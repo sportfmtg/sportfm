@@ -957,7 +957,12 @@ function ArticleEditor({ initial, onSave, onCancel, toast }){
       if(error) throw error;
       const { data }=sb.storage.from('article-images').getPublicUrl(path);
       set('image_url',data.publicUrl); toast('Image téléchargée ✓');
-    } catch(err){ toast('Erreur upload : '+err.message); }
+    } catch(err){
+      const msg = err.message?.includes('Bucket not found')
+        ? 'Bucket introuvable — créez le bucket "article-images" dans Supabase → Storage'
+        : 'Erreur upload : '+err.message;
+      toast(msg);
+    }
     finally{ setUploading(false); }
   }
   async function save(){
