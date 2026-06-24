@@ -2076,15 +2076,18 @@ function AdminUsers({ adminEmail, toast }){
     toast('Retiré'); load();
   }
 
-  const roleLabel={ admin:'Administrateur', journalist:'Journaliste web', finance:'Finance' };
-  const rolePill={ admin:'pub', journalist:'contacted', finance:'won' };
+  const roleLabel={ admin:'Administrateur', journalist:'Journaliste web', animateur:'Animateur/Présentateur', media:'Média & Réseaux sociaux', securite:'Sécurité', finance:'Finance' };
+  const rolePill={ admin:'pub', journalist:'contacted', animateur:'in_discussion', media:'follow_up', securite:'new', finance:'won' };
 
   return (
     <div className="panel">
       <h3>Équipe &amp; rôles</h3>
       <div style={{background:'rgba(239,0,63,.05)',border:'1px solid rgba(239,0,63,.2)',borderRadius:10,padding:'12px 16px',marginBottom:20,fontSize:13.5,color:'#5a6178',lineHeight:1.5}}>
-        <strong style={{color:'var(--navy)'}}>Administrateur</strong> — accès complet (articles, scores, partenaires, publicités, journal, équipe).<br/>
-        <strong style={{color:'var(--navy)'}}>Journaliste web</strong> — accès limité : articles, scores et contenu. Partenaires et publicités masqués.<br/>
+        <strong style={{color:'var(--navy)'}}>Administrateur</strong> — accès complet (articles, scores, partenaires, publicités, journal, équipe, finance).<br/>
+        <strong style={{color:'var(--navy)'}}>Journaliste</strong> — articles, scores, planning contenu. Partenaires et publicités masqués.<br/>
+        <strong style={{color:'var(--navy)'}}>Animateur / Présentateur</strong> — articles, scores, planning contenu.<br/>
+        <strong style={{color:'var(--navy)'}}>Média &amp; Réseaux sociaux</strong> — articles, scores, planning contenu.<br/>
+        <strong style={{color:'var(--navy)'}}>Sécurité</strong> — accès lecture seule au planning contenu.<br/>
         <strong style={{color:'var(--navy)'}}>Finance</strong> — accès exclusif à la gestion des fiches de paie et des employés.
       </div>
 
@@ -2101,7 +2104,10 @@ function AdminUsers({ adminEmail, toast }){
                 disabled={u.email===adminEmail}
                 style={{padding:'5px 10px',border:'1px solid var(--line)',borderRadius:7,fontSize:13,background:'#fff',cursor:'pointer'}}>
                 <option value="admin">Administrateur</option>
-                <option value="journalist">Journaliste web</option>
+                <option value="journalist">Journaliste</option>
+                <option value="animateur">Animateur / Présentateur</option>
+                <option value="media">Média &amp; Réseaux sociaux</option>
+                <option value="securite">Sécurité</option>
                 <option value="finance">Finance</option>
               </select>
             </td>
@@ -2133,7 +2139,10 @@ function AdminUsers({ adminEmail, toast }){
             <label>Rôle</label>
             <select value={newRole} onChange={e=>setNewRole(e.target.value)}
               style={{width:'100%',padding:'11px 13px',border:'1px solid var(--line)',borderRadius:9,fontSize:14,outline:'none'}}>
-              <option value="journalist">Journaliste web</option>
+              <option value="journalist">Journaliste</option>
+              <option value="animateur">Animateur / Présentateur</option>
+              <option value="media">Média &amp; Réseaux sociaux</option>
+              <option value="securite">Sécurité</option>
               <option value="finance">Finance</option>
               <option value="admin">Administrateur</option>
             </select>
@@ -2155,13 +2164,17 @@ function Admin({ session, onExit, data, reload, toast, userRole }){
   const adminEmail = session.user.email;
   async function logout(){ await sb.auth.signOut(); onExit(); }
 
-  const ROLE_LABELS = { admin:'ADMINISTRATEUR', journalist:'JOURNALISTE', finance:'FINANCE' };
+  const ROLE_LABELS = { admin:'ADMINISTRATEUR', journalist:'JOURNALISTE', animateur:'ANIMATEUR', media:'MÉDIA', securite:'SÉCURITÉ', finance:'FINANCE' };
+
+  const isEditorialRole = ['journalist','animateur','media'].includes(userRole);
+  const isSecurite = userRole==='securite';
 
   // Redirect to allowed tab if landing on a restricted one
   useEffect(()=>{
     if(isFinance && tab!=='finance') setTab('finance');
-    if(!isAdmin && !isFinance && (tab==='partners'||tab==='ads'||tab==='users'||tab==='logs'||tab==='finance')) setTab('articles');
-  },[isAdmin,isFinance,tab]);
+    if(isSecurite && tab!=='content') setTab('content');
+    if(isEditorialRole && (tab==='partners'||tab==='ads'||tab==='users'||tab==='logs'||tab==='finance')) setTab('articles');
+  },[isAdmin,isFinance,isSecurite,isEditorialRole,tab]);
 
   return (
     <div className="admin">
@@ -2175,8 +2188,8 @@ function Admin({ session, onExit, data, reload, toast, userRole }){
         <button className="exit" onClick={logout}>Déconnexion</button>
       </div></div>
       <div className="admin-tabs"><div className="wrap">
-        {!isFinance && <button className={tab==='articles'?'active':''} onClick={()=>setTab('articles')}>Articles</button>}
-        {!isFinance && <button className={tab==='scores'?'active':''} onClick={()=>setTab('scores')}>Scores &amp; Classement</button>}
+        {(isAdmin||isEditorialRole||isSecurite) && !isFinance && <button className={tab==='articles'?'active':''} onClick={()=>setTab('articles')}>Articles</button>}
+        {(isAdmin||isEditorialRole) && <button className={tab==='scores'?'active':''} onClick={()=>setTab('scores')}>Scores &amp; Classement</button>}
         {isAdmin && <button className={tab==='partners'?'active':''} onClick={()=>setTab('partners')}>Partenaires</button>}
         {isAdmin && <button className={tab==='ads'?'active':''} onClick={()=>setTab('ads')}>Publicités</button>}
         {isAdmin && <button className={tab==='users'?'active':''} onClick={()=>setTab('users')}>Équipe</button>}
