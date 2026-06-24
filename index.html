@@ -934,6 +934,315 @@ function PartnerView({ onBack, toast }){
 }
 
 // ============================================================
+//  CONTENT CRM
+// ============================================================
+const CONTENT_TYPES = ['Article web','Post Facebook','Vidéo TikTok','Vidéo YouTube','Émission radio','Reportage','Interview','Publireportage','Newsletter','Story Instagram','Autre'];
+const CONTENT_PLATFORMS = ['Site web','Facebook','TikTok','YouTube','Radio 91.9 FM','Instagram','Multiplateforme'];
+const TASK_STATUSES = [
+  { key:'todo',        label:'À faire',     color:'#8a90a2', bg:'#eef0f4' },
+  { key:'in_progress', label:'En cours',    color:'#2a5bd0', bg:'#e7eefc' },
+  { key:'review',      label:'En révision', color:'#9a6a00', bg:'#fff4e0' },
+  { key:'done',        label:'Terminé ✓',   color:'#1f7a48', bg:'#e3f6ea' },
+  { key:'cancelled',   label:'Annulé',      color:'#6b7180', bg:'#f1f2f6' },
+];
+const TASK_PRIORITIES = [
+  { key:'normal',     label:'Normal',    color:'var(--muted)' },
+  { key:'high',       label:'Prioritaire', color:'#e87820' },
+  { key:'urgent',     label:'URGENT',    color:'var(--red)' },
+];
+const EMPTY_TASK = { title:'', description:'', content_type:'Article web', platform:'Site web', assigned_to:'', priority:'normal', status:'todo', due_date:'', completion_notes:'' };
+
+function dueDateInfo(date){
+  if(!date) return { text:'—', color:'var(--muted-2)', weight:400 };
+  const d=new Date(date+'T00:00:00'), now=new Date();
+  now.setHours(0,0,0,0); d.setHours(0,0,0,0);
+  const diff=Math.round((d-now)/(86400000));
+  const fmt=d.toLocaleDateString('fr-FR',{day:'numeric',month:'short'});
+  if(diff<0) return { text:fmt+' · EN RETARD', color:'var(--red)', weight:700 };
+  if(diff===0) return { text:"Aujourd'hui", color:'#e87820', weight:700 };
+  if(diff===1) return { text:'Demain', color:'#e87820', weight:600 };
+  if(diff<=7) return { text:fmt+' (dans '+diff+'j)', color:'#5a6178', weight:500 };
+  return { text:fmt, color:'var(--muted-2)', weight:400 };
+}
+
+function TaskForm({ initial, onSave, onCancel, adminEmail, toast, teamMembers }){
+  const [t,setT]=useState(initial||{...EMPTY_TASK});
+  const [busy,setBusy]=useState(false);
+  const set=(k,v)=>setT(p=>({...p,[k]:v}));
+
+  async function save(){
+    if(!t.title.trim()){ toast('Le titre est obligatoire'); return; }
+    setBusy(true);
+    const payload={ title:t.title, description:t.description||null, content_type:t.content_type,
+      platform:t.platform, assigned_to:t.assigned_to||null, priority:t.priority,
+      status:t.status, due_date:t.due_date||null, completion_notes:t.completion_notes||null,
+      updated_at:new Date().toISOString() };
+    let res;
+    if(t.id){ res=await sb.from('content_tasks').update(payload).eq('id',t.id); }
+    else { res=await sb.from('content_tasks').insert([{...payload, created_by:adminEmail}]); }
+    setBusy(false);
+    if(res.error){ toast('Erreur : '+res.error.message); return; }
+    await logAction(adminEmail, t.id?'Tâche modifiée':'Tâche créée', t.title+' → '+t.assigned_to);
+    toast(t.id?'Mis à jour':'Tâche créée'); onSave();
+  }
+
+  const statusInfo=TASK_STATUSES.find(s=>s.key===t.status);
+
+  return (
+    <div className="panel">
+      <h3 style={{marginBottom:20}}>{t.id?'Modifier la tâche':'Nouvelle tâche de contenu'}</h3>
+
+      <div className="field"><label>Titre / sujet *</label>
+        <input value={t.title} onChange={e=>set('title',e.target.value)}
+          placeholder="Ex : Résumé Coupe Nationale J12, Interview coach Hawks FC…" /></div>
+
+      <div className="field"><label>Description <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(contexte, angle, sources…)</span></label>
+        <textarea value={t.description||''} onChange={e=>set('description',e.target.value)}
+          style={{minHeight:80}} placeholder="Expliquez le sujet, les informations clés, ce qu'il faut couvrir…" /></div>
+
+      <div className="grid2">
+        <div className="field"><label>Type de contenu</label>
+          <select value={t.content_type} onChange={e=>set('content_type',e.target.value)}>
+            {CONTENT_TYPES.map(x=><option key={x}>{x}</option>)}
+          </select></div>
+        <div className="field"><label>Plateforme</label>
+          <select value={t.platform} onChange={e=>set('platform',e.target.value)}>
+            {CONTENT_PLATFORMS.map(x=><option key={x}>{x}</option>)}
+          </select></div>
+      </div>
+
+      <div className="grid2">
+        <div className="field"><label>Assigné à</label>
+          <input value={t.assigned_to||''} onChange={e=>set('assigned_to',e.target.value)}
+            placeholder="Nom ou e-mail"
+            list="team-list" />
+          <datalist id="team-list">{teamMembers.map(m=><option key={m} value={m}/>)}</datalist>
+        </div>
+        <div className="field"><label>Date limite</label>
+          <input type="date" value={t.due_date||''} onChange={e=>set('due_date',e.target.value)} /></div>
+      </div>
+
+      <div className="grid2">
+        <div className="field"><label>Priorité</label>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:4}}>
+            {TASK_PRIORITIES.map(p=>(
+              <button key={p.key} type="button" onClick={()=>set('priority',p.key)}
+                style={{padding:'8px 14px',borderRadius:20,fontSize:13,fontWeight:700,cursor:'pointer',border:'2px solid',
+                  borderColor:t.priority===p.key?p.color:'var(--line)',
+                  background:t.priority===p.key?p.color+'18':'#fff',
+                  color:t.priority===p.key?p.color:'#5a6178'}}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="field"><label>Statut</label>
+          <select value={t.status} onChange={e=>set('status',e.target.value)}>
+            {TASK_STATUSES.map(s=><option key={s.key} value={s.key}>{s.label}</option>)}
+          </select></div>
+      </div>
+
+      {(t.status==='done'||t.status==='cancelled') && (
+        <div className="field"><label>{t.status==='done'?'Note de clôture':'Raison d\'annulation'} <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label>
+          <textarea value={t.completion_notes||''} onChange={e=>set('completion_notes',e.target.value)}
+            style={{minHeight:60}} placeholder={t.status==='done'?'Lien vers le contenu publié, remarques…':'Pourquoi cette tâche est annulée…'} /></div>
+      )}
+
+      <div style={{display:'flex',gap:10,marginTop:4}}>
+        <button className="btn-primary" disabled={busy} onClick={save}>{busy?'…':(t.id?'Enregistrer':'Créer la tâche')}</button>
+        <button className="btn-ghost" onClick={onCancel}>Annuler</button>
+      </div>
+    </div>
+  );
+}
+
+function AdminContent({ adminEmail, userRole, toast }){
+  const [tasks,setTasks]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [editing,setEditing]=useState(null);
+  const [statusFilter,setStatusFilter]=useState('all');
+  const [assigneeFilter,setAssigneeFilter]=useState('all');
+  const [view,setView]=useState('table'); // 'table' | 'board'
+
+  async function load(){
+    const { data }=await sb.from('content_tasks').select('*').order('due_date',{ascending:true,nullsFirst:false});
+    setTasks(data||[]); setLoading(false);
+  }
+  useEffect(()=>{ load(); },[]);
+
+  async function quickStatus(id,status,title){
+    await sb.from('content_tasks').update({status,updated_at:new Date().toISOString()}).eq('id',id);
+    await logAction(adminEmail,'Statut tâche → '+status,title);
+    load();
+  }
+
+  async function deleteTask(id,title){
+    if(!confirm('Supprimer cette tâche ?')) return;
+    await sb.from('content_tasks').delete().eq('id',id);
+    await logAction(adminEmail,'Tâche supprimée',title);
+    load();
+  }
+
+  const teamMembers=[...new Set(tasks.map(t=>t.assigned_to).filter(Boolean))];
+
+  const visible=tasks.filter(t=>
+    (statusFilter==='all'||t.status===statusFilter) &&
+    (assigneeFilter==='all'||t.assigned_to===assigneeFilter)
+  );
+
+  // KPI counts
+  const counts=TASK_STATUSES.reduce((a,s)=>({...a,[s.key]:tasks.filter(t=>t.status===s.key).length}),{});
+  const overdue=tasks.filter(t=>t.due_date&&t.status!=='done'&&t.status!=='cancelled'&&new Date(t.due_date+'T00:00:00')<new Date()).length;
+
+  if(editing!==null) return (
+    <TaskForm initial={editing} onSave={()=>{setEditing(null);load();}} onCancel={()=>setEditing(null)}
+      adminEmail={adminEmail} toast={toast} teamMembers={teamMembers} />
+  );
+
+  return (
+    <div>
+      {/* KPI row */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:12,marginBottom:22}}>
+        {[
+          {label:'Total',n:tasks.length,color:'var(--navy)',bg:'#fff'},
+          ...TASK_STATUSES.map(s=>({label:s.label,n:counts[s.key],color:s.color,bg:s.bg})),
+          ...(overdue>0?[{label:'En retard 🔴',n:overdue,color:'var(--red)',bg:'rgba(239,0,63,.06)'}]:[]),
+        ].map((k,i)=>(
+          <div key={i} style={{background:k.bg,border:'1px solid var(--line)',borderRadius:10,padding:'12px 16px'}}>
+            <div style={{fontSize:11,fontWeight:700,letterSpacing:'.05em',color:k.color,opacity:.8}}>{k.label.toUpperCase()}</div>
+            <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:26,color:k.color,marginTop:2}}>{k.n}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Toolbar */}
+      <div style={{display:'flex',gap:10,marginBottom:18,flexWrap:'wrap',alignItems:'center'}}>
+        <button className="btn-primary" onClick={()=>setEditing({...EMPTY_TASK})}>+ Nouvelle tâche</button>
+        <select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}
+          style={{padding:'9px 12px',border:'1px solid var(--line)',borderRadius:9,fontSize:13.5,background:'#fff',outline:'none'}}>
+          <option value="all">Tous les statuts</option>
+          {TASK_STATUSES.map(s=><option key={s.key} value={s.key}>{s.label}</option>)}
+        </select>
+        <select value={assigneeFilter} onChange={e=>setAssigneeFilter(e.target.value)}
+          style={{padding:'9px 12px',border:'1px solid var(--line)',borderRadius:9,fontSize:13.5,background:'#fff',outline:'none'}}>
+          <option value="all">Toute l'équipe</option>
+          {teamMembers.map(m=><option key={m} value={m}>{m}</option>)}
+        </select>
+        <div style={{marginLeft:'auto',display:'flex',gap:6}}>
+          {['table','board'].map(v=>(
+            <button key={v} onClick={()=>setView(v)}
+              style={{padding:'8px 14px',borderRadius:8,fontSize:13,fontWeight:700,cursor:'pointer',border:'1px solid',
+                borderColor:view===v?'var(--navy)':'var(--line)',
+                background:view===v?'var(--navy)':'#fff',color:view===v?'#fff':'#5a6178'}}>
+              {v==='table'?'📋 Liste':'📌 Kanban'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? <Spinner/> : visible.length===0 ? (
+        <div className="panel"><div className="empty">Aucune tâche trouvée. Créez votre première tâche de contenu.</div></div>
+      ) : view==='board' ? (
+        /* ---- KANBAN BOARD ---- */
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:16,alignItems:'start'}}>
+          {TASK_STATUSES.filter(s=>s.key!=='cancelled').map(s=>{
+            const col=visible.filter(t=>t.status===s.key);
+            return (
+              <div key={s.key} style={{background:'#fff',border:'1px solid var(--line)',borderRadius:12,overflow:'hidden'}}>
+                <div style={{padding:'10px 14px',background:s.bg,borderBottom:'1px solid var(--line)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <span style={{fontWeight:800,fontSize:13,color:s.color}}>{s.label}</span>
+                  <span style={{fontSize:12,fontWeight:700,color:s.color,background:'rgba(0,0,0,.08)',borderRadius:20,padding:'2px 8px'}}>{col.length}</span>
+                </div>
+                <div style={{padding:'8px',display:'flex',flexDirection:'column',gap:8}}>
+                  {col.length===0 && <div style={{textAlign:'center',color:'var(--muted)',fontSize:12.5,padding:12}}>Aucune tâche</div>}
+                  {col.map(t=>{
+                    const dd=dueDateInfo(t.due_date);
+                    const pri=TASK_PRIORITIES.find(p=>p.key===t.priority);
+                    return (
+                      <div key={t.id} onClick={()=>setEditing(t)}
+                        style={{background:'#f8f9fc',border:'1px solid var(--line)',borderRadius:8,padding:12,cursor:'pointer',
+                          borderLeft:'3px solid '+(t.priority==='urgent'?'var(--red)':t.priority==='high'?'#e87820':'var(--line)')}}
+                        onMouseOver={e=>e.currentTarget.style.background='#f0f2f8'}
+                        onMouseOut={e=>e.currentTarget.style.background='#f8f9fc'}>
+                        <div style={{fontSize:13,fontWeight:700,color:'var(--navy)',marginBottom:4,lineHeight:1.3}}>{t.title}</div>
+                        <div style={{fontSize:11,color:'var(--muted-2)',marginBottom:6}}>{t.content_type} · {t.platform}</div>
+                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:4}}>
+                          {t.assigned_to && <span style={{fontSize:11.5,fontWeight:600,color:'#2a5bd0',background:'#e7eefc',borderRadius:20,padding:'2px 8px'}}>{t.assigned_to}</span>}
+                          {t.due_date && <span style={{fontSize:11,fontWeight:dd.weight,color:dd.color}}>{dd.text}</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        /* ---- TABLE VIEW ---- */
+        <div className="panel" style={{padding:0,overflow:'hidden'}}>
+          <table className="admin-table" style={{tableLayout:'fixed',width:'100%'}}>
+            <thead><tr>
+              <th style={{width:'28%',paddingLeft:16}}>Tâche</th>
+              <th style={{width:'12%'}}>Type</th>
+              <th style={{width:'13%'}}>Assigné à</th>
+              <th style={{width:'13%'}}>Échéance</th>
+              <th style={{width:'10%'}}>Priorité</th>
+              <th style={{width:'11%'}}>Statut</th>
+              <th style={{width:'13%',textAlign:'right',paddingRight:16}}></th>
+            </tr></thead>
+            <tbody>
+              {visible.map(t=>{
+                const dd=dueDateInfo(t.due_date);
+                const sInfo=TASK_STATUSES.find(s=>s.key===t.status)||TASK_STATUSES[0];
+                const pInfo=TASK_PRIORITIES.find(p=>p.key===t.priority)||TASK_PRIORITIES[0];
+                const isOverdue=t.due_date&&t.status!=='done'&&t.status!=='cancelled'&&new Date(t.due_date+'T00:00:00')<new Date();
+                return (
+                  <tr key={t.id} style={{background:isOverdue?'rgba(239,0,63,.025)':'#fff'}}>
+                    <td style={{paddingLeft:16}}>
+                      <div style={{fontWeight:700,fontSize:13.5,color:'var(--navy)',lineHeight:1.3}}>{t.title}</div>
+                      {t.description && <div style={{fontSize:12,color:'var(--muted)',marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:260}}>{t.description}</div>}
+                    </td>
+                    <td>
+                      <div style={{fontSize:12.5,color:'#4a5168'}}>{t.content_type}</div>
+                      <div style={{fontSize:11,color:'var(--muted-2)'}}>{t.platform}</div>
+                    </td>
+                    <td>
+                      {t.assigned_to
+                        ? <span style={{fontSize:12.5,fontWeight:700,color:'#2a5bd0',background:'#e7eefc',borderRadius:20,padding:'3px 10px',whiteSpace:'nowrap'}}>{t.assigned_to}</span>
+                        : <span style={{color:'var(--muted)',fontSize:12}}>—</span>}
+                    </td>
+                    <td>
+                      <span style={{fontSize:13,fontWeight:dd.weight,color:dd.color}}>{dd.text}</span>
+                    </td>
+                    <td>
+                      {t.priority!=='normal'
+                        ? <span style={{fontSize:11.5,fontWeight:800,color:pInfo.color,background:pInfo.color+'18',borderRadius:20,padding:'3px 8px'}}>{pInfo.label}</span>
+                        : <span style={{color:'var(--muted)',fontSize:12}}>Normal</span>}
+                    </td>
+                    <td>
+                      <select value={t.status} onChange={e=>quickStatus(t.id,e.target.value,t.title)}
+                        style={{padding:'5px 8px',border:'1px solid',borderRadius:7,fontSize:12,fontWeight:700,cursor:'pointer',outline:'none',
+                          borderColor:sInfo.color,background:sInfo.bg,color:sInfo.color}}>
+                        {TASK_STATUSES.map(s=><option key={s.key} value={s.key}>{s.label}</option>)}
+                      </select>
+                    </td>
+                    <td style={{textAlign:'right',paddingRight:16,whiteSpace:'nowrap'}}>
+                      <button className="icon-btn" onClick={()=>setEditing(t)}>Modifier</button>
+                      <button className="icon-btn del" onClick={()=>deleteTask(t.id,t.title)}>✕</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
 //  ADMIN — LOGIN
 // ============================================================
 function AdminLogin({ onAuthed, onExit }){
@@ -1519,6 +1828,7 @@ function Admin({ session, onExit, data, reload, toast, userRole }){
         {isAdmin && <button className={tab==='ads'?'active':''} onClick={()=>setTab('ads')}>Publicités</button>}
         {isAdmin && <button className={tab==='users'?'active':''} onClick={()=>setTab('users')}>Équipe</button>}
         {isAdmin && <button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}>Journal</button>}
+        <button className={tab==='content'?'active':''} onClick={()=>setTab('content')}>📋 Contenu</button>
       </div></div>
       <div className="admin-body"><div className="wrap">
         {tab==='articles' && <AdminArticles articles={data.articles} reload={reload} toast={toast} adminEmail={adminEmail} />}
@@ -1527,6 +1837,7 @@ function Admin({ session, onExit, data, reload, toast, userRole }){
         {tab==='ads' && isAdmin && <AdminAds ads={data.ads||[]} reload={reload} toast={toast} adminEmail={adminEmail} />}
         {tab==='users' && isAdmin && <AdminUsers adminEmail={adminEmail} toast={toast} />}
         {tab==='logs' && isAdmin && <AdminLogs />}
+        {tab==='content' && <AdminContent adminEmail={adminEmail} userRole={userRole} toast={toast} />}
       </div></div>
     </div>
   );
