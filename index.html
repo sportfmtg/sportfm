@@ -1,0 +1,1209 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SportFM · Couverture Metro D1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:ital,wght@0,400;0,500;0,600;0,700;1,800&family=Barlow+Semi+Condensed:ital,wght@0,600;0,700;0,800;1,800&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js" crossorigin></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --navy:#0B245E; --navy-deep:#081A45; --red:#EF003F; --ink:#14182a;
+    --paper:#eef0f4; --line:#e6e8ef; --muted:#8a90a2; --muted-2:#9aa1b2;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; background:var(--paper); }
+  body{ font-family:'Barlow',system-ui,sans-serif; color:var(--ink); min-height:100vh; }
+  ::selection{ background:var(--red); color:#fff; }
+  a{ color:inherit; text-decoration:none; }
+  button{ font-family:inherit; cursor:pointer; border:none; background:none; }
+  input,textarea,select{ font-family:inherit; }
+  .cond{ font-family:'Barlow Semi Condensed',sans-serif; }
+  .wrap{ max-width:1240px; margin:0 auto; padding:0 24px; }
+  .app-pad{ padding-bottom:84px; }
+
+  @keyframes wf{ 0%,100%{ transform:scaleY(.32) } 50%{ transform:scaleY(1) } }
+  @keyframes tickermove{ from{ transform:translateX(0) } to{ transform:translateX(-50%) } }
+  @keyframes pulse{ 0%,100%{ opacity:1 } 50%{ opacity:.35 } }
+  @keyframes fadein{ from{ opacity:0; transform:translateY(8px) } to{ opacity:1; transform:none } }
+  @keyframes spin{ to{ transform:rotate(360deg) } }
+  @media (prefers-reduced-motion: reduce){ *{ animation:none !important; transition:none !important; } }
+
+  .spinner{ width:34px; height:34px; border:3px solid var(--line); border-top-color:var(--red);
+    border-radius:50%; animation:spin .8s linear infinite; margin:60px auto; }
+
+  /* utility bar */
+  .util{ background:var(--navy-deep); color:#aeb8d6; }
+  .util .wrap{ display:flex; justify-content:space-between; align-items:center; height:34px; font-size:12.5px; }
+  .util .left{ display:flex; gap:18px; align-items:center; }
+  .dot{ width:7px; height:7px; border-radius:50%; background:var(--red); display:inline-block; }
+  .util .live{ display:inline-flex; align-items:center; gap:6px; }
+  .util .right{ display:flex; gap:20px; align-items:center; }
+  .util .right span{ cursor:pointer; } .util .right span:hover{ color:#fff; }
+
+  /* header */
+  header{ background:#fff; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:40; }
+  header .wrap{ display:flex; align-items:center; gap:30px; height:68px; }
+  .logo{ font-family:'Barlow Semi Condensed',sans-serif; font-style:italic; font-weight:800;
+    font-size:28px; letter-spacing:-.01em; color:var(--navy); display:flex; align-items:center;
+    line-height:1; cursor:pointer; }
+  .logo .fm{ position:relative; padding-right:4px; }
+  .logo .swoosh{ position:absolute; top:-2px; right:-7px; width:11px; height:11px;
+    border:3.5px solid var(--red); border-left-color:transparent; border-bottom-color:transparent;
+    border-top-right-radius:11px; transform:rotate(10deg); }
+  nav.main{ display:flex; gap:24px; }
+  nav.main button{ color:#27304a; font-weight:600; font-size:15px; padding:0; position:relative; }
+  nav.main button:hover{ color:var(--red); }
+  nav.main button.active{ color:var(--navy); }
+  nav.main button.active::after{ content:''; position:absolute; left:0; right:0; bottom:-24px;
+    height:3px; background:var(--red); border-radius:2px 2px 0 0; }
+  .grow{ flex:1; }
+  .search{ display:flex; align-items:center; gap:8px; background:#f1f2f6; border:1px solid var(--line);
+    border-radius:8px; padding:8px 12px; width:180px; color:var(--muted-2); font-size:13.5px; }
+  .search input{ border:none; background:none; outline:none; font-size:13.5px; color:var(--ink); width:100%; }
+  .btn-partner{ background:var(--navy); color:#fff; font-weight:700; font-size:13.5px; padding:9px 14px;
+    border-radius:8px; white-space:nowrap; }
+  .btn-partner:hover{ background:#0d2a6f; }
+  .listen{ display:flex; align-items:center; gap:8px; background:var(--red); color:#fff;
+    font-weight:700; font-size:14px; padding:10px 16px; border-radius:8px;
+    box-shadow:0 2px 10px rgba(239,0,63,.28); white-space:nowrap; }
+  .listen .dot{ background:#fff; animation:pulse 1.6s ease-in-out infinite; }
+  .listen:hover{ background:#d40038; }
+  .menu-btn{ display:none; }
+
+  /* ticker */
+  .ticker{ background:var(--navy); color:#fff; overflow:hidden; }
+  .ticker .wrap{ display:flex; align-items:stretch; padding:0; }
+  .ticker .badge{ display:flex; align-items:center; gap:7px; background:var(--red); padding:0 16px;
+    font-weight:800; font-size:12px; letter-spacing:.08em; flex:0 0 auto; }
+  .ticker .badge .dot{ background:#fff; animation:pulse 1.4s ease-in-out infinite; }
+  .ticker .track-wrap{ overflow:hidden; flex:1; }
+  .ticker-track{ display:flex; width:max-content; animation:tickermove 36s linear infinite; }
+  .ticker-track:hover{ animation-play-state:paused; }
+  .tk{ display:flex; align-items:center; gap:9px; padding:9px 20px;
+    border-right:1px solid rgba(255,255,255,.1); font-size:13px; white-space:nowrap; }
+  .tk .score{ font-weight:800; background:rgba(255,255,255,.08); padding:1px 8px; border-radius:4px; }
+  .tk .tag{ font-size:11px; font-weight:700; letter-spacing:.04em; }
+  .tk .tag.live{ color:#ff5c84; } .tk .tag.ft{ color:#8ea0cf; }
+
+  /* body grid */
+  .body{ display:grid; grid-template-columns:1fr 326px; gap:30px; align-items:start;
+    padding-top:26px; padding-bottom:60px; }
+  .shot{ background:repeating-linear-gradient(135deg,#e9ebf2,#e9ebf2 11px,#e3e6ef 11px,#e3e6ef 22px);
+    position:relative; background-size:cover; background-position:center; }
+  .shot.has-img{ background-image:var(--img); }
+
+  .hero{ cursor:pointer; animation:fadein .4s ease both; }
+  .hero .img{ aspect-ratio:16/8.4; border-radius:12px; overflow:hidden; position:relative; }
+  .tagchip{ position:absolute; top:14px; left:14px; background:var(--red); color:#fff; font-weight:800;
+    font-size:11px; letter-spacing:.07em; padding:5px 10px; border-radius:5px; }
+  .imglabel{ position:absolute; bottom:10px; left:14px; font:11px ui-monospace,monospace; color:#9aa1b6; }
+  .hero h1{ font-family:'Barlow Semi Condensed',sans-serif; font-weight:800; font-size:35px;
+    line-height:1.04; letter-spacing:-.015em; margin:16px 0 0; color:var(--navy); text-wrap:balance; }
+  .hero p{ font-size:16px; line-height:1.5; color:#4a5168; margin:10px 0 0; max-width:62ch; }
+  .byline{ display:flex; align-items:center; gap:10px; margin-top:12px; font-size:13px; color:var(--muted); flex-wrap:wrap; }
+  .byline .who{ font-weight:700; color:var(--navy); }
+  .hero:hover h1{ color:var(--red); }
+  .rule{ height:1px; background:#e3e5ec; margin:26px 0; }
+
+  .seclist{ display:flex; flex-direction:column; gap:20px; }
+  .secitem{ display:grid; grid-template-columns:188px 1fr; gap:18px; cursor:pointer; align-items:start; }
+  .secitem .img{ aspect-ratio:16/10; border-radius:9px; overflow:hidden; }
+  .eyebrow{ font-weight:800; font-size:11px; letter-spacing:.06em; color:var(--red); margin-bottom:6px; }
+  .secitem h3{ font-family:'Barlow Semi Condensed',sans-serif; font-weight:700; font-size:21px;
+    line-height:1.12; letter-spacing:-.01em; margin:0; color:var(--navy); }
+  .secitem p{ font-size:14px; line-height:1.45; color:#5a6178; margin:7px 0 0; }
+  .secitem .meta{ font-size:12.5px; color:var(--muted-2); margin-top:8px; }
+  .secitem:hover h3{ color:var(--red); }
+
+  .sechead{ display:flex; align-items:center; gap:12px; margin:32px 0 18px; }
+  .sechead h2{ font-family:'Barlow Semi Condensed',sans-serif; font-weight:800; font-size:15px;
+    letter-spacing:.06em; text-transform:uppercase; color:var(--navy); margin:0; }
+  .sechead .line{ flex:1; height:2px; background:#e3e5ec; }
+
+  .grid3{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:18px; }
+  .gcard{ cursor:pointer; }
+  .gcard .img{ aspect-ratio:16/10; border-radius:9px; overflow:hidden; }
+  .gcard .eyebrow{ font-size:10.5px; margin:10px 0 5px; }
+  .gcard h4{ font-family:'Barlow Semi Condensed',sans-serif; font-weight:700; font-size:17px;
+    line-height:1.15; letter-spacing:-.005em; margin:0; color:var(--navy); }
+  .gcard .meta{ font-size:12px; color:var(--muted-2); margin-top:7px; }
+  .gcard:hover h4{ color:var(--red); }
+
+  /* rail */
+  aside{ display:flex; flex-direction:column; gap:20px; position:sticky; top:84px; }
+  .card{ background:#fff; border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  .card .head{ display:flex; align-items:center; justify-content:space-between; padding:13px 16px; border-bottom:1px solid #eef0f4; }
+  .card .head .title{ display:flex; align-items:center; gap:8px; font-family:'Barlow Semi Condensed',sans-serif;
+    font-weight:800; font-size:15px; letter-spacing:.04em; text-transform:uppercase; color:var(--navy); }
+  .card .head .title .dot{ animation:pulse 1.8s ease-in-out infinite; }
+  .card .head .more{ font-size:12px; font-weight:700; color:var(--muted); cursor:pointer; }
+  .card .head .more:hover{ color:var(--red); }
+  .tbl-head{ display:grid; grid-template-columns:24px 1fr 30px 34px; padding:7px 16px; font-size:10.5px;
+    font-weight:700; letter-spacing:.05em; color:var(--muted-2); border-bottom:1px solid #eef0f4; }
+  .tbl-head span:nth-child(3){ text-align:center; } .tbl-head span:nth-child(4){ text-align:right; }
+  .trow{ display:grid; grid-template-columns:24px 1fr 30px 34px; align-items:center; padding:9px 16px;
+    border-bottom:1px solid #f2f3f7; } .trow:last-child{ border-bottom:none; }
+  .trow:hover{ background:#f7f8fb; }
+  .trow .pos{ font-weight:700; font-size:13px; }
+  .trow .club{ display:flex; align-items:center; gap:9px; min-width:0; }
+  .crest{ width:22px; height:22px; border-radius:5px; color:#fff; font-weight:800; font-size:10px;
+    display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
+  .trow .name{ font-weight:600; font-size:13.5px; color:#1c2236; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .trow .pld{ text-align:center; font-size:13px; color:#6b7180; }
+  .trow .pts{ text-align:right; font-weight:800; font-size:14px; color:var(--navy); }
+  .fix{ display:flex; align-items:center; justify-content:space-between; padding:11px 16px; border-bottom:1px solid #f2f3f7; }
+  .fix:last-child{ border-bottom:none; }
+  .fix .teams{ display:flex; align-items:center; gap:8px; font-weight:700; font-size:13px; color:#1c2236; }
+  .fix .teams .v{ color:#b9bdca; font-weight:600; }
+  .fix .when{ text-align:right; } .fix .when .t{ font-weight:800; font-size:12.5px; color:var(--navy); }
+  .fix .when .d{ font-size:11px; color:var(--muted-2); }
+
+  .promo{ background:var(--navy); border-radius:12px; padding:20px; color:#fff; position:relative; overflow:hidden; }
+  .promo .swoosh-big{ position:absolute; top:-30px; right:-30px; width:90px; height:90px;
+    border:14px solid var(--red); border-left-color:transparent; border-bottom-color:transparent;
+    border-top-right-radius:90px; transform:rotate(10deg); opacity:.9; }
+  .promo .kicker{ font-family:'Barlow Semi Condensed',sans-serif; font-weight:800; font-size:13px; letter-spacing:.08em; color:#7e8cb5; }
+  .promo .ptitle{ font-family:'Barlow Semi Condensed',sans-serif; font-weight:800; font-size:23px; line-height:1.1; margin:8px 0 6px; }
+  .promo p{ font-size:13px; color:#b9c2dc; margin:0 0 14px; }
+  .promo .cta{ display:inline-flex; background:var(--red); color:#fff; font-weight:700; font-size:13px; padding:9px 16px; border-radius:7px; }
+  .promo .cta:hover{ background:#ff1a52; }
+
+  /* article */
+  .article{ animation:fadein .35s ease both; padding-top:26px; padding-bottom:60px; max-width:760px; }
+  .back{ display:inline-flex; align-items:center; gap:8px; font-weight:700; font-size:13px; color:var(--muted); margin-bottom:18px; }
+  .back:hover{ color:var(--red); }
+  .article .tagchip{ position:static; display:inline-block; margin-bottom:14px; }
+  .article h1{ font-family:'Barlow Semi Condensed',sans-serif; font-weight:800; font-size:42px;
+    line-height:1.03; letter-spacing:-.02em; margin:0 0 14px; color:var(--navy); text-wrap:balance; }
+  .article .standfirst{ font-size:19px; line-height:1.45; color:#3a4156; margin:0 0 18px; }
+  .article .byline{ margin-bottom:20px; }
+  .article .img{ aspect-ratio:16/9; border-radius:12px; overflow:hidden; margin-bottom:24px; }
+  .article .prose p{ font-size:17px; line-height:1.65; color:#2b3142; margin:0 0 18px; }
+
+  /* footer */
+  footer{ background:var(--navy-deep); color:#9aa6c8; }
+  footer .wrap{ padding:34px 24px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px; }
+  footer .logo{ color:#fff; font-size:22px; }
+  footer .fnav{ display:flex; gap:26px; font-size:13.5px; font-weight:600; }
+  footer .fnav span{ cursor:pointer; } footer .fnav span:hover{ color:#fff; }
+  footer .copy{ font-size:12px; color:#5e6c93; }
+
+  /* player */
+  .player{ position:fixed; left:0; right:0; bottom:0; z-index:60; background:var(--navy);
+    color:#fff; box-shadow:0 -8px 30px rgba(8,20,55,.28); }
+  .player .inner{ max-width:1240px; margin:0 auto; display:flex; align-items:center; gap:16px; padding:12px 24px; }
+  .play-btn{ width:48px; height:48px; border-radius:50%; background:var(--red); flex:0 0 auto;
+    display:flex; align-items:center; justify-content:center; box-shadow:0 4px 14px rgba(239,0,63,.4); }
+  .play-btn:hover{ background:#ff1a52; }
+  .play-btn .pause{ display:flex; gap:4px; } .play-btn .pause i{ width:4px; height:16px; background:#fff; border-radius:1px; display:block; }
+  .play-btn .play-tri{ width:0; height:0; border-left:15px solid #fff; border-top:9px solid transparent; border-bottom:9px solid transparent; margin-left:4px; }
+  .nowplaying{ min-width:0; flex:0 0 auto; width:230px; }
+  .nowplaying .on{ display:flex; align-items:center; gap:7px; }
+  .nowplaying .onair{ background:var(--red); font-weight:800; font-size:9.5px; letter-spacing:.06em; padding:2px 6px; border-radius:4px; }
+  .nowplaying .freq{ font-size:11px; color:#9fb0d8; }
+  .nowplaying .show{ font-family:'Barlow Semi Condensed',sans-serif; font-weight:700; font-size:16px; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .nowplaying .hosts{ font-size:11.5px; color:#9fb0d8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .wave{ display:flex; align-items:flex-end; gap:3px; height:30px; width:46px; flex:0 0 auto; }
+  .wave i{ flex:1; height:100%; background:var(--red); border-radius:2px; transform-origin:bottom; transform:scaleY(.32); opacity:.4; display:block; }
+  .player.playing .wave i{ opacity:.92; }
+  .player.playing .wave i:nth-child(1){ animation:wf .80s ease-in-out 0s infinite; }
+  .player.playing .wave i:nth-child(2){ animation:wf .92s ease-in-out .07s infinite; }
+  .player.playing .wave i:nth-child(3){ animation:wf 1.04s ease-in-out .14s infinite; }
+  .player.playing .wave i:nth-child(4){ animation:wf 1.16s ease-in-out .21s infinite; }
+  .player.playing .wave i:nth-child(5){ animation:wf 1.28s ease-in-out .28s infinite; }
+  .player.playing .wave i:nth-child(6){ animation:wf 1.40s ease-in-out .35s infinite; }
+  .player .progress{ flex:1; display:flex; align-items:center; gap:12px; min-width:0; }
+  .player .vol{ display:flex; align-items:center; gap:8px; flex:0 0 auto; }
+  .player .vol input[type=range]{ width:90px; accent-color:var(--red); cursor:pointer; }
+  .player .listeners{ display:flex; align-items:center; gap:6px; color:#cdd6ec; font-size:12px; flex:0 0 auto; }
+  .player .listeners .dot{ animation:pulse 1.5s ease-in-out infinite; }
+  .player .live-pill{ font-size:11px; font-weight:700; color:#9fb0d8; }
+
+  /* toast */
+  .toast{ position:fixed; left:50%; bottom:96px; transform:translateX(-50%) translateY(20px);
+    background:var(--ink); color:#fff; font-size:13px; font-weight:600; padding:10px 18px;
+    border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.25); opacity:0; pointer-events:none;
+    transition:opacity .25s, transform .25s; z-index:80; }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+  /* ---------- generic form controls ---------- */
+  .field{ margin-bottom:16px; }
+  .field label{ display:block; font-weight:700; font-size:13px; color:var(--navy); margin-bottom:6px; }
+  .field input, .field textarea, .field select{ width:100%; padding:11px 13px; border:1px solid var(--line);
+    border-radius:9px; font-size:14.5px; color:var(--ink); background:#fff; outline:none; }
+  .field input:focus, .field textarea:focus, .field select:focus{ border-color:var(--red); box-shadow:0 0 0 3px rgba(239,0,63,.1); }
+  .field textarea{ resize:vertical; min-height:90px; }
+  .field .hint{ font-size:12px; color:var(--muted); margin-top:5px; }
+  .btn-primary{ background:var(--red); color:#fff; font-weight:700; font-size:14.5px; padding:12px 22px; border-radius:9px; }
+  .btn-primary:hover{ background:#d40038; } .btn-primary:disabled{ opacity:.55; cursor:default; }
+  .btn-ghost{ background:#fff; color:var(--navy); font-weight:700; font-size:14px; padding:10px 18px; border-radius:9px; border:1px solid var(--line); }
+  .btn-ghost:hover{ border-color:var(--navy); }
+  .chip-grid{ display:flex; flex-wrap:wrap; gap:9px; }
+  .chip{ padding:9px 15px; border:1.5px solid var(--line); border-radius:30px; font-weight:600; font-size:13.5px; color:#4a5168; }
+  .chip.on{ border-color:var(--red); background:rgba(239,0,63,.06); color:var(--red); }
+
+  /* ---------- partner page ---------- */
+  .partner-hero{ background:var(--navy); color:#fff; position:relative; overflow:hidden; }
+  .partner-hero .swoosh-big{ position:absolute; top:-60px; right:-40px; width:220px; height:220px;
+    border:34px solid var(--red); border-left-color:transparent; border-bottom-color:transparent;
+    border-top-right-radius:220px; transform:rotate(10deg); opacity:.85; }
+  .partner-hero .wrap{ padding:54px 24px; position:relative; z-index:1; }
+  .partner-hero .kicker{ font-family:'Barlow Semi Condensed',sans-serif; font-weight:800; font-size:14px;
+    letter-spacing:.1em; color:#7e8cb5; text-transform:uppercase; }
+  .partner-hero h1{ font-family:'Barlow Semi Condensed',sans-serif; font-weight:800; font-size:46px;
+    line-height:1.02; letter-spacing:-.02em; margin:10px 0 14px; max-width:18ch; }
+  .partner-hero p{ font-size:18px; color:#cfd6ea; max-width:60ch; line-height:1.5; margin:0; }
+  .partner-stats{ display:flex; gap:36px; margin-top:30px; flex-wrap:wrap; }
+  .partner-stats .st .n{ font-family:'Barlow Semi Condensed',sans-serif; font-weight:800; font-size:34px; }
+  .partner-stats .st .l{ font-size:13px; color:#9fb0d8; margin-top:2px; }
+  .partner-form{ background:#fff; border:1px solid var(--line); border-radius:16px; padding:30px;
+    margin:-40px auto 60px; max-width:760px; position:relative; z-index:5; box-shadow:0 12px 40px rgba(8,20,55,.1); }
+  .partner-form .step-dots{ display:flex; gap:8px; margin-bottom:24px; }
+  .partner-form .step-dots .sd{ height:5px; flex:1; border-radius:3px; background:var(--line); }
+  .partner-form .step-dots .sd.on{ background:var(--red); }
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .reco{ background:rgba(239,0,63,.05); border:1.5px solid rgba(239,0,63,.25); border-radius:12px; padding:18px; margin-bottom:20px; }
+  .reco .lbl{ font-weight:800; font-size:11px; letter-spacing:.07em; color:var(--red); }
+  .reco .pkg{ font-family:'Barlow Semi Condensed',sans-serif; font-weight:800; font-size:26px; color:var(--navy); margin:4px 0; }
+  .reco .why{ font-size:13.5px; color:#5a6178; }
+
+  /* ---------- admin ---------- */
+  .admin{ background:#f6f7f9; min-height:100vh; }
+  .admin-top{ background:var(--navy); color:#fff; }
+  .admin-top .wrap{ display:flex; align-items:center; gap:20px; height:60px; }
+  .admin-top .logo{ color:#fff; font-size:22px; }
+  .admin-top .tag{ background:var(--red); font-size:10px; font-weight:800; letter-spacing:.08em; padding:3px 8px; border-radius:4px; }
+  .admin-top .grow{ flex:1; }
+  .admin-top button.exit{ color:#cfd6ea; font-weight:600; font-size:13.5px; }
+  .admin-top button.exit:hover{ color:#fff; }
+  .admin-tabs{ background:#fff; border-bottom:1px solid var(--line); }
+  .admin-tabs .wrap{ display:flex; gap:4px; }
+  .admin-tabs button{ padding:14px 18px; font-weight:700; font-size:14px; color:#5a6178; position:relative; }
+  .admin-tabs button.active{ color:var(--navy); }
+  .admin-tabs button.active::after{ content:''; position:absolute; left:18px; right:18px; bottom:0; height:3px; background:var(--red); border-radius:2px 2px 0 0; }
+  .admin-body{ padding:28px 0 60px; }
+  .panel{ background:#fff; border:1px solid var(--line); border-radius:14px; padding:24px; margin-bottom:22px; }
+  .panel h3{ font-family:'Barlow Semi Condensed',sans-serif; font-weight:800; font-size:18px; color:var(--navy); margin:0 0 18px; letter-spacing:.01em; }
+  .admin-table{ width:100%; border-collapse:collapse; }
+  .admin-table th{ text-align:left; font-size:11px; letter-spacing:.05em; color:var(--muted); font-weight:700; padding:8px 10px; border-bottom:2px solid var(--line); }
+  .admin-table td{ padding:11px 10px; border-bottom:1px solid #f1f2f6; font-size:13.5px; vertical-align:middle; }
+  .admin-table tr:hover td{ background:#fafbfc; }
+  .pill{ font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; display:inline-block; }
+  .pill.live{ background:rgba(239,0,63,.1); color:var(--red); }
+  .pill.ft{ background:#eef0f4; color:#6b7180; }
+  .pill.draft{ background:#fff4e0; color:#9a6a00; }
+  .pill.pub{ background:#e3f6ea; color:#1f7a48; }
+  .pill.new{ background:rgba(239,0,63,.1); color:var(--red); }
+  .pill.contacted{ background:#e7eefc; color:#2a5bd0; }
+  .pill.won{ background:#e3f6ea; color:#1f7a48; }
+  .icon-btn{ font-size:13px; font-weight:700; color:var(--navy); padding:5px 10px; border-radius:7px; }
+  .icon-btn:hover{ background:#f1f2f6; }
+  .icon-btn.del{ color:var(--red); } .icon-btn.del:hover{ background:rgba(239,0,63,.08); }
+  .inline-edit{ width:60px; padding:6px 8px; border:1px solid var(--line); border-radius:6px; font-size:13px; text-align:center; }
+  .inline-edit.wide{ width:100%; text-align:left; }
+
+  /* login */
+  .login-wrap{ min-height:100vh; display:flex; align-items:center; justify-content:center; background:var(--navy); padding:24px; }
+  .login-card{ background:#fff; border-radius:16px; padding:36px; width:100%; max-width:400px; box-shadow:0 20px 60px rgba(0,0,0,.3); }
+  .login-card .logo{ justify-content:center; margin-bottom:6px; font-size:30px; }
+  .login-card .sub{ text-align:center; color:var(--muted); font-size:13.5px; margin-bottom:24px; }
+  .login-card .err{ background:rgba(239,0,63,.08); color:var(--red); font-size:13px; font-weight:600; padding:10px 13px; border-radius:8px; margin-bottom:14px; }
+
+  .empty{ text-align:center; color:var(--muted); padding:40px; font-size:14px; }
+
+  /* drawer */
+  .drawer{ position:fixed; inset:0; z-index:90; background:rgba(8,20,55,.5); opacity:0; pointer-events:none; transition:opacity .2s; }
+  .drawer.open{ opacity:1; pointer-events:auto; }
+  .drawer .panel-d{ position:absolute; top:0; left:0; bottom:0; width:260px; background:#fff; padding:24px;
+    transform:translateX(-100%); transition:transform .25s; display:flex; flex-direction:column; gap:4px; }
+  .drawer.open .panel-d{ transform:none; }
+  .drawer .panel-d button{ text-align:left; padding:12px 8px; font-weight:700; font-size:17px; color:var(--navy); border-radius:8px; }
+  .drawer .panel-d button:hover{ background:#f1f2f6; color:var(--red); }
+
+  @media (max-width:980px){ .body{ grid-template-columns:1fr; } aside{ position:static; } }
+  @media (max-width:720px){
+    nav.main,.search,.grow{ display:none; }
+    .menu-btn{ display:flex; flex-direction:column; gap:4px; padding:6px; }
+    .menu-btn i{ width:20px; height:2px; background:#27304a; display:block; border-radius:2px; }
+    header .wrap{ gap:12px; } .logo{ font-size:24px; }
+    .btn-partner{ display:none; }
+    .util .right span:not(.signin){ display:none; }
+    .hero h1{ font-size:27px; } .article h1{ font-size:30px; }
+    .partner-hero h1{ font-size:32px; }
+    .secitem{ grid-template-columns:120px 1fr; gap:12px; } .secitem h3{ font-size:18px; } .secitem p{ display:none; }
+    .grid3,.grid2{ grid-template-columns:1fr; }
+    .player .progress,.player .vol{ display:none; }
+    .nowplaying{ flex:1; width:auto; }
+    .player .inner{ gap:12px; padding:10px 16px; } .play-btn{ width:42px; height:42px; }
+    .app-pad{ padding-bottom:74px; }
+    .partner-form{ padding:20px; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ============================================================
+//  CONFIG  — swap these for your own values
+// ============================================================
+const SUPABASE_URL = "https://mmiegwjrzxbyguczcnku.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1taWVnd2pyenhieWd1Y3pjbmt1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzMDc5NjUsImV4cCI6MjA5Nzg4Mzk2NX0.q53UjckFFquySvy46MYm1IXd8TZ4_eI1sbcjVecsV5Q";
+
+// RadioKing — flux direct du player HTML5.
+// Le .m3u (https://api.radioking.io/radio/512377/listen.m3u) est une playlist ;
+// on utilise l'URL de flux direct, qui se lit dans une balise <audio>.
+const RADIO_STREAM_URL = "https://listen.radioking.com/radio/512377/stream/570244";
+const RADIO_STREAM_FALLBACK = "https://api.radioking.io/radio/512377/listen.m3u";
+const STATION_NAME = "Le Direct Matchday";
+const STATION_HOSTS = "avec Dan Pryce & Mara Voss";
+const STATION_FREQ  = "90.3 FM";
+
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+const crests = ['#0B245E','#10307a','#3a4a6b','#5a3b8a','#1f6b4a','#7a4a1f','#444c5e','#6b1f3a'];
+const NAVS = [
+  { key:'Home', label:'Accueil' },
+  { key:'Football', label:'Football' },
+  { key:'Basketball', label:'Basket' },
+  { key:'Standings', label:'Classement' },
+  { key:'Shows', label:'Émissions' },
+];
+const navLabel = (key)=> (NAVS.find(n=>n.key===key)||{}).label || key;
+
+// ============================================================
+//  SHARED UI
+// ============================================================
+function Logo({ onClick, footer }){
+  return (
+    <div className="logo" onClick={onClick} role="button" tabIndex={0}>
+      <span>Sport</span><span className="fm">fm
+        <span className="swoosh" style={footer?{borderWidth:'3px',width:'9px',height:'9px',right:'-6px'}:null}></span>
+      </span>
+    </div>
+  );
+}
+function Crest({ abbr, idx }){
+  return <span className="crest" style={{background:crests[idx % crests.length]}}>{abbr}</span>;
+}
+function Spinner(){ return <div className="spinner" />; }
+
+function useToast(){
+  const [msg,setMsg]=useState(null); const t=useRef();
+  const show=useCallback((m)=>{ setMsg(m); clearTimeout(t.current); t.current=setTimeout(()=>setMsg(null),2600); },[]);
+  const node = <div className={"toast"+(msg?" show":"")}>{msg}</div>;
+  return [show, node];
+}
+
+// ============================================================
+//  RADIO PLAYER (RadioKing stream via <audio>)
+// ============================================================
+function Player({ liveScores }){
+  const [playing,setPlaying]=useState(false);
+  const [vol,setVol]=useState(0.7);
+  const [err,setErr]=useState(false);
+  const audioRef=useRef(null);
+  const liveCount = liveScores.filter(s=>s.is_live).length;
+
+  useEffect(()=>{ if(audioRef.current) audioRef.current.volume=vol; },[vol]);
+
+  function toggle(){
+    const a=audioRef.current; if(!a) return;
+    if(playing){ a.pause(); setPlaying(false); }
+    else{
+      a.play().then(()=>{ setPlaying(true); setErr(false); })
+        .catch(()=>{
+          // si le flux direct échoue, on tente la playlist .m3u
+          if(a.src!==RADIO_STREAM_FALLBACK){
+            a.src=RADIO_STREAM_FALLBACK;
+            a.play().then(()=>{ setPlaying(true); setErr(false); }).catch(()=>{ setErr(true); setPlaying(false); });
+          } else { setErr(true); setPlaying(false); }
+        });
+    }
+  }
+  return (
+    <div className={"player"+(playing?" playing":"")}>
+      <audio ref={audioRef} src={RADIO_STREAM_URL} preload="none"
+        onError={()=>{ setErr(true); setPlaying(false); }} />
+      <div className="inner">
+        <button className="play-btn" onClick={toggle} aria-label={playing?"Mettre en pause":"Écouter la radio"}>
+          {playing ? <span className="pause"><i></i><i></i></span> : <span className="play-tri"></span>}
+        </button>
+        <div className="nowplaying">
+          <div className="on"><span className="onair">EN DIRECT</span><span className="freq">{STATION_FREQ}</span></div>
+          <div className="show">{STATION_NAME}</div>
+          <div className="hosts">{err ? "Flux indisponible — vérifiez l'URL" : STATION_HOSTS}</div>
+        </div>
+        <div className="wave"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div className="progress">
+          <span className="listeners"><span className="dot"></span>{liveCount} match{liveCount===1?'':'s'} en direct</span>
+        </div>
+        <div className="vol">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9fb0d8" strokeWidth="2"><path d="M3 10v4h4l5 4V6L7 10H3z"></path><path d="M16 8a5 5 0 0 1 0 8"></path></svg>
+          <input type="range" min="0" max="1" step="0.01" value={vol} onChange={e=>setVol(+e.target.value)} aria-label="Volume" />
+        </div>
+        <span className="live-pill">{playing?'● EN LECTURE':'EN PAUSE'}</span>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+//  PUBLIC SITE
+// ============================================================
+function Ticker({ scores }){
+  if(!scores.length) return null;
+  const one = scores.map((g,i)=>(
+    <div className="tk" key={i}>
+      <span style={{fontWeight:700}}>{g.home}</span>
+      <span className="score">{g.score}</span>
+      <span style={{fontWeight:700}}>{g.away}</span>
+      <span className={"tag "+(g.is_live?'live':'ft')}>{g.status}</span>
+    </div>
+  ));
+  return (
+    <div className="ticker"><div className="wrap">
+      <div className="badge"><span className="dot"></span>LIVE</div>
+      <div className="track-wrap"><div className="ticker-track">{one}{one}</div></div>
+    </div></div>
+  );
+}
+
+function Rail({ standings, fixtures, onNav, onTrial }){
+  const rows=[...standings].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+  return (
+    <aside>
+      <div className="card">
+        <div className="head"><div className="title"><span className="dot"></span>Classement Metro D1</div>
+          <span className="more" onClick={()=>onNav('Standings')}>Tout</span></div>
+        <div className="tbl-head"><span>#</span><span>CLUB</span><span>J</span><span>PTS</span></div>
+        {rows.map((t,i)=>(
+          <div className="trow" key={t.id} style={{background:i===0?'rgba(239,0,63,0.035)':'#fff'}}>
+            <span className="pos" style={{color:i<3?'var(--red)':'var(--muted-2)'}}>{i+1}</span>
+            <span className="club"><Crest abbr={t.abbr} idx={i}/><span className="name">{t.team}</span></span>
+            <span className="pld">{t.played}</span><span className="pts">{t.points}</span>
+          </div>
+        ))}
+      </div>
+      <div className="card">
+        <div className="head"><div className="title">Prochains matchs</div></div>
+        {[...fixtures].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)).map(f=>(
+          <div className="fix" key={f.id}>
+            <div className="teams"><span>{f.home}</span><span className="v">v</span><span>{f.away}</span></div>
+            <div className="when"><div className="t">{f.kickoff_time}</div><div className="d">{f.kickoff_day}</div></div>
+          </div>
+        ))}
+      </div>
+      <div className="promo">
+        <div className="swoosh-big"></div>
+        <div className="kicker">SPORTFM+</div>
+        <div className="ptitle">Audio sans pub &amp; replays intégraux</div>
+        <p>Tous les matchs de D1, à la demande. Premier mois offert.</p>
+        <button className="cta" onClick={onTrial}>Essai gratuit</button>
+      </div>
+    </aside>
+  );
+}
+
+function Home({ articles, standings, fixtures, onOpen, onNav, onTrial }){
+  const hero = articles.find(a=>a.is_hero) || articles[0];
+  if(!hero) return <div className="empty">Aucun article publié pour le moment.</div>;
+  const rest = articles.filter(a=>a.id!==hero.id);
+  const secondary = rest.slice(0,3);
+  const grid = rest.slice(3,6);
+  const imgStyle = (a)=> a.image_url ? {'--img':`url(${a.image_url})`} : null;
+  const imgCls = (a)=> "img shot"+(a.image_url?" has-img":"");
+  return (
+    <div className="body">
+      <div>
+        <article className="hero" onClick={()=>onOpen(hero)}>
+          <div className={imgCls(hero)} style={imgStyle(hero)}>
+            <span className="tagchip">{hero.tag}</span>
+            {!hero.image_url && <span className="imglabel">[ photo principale ]</span>}
+          </div>
+          <h1>{hero.title}</h1>
+          {hero.dek && <p>{hero.dek}</p>}
+          <div className="byline"><span className="who">{hero.author}</span><span>·</span><span>{hero.read_time}</span><span>·</span><span>{timeAgo(hero.created_at)}</span></div>
+        </article>
+        <div className="rule"></div>
+        <div className="seclist">
+          {secondary.map(a=>(
+            <article className="secitem" key={a.id} onClick={()=>onOpen(a)}>
+              <div className={imgCls(a)} style={imgStyle(a)}></div>
+              <div>
+                <div className="eyebrow">{a.tag}</div>
+                <h3>{a.title}</h3>
+                {a.dek && <p>{a.dek}</p>}
+                <div className="meta">{a.author} · {timeAgo(a.created_at)}</div>
+              </div>
+            </article>
+          ))}
+        </div>
+        {grid.length>0 && <>
+          <div className="sechead"><h2>Toute l'actualité du championnat</h2><div className="line"></div></div>
+          <div className="grid3">
+            {grid.map(a=>(
+              <article className="gcard" key={a.id} onClick={()=>onOpen(a)}>
+                <div className={imgCls(a)} style={imgStyle(a)}></div>
+                <div className="eyebrow">{a.tag}</div>
+                <h4>{a.title}</h4>
+                <div className="meta">{timeAgo(a.created_at)}</div>
+              </article>
+            ))}
+          </div>
+        </>}
+      </div>
+      <Rail standings={standings} fixtures={fixtures} onNav={onNav} onTrial={onTrial} />
+    </div>
+  );
+}
+
+function CategoryView({ cat, articles, onOpen }){
+  if(cat==='Shows'){
+    const shows=[
+      ['Le Direct Matchday','EN DIRECT','90.3 FM · tous les jours'],['Le Réveil Coup d\'envoi','EN SEMAINE','06h00–09h00'],
+      ['Le Bureau du Mercato','TRANSFERTS','Vendredi 18h00'],['L\'Antenne d\'après-match','AUDITEURS','Après chaque match'],
+      ['Vision Parquet','BASKET','Mar & Jeu'],['Le Récap du Dimanche','HEBDO','Dim 20h00'],
+    ];
+    return (
+      <div className="article" style={{maxWidth:880}}>
+        <div className="sechead" style={{marginTop:0}}><h2 style={{fontSize:22}}>Nos émissions</h2><div className="line"></div></div>
+        <div className="grid3">{shows.map((s,i)=>(
+          <div className="gcard" key={i}><div className="img shot"></div>
+            <div className="eyebrow">{s[1]}</div><h4>{s[0]}</h4><div className="meta">{s[2]}</div></div>
+        ))}</div>
+      </div>
+    );
+  }
+  const titleMap={ Football:'Football', Basketball:'Basket' };
+  const items=articles.filter(a=>a.category===cat);
+  return (
+    <div className="article" style={{maxWidth:880}}>
+      <div className="sechead" style={{marginTop:0}}><h2 style={{fontSize:22}}>{titleMap[cat]||cat}</h2><div className="line"></div></div>
+      <div className="seclist">
+        {items.length? items.map(a=>(
+          <article className="secitem" key={a.id} onClick={()=>onOpen(a)}>
+            <div className={"img shot"+(a.image_url?" has-img":"")} style={a.image_url?{'--img':`url(${a.image_url})`}:null}></div>
+            <div><div className="eyebrow">{a.tag}</div><h3>{a.title}</h3>{a.dek&&<p>{a.dek}</p>}
+              <div className="meta">{a.author} · {timeAgo(a.created_at)}</div></div>
+          </article>
+        )) : <p style={{color:'var(--muted)'}}>Aucun article ici pour l'instant. Revenez après la prochaine journée.</p>}
+      </div>
+    </div>
+  );
+}
+
+function StandingsView({ standings }){
+  const rows=[...standings].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+  const cols="34px 1fr 36px 36px 36px 36px 44px";
+  return (
+    <div className="article" style={{maxWidth:880}}>
+      <div className="sechead" style={{marginTop:0}}><h2 style={{fontSize:22}}>Metro D1 — Classement complet</h2><div className="line"></div></div>
+      <div className="card">
+        <div style={{display:'grid',gridTemplateColumns:cols,padding:'10px 18px',fontSize:11,fontWeight:700,letterSpacing:'.05em',color:'var(--muted-2)',borderBottom:'1px solid #eef0f4'}}>
+          <span>#</span><span>CLUB</span><span style={{textAlign:'center'}}>J</span><span style={{textAlign:'center'}}>G</span><span style={{textAlign:'center'}}>N</span><span style={{textAlign:'center'}}>P</span><span style={{textAlign:'right'}}>PTS</span>
+        </div>
+        {rows.map((t,i)=>(
+          <div key={t.id} style={{display:'grid',gridTemplateColumns:cols,alignItems:'center',padding:'11px 18px',borderBottom:'1px solid #f2f3f7',background:i===0?'rgba(239,0,63,0.035)':'#fff'}}>
+            <span style={{fontWeight:700,color:i<3?'var(--red)':'var(--muted-2)'}}>{i+1}</span>
+            <span className="club"><Crest abbr={t.abbr} idx={i}/><span className="name">{t.team}</span></span>
+            <span style={{textAlign:'center',color:'#6b7180'}}>{t.played}</span>
+            <span style={{textAlign:'center',color:'#6b7180'}}>{t.won}</span>
+            <span style={{textAlign:'center',color:'#6b7180'}}>{t.drawn}</span>
+            <span style={{textAlign:'center',color:'#6b7180'}}>{t.lost}</span>
+            <span style={{textAlign:'right',fontWeight:800,color:'var(--navy)'}}>{t.points}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ArticleView({ article, onBack, backLabel }){
+  const blocks=(article.body||'').split(/\n\s*\n/).filter(Boolean);
+  return (
+    <article className="article">
+      <button className="back" onClick={onBack}>← Retour à {backLabel}</button>
+      <span className="tagchip">{article.tag}</span>
+      <h1>{article.title}</h1>
+      {article.dek && <p className="standfirst">{article.dek}</p>}
+      <div className="byline"><span className="who">{article.author}</span><span>·</span><span>{article.read_time}</span><span>·</span><span>{timeAgo(article.created_at)}</span></div>
+      <div className={"img shot"+(article.image_url?" has-img":"")} style={article.image_url?{'--img':`url(${article.image_url})`}:null}>
+        {!article.image_url && <span className="imglabel">[ photo de l'article ]</span>}
+      </div>
+      <div className="prose">{blocks.map((b,i)=><p key={i}>{b}</p>)}</div>
+    </article>
+  );
+}
+
+// ============================================================
+//  PARTNER QUESTIONNAIRE
+// ============================================================
+const GOALS = ['Notoriété de marque','Sponsoring de match','Spots publicitaires à l\'antenne','Sponsoring d\'émission / podcast','Bannières display','Activation événementielle','Placement newsletter'];
+const BUDGETS = ['Moins de 1k€ / mois','1k€–5k€ / mois','5k€–15k€ / mois','15k€+ / mois','Campagne ponctuelle'];
+const INDUSTRIES = ['Commerce / e-commerce','Alimentaire & boissons','Automobile','Finance / assurance','Tech / SaaS','Services locaux','Paris / jeux','Autre'];
+
+function recommendPackage({ budget, goals }){
+  const g = goals||[];
+  if(budget==='15k€+ / mois' || g.includes('Sponsoring de match') || g.includes('Activation événementielle'))
+    return { pkg:'Partenaire Matchday', why:'Sponsoring premium à l\'antenne et sur les matchs en direct, segments brandés, activation événementielle et couverture digitale complète sur chaque match de D1.' };
+  if(budget==='5k€–15k€ / mois' || g.includes('Sponsoring d\'émission / podcast') || g.includes('Spots publicitaires à l\'antenne'))
+    return { pkg:'Sponsor d\'émission', why:'Sponsoring dédié d\'une émission ou d\'un podcast, avec spots réguliers à l\'antenne et placement newsletter — une forte audience récurrente.' };
+  if(budget==='Moins de 1k€ / mois' || budget==='Campagne ponctuelle')
+    return { pkg:'Pack Découverte', why:'Un pack d\'entrée ciblé : display digital, un emplacement newsletter et une série de spots à l\'antenne pour tester l\'audience.' };
+  return { pkg:'Visibilité Digitale', why:'Bannières display et placement newsletter sur tout le site SportFM — flexible et facile à faire évoluer.' };
+}
+
+function PartnerView({ onBack, toast }){
+  const [step,setStep]=useState(0);
+  const [done,setDone]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const [f,setF]=useState({ company:'',contact_name:'',email:'',phone:'',industry:'',budget:'',goals:[],audience:'',timeline:'',message:'' });
+  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+  const toggleGoal=(g)=>setF(p=>({...p,goals:p.goals.includes(g)?p.goals.filter(x=>x!==g):[...p.goals,g]}));
+  const reco=recommendPackage(f);
+
+  const canStep0 = f.company && f.email;
+  const canStep1 = f.budget && f.goals.length>0;
+
+  async function submit(){
+    setSaving(true);
+    const { error } = await sb.from('partners').insert([{ ...f, recommended:reco.pkg }]);
+    setSaving(false);
+    if(error){ toast('Envoi impossible — '+error.message); return; }
+    setDone(true);
+  }
+
+  if(done){
+    return (
+      <div className="partner-form" style={{textAlign:'center',marginTop:60}}>
+        <div style={{fontSize:48,marginBottom:8}}>🎉</div>
+        <h1 style={{fontFamily:"'Barlow Semi Condensed'",fontWeight:800,color:'var(--navy)',fontSize:30,margin:'0 0 10px'}}>Merci, {f.contact_name||f.company} !</h1>
+        <p style={{color:'#5a6178',fontSize:16,maxWidth:'46ch',margin:'0 auto 8px'}}>Votre demande est bien reçue. D'après vos réponses, le pack <strong>{reco.pkg}</strong> nous semble idéal — notre équipe partenariats vous contactera sous un jour ouvré pour l'adapter.</p>
+        <button className="btn-ghost" style={{marginTop:18}} onClick={onBack}>Retour à SportFM</button>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="partner-hero">
+        <div className="swoosh-big"></div>
+        <div className="wrap">
+          <div className="kicker">Devenir partenaire</div>
+          <h1>Placez votre marque au cœur de la Metro D1</h1>
+          <p>SportFM touche des milliers de passionnés de sport local à chaque journée — à l'antenne, en ligne et dans leur boîte mail. Parlez-nous de vos objectifs et nous construirons le pack qui vous correspond.</p>
+          <div className="partner-stats">
+            <div className="st"><div className="n">48k</div><div className="l">auditeurs / mois</div></div>
+            <div className="st"><div className="n">120k</div><div className="l">visites / mois</div></div>
+            <div className="st"><div className="n">9k</div><div className="l">abonnés newsletter</div></div>
+            <div className="st"><div className="n">100%</div><div className="l">focus D1 local</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div className="wrap">
+        <div className="partner-form">
+          <div className="step-dots">
+            {[0,1,2].map(i=><div key={i} className={"sd"+(i<=step?" on":"")}></div>)}
+          </div>
+
+          {step===0 && <>
+            <h3 className="cond" style={{fontSize:20,color:'var(--navy)',margin:'0 0 18px'}}>Votre entreprise</h3>
+            <div className="grid2">
+              <div className="field"><label>Nom de l'entreprise *</label><input value={f.company} onChange={e=>set('company',e.target.value)} placeholder="Acme Sports SARL" /></div>
+              <div className="field"><label>Votre nom</label><input value={f.contact_name} onChange={e=>set('contact_name',e.target.value)} placeholder="Jordan Bell" /></div>
+              <div className="field"><label>E-mail *</label><input type="email" value={f.email} onChange={e=>set('email',e.target.value)} placeholder="vous@entreprise.com" /></div>
+              <div className="field"><label>Téléphone</label><input value={f.phone} onChange={e=>set('phone',e.target.value)} placeholder="+228 ..." /></div>
+            </div>
+            <div className="field"><label>Secteur d'activité</label>
+              <select value={f.industry} onChange={e=>set('industry',e.target.value)}>
+                <option value="">Sélectionner…</option>{INDUSTRIES.map(x=><option key={x}>{x}</option>)}
+              </select>
+            </div>
+            <div style={{display:'flex',justifyContent:'space-between',marginTop:8}}>
+              <button className="btn-ghost" onClick={onBack}>Annuler</button>
+              <button className="btn-primary" disabled={!canStep0} onClick={()=>setStep(1)}>Continuer →</button>
+            </div>
+          </>}
+
+          {step===1 && <>
+            <h3 className="cond" style={{fontSize:20,color:'var(--navy)',margin:'0 0 18px'}}>Vos objectifs &amp; budget</h3>
+            <div className="field"><label>Que souhaitez-vous accomplir ? *</label>
+              <div className="chip-grid">{GOALS.map(g=>(
+                <button key={g} type="button" className={"chip"+(f.goals.includes(g)?" on":"")} onClick={()=>toggleGoal(g)}>{g}</button>
+              ))}</div>
+            </div>
+            <div className="field"><label>Budget mensuel *</label>
+              <div className="chip-grid">{BUDGETS.map(b=>(
+                <button key={b} type="button" className={"chip"+(f.budget===b?" on":"")} onClick={()=>set('budget',b)}>{b}</button>
+              ))}</div>
+            </div>
+            <div className="field"><label>Quelle est votre cible ?</label>
+              <input value={f.audience} onChange={e=>set('audience',e.target.value)} placeholder="ex. fans de foot locaux 18–35 ans" /></div>
+            <div style={{display:'flex',justifyContent:'space-between',marginTop:8}}>
+              <button className="btn-ghost" onClick={()=>setStep(0)}>← Retour</button>
+              <button className="btn-primary" disabled={!canStep1} onClick={()=>setStep(2)}>Continuer →</button>
+            </div>
+          </>}
+
+          {step===2 && <>
+            <h3 className="cond" style={{fontSize:20,color:'var(--navy)',margin:'0 0 18px'}}>Dernière étape</h3>
+            <div className="reco">
+              <div className="lbl">PACK SUGGÉRÉ</div>
+              <div className="pkg">{reco.pkg}</div>
+              <div className="why">{reco.why}</div>
+            </div>
+            <div className="field"><label>Quand souhaitez-vous démarrer ?</label>
+              <select value={f.timeline} onChange={e=>set('timeline',e.target.value)}>
+                <option value="">Sélectionner…</option>
+                <option>Dès que possible</option><option>Dans le mois</option>
+                <option>Au prochain trimestre</option><option>Je me renseigne</option>
+              </select>
+            </div>
+            <div className="field"><label>Autre chose à nous préciser ?</label>
+              <textarea value={f.message} onChange={e=>set('message',e.target.value)} placeholder="Parlez-nous de votre campagne, vos dates clés, ou vos questions…" /></div>
+            <div style={{display:'flex',justifyContent:'space-between',marginTop:8}}>
+              <button className="btn-ghost" onClick={()=>setStep(1)}>← Retour</button>
+              <button className="btn-primary" disabled={saving} onClick={submit}>{saving?'Envoi…':'Envoyer la demande'}</button>
+            </div>
+          </>}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ============================================================
+//  ADMIN — LOGIN
+// ============================================================
+function AdminLogin({ onAuthed, onExit }){
+  const [email,setEmail]=useState(''); const [pw,setPw]=useState('');
+  const [err,setErr]=useState(''); const [busy,setBusy]=useState(false);
+  async function login(){
+    setBusy(true); setErr('');
+    const { data, error } = await sb.auth.signInWithPassword({ email, password:pw });
+    setBusy(false);
+    if(error){ setErr(error.message); return; }
+    onAuthed(data.session);
+  }
+  return (
+    <div className="login-wrap">
+      <div className="login-card">
+        <Logo onClick={()=>{}} />
+        <div className="sub">Administration rédaction &amp; partenariats</div>
+        {err && <div className="err">{err}</div>}
+        <div className="field"><label>E-mail</label><input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&login()} placeholder="redaction@sportfm.com" /></div>
+        <div className="field"><label>Mot de passe</label><input type="password" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==='Enter'&&login()} placeholder="••••••••" /></div>
+        <button className="btn-primary" style={{width:'100%'}} disabled={busy} onClick={login}>{busy?'Connexion…':'Se connecter'}</button>
+        <button className="btn-ghost" style={{width:'100%',marginTop:10}} onClick={onExit}>← Retour au site</button>
+        <p style={{fontSize:12,color:'var(--muted)',textAlign:'center',marginTop:16,lineHeight:1.5}}>
+          Créez un administrateur dans Supabase → Authentication → Users, puis connectez-vous ici.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+//  ADMIN — ARTICLE EDITOR
+// ============================================================
+const EMPTY_ARTICLE = { title:'',tag:'ACTU',category:'Football',dek:'',body:'',author:'Rédaction SportFM',read_time:'5 min de lecture',image_url:'',is_hero:false,published:true };
+
+function ArticleEditor({ initial, onSave, onCancel, toast }){
+  const [a,setA]=useState(initial||EMPTY_ARTICLE);
+  const [busy,setBusy]=useState(false);
+  const set=(k,v)=>setA(p=>({...p,[k]:v}));
+  async function save(){
+    if(!a.title){ toast('Le titre est obligatoire'); return; }
+    setBusy(true);
+    let res;
+    const payload={ title:a.title,tag:a.tag,category:a.category,dek:a.dek,body:a.body,author:a.author,read_time:a.read_time,image_url:a.image_url||null,is_hero:a.is_hero,published:a.published,updated_at:new Date().toISOString() };
+    if(a.id){ res=await sb.from('articles').update(payload).eq('id',a.id); }
+    else { res=await sb.from('articles').insert([payload]); }
+    setBusy(false);
+    if(res.error){ toast('Échec de l\'enregistrement — '+res.error.message); return; }
+    toast(a.id?'Article mis à jour':'Article publié');
+    onSave();
+  }
+  return (
+    <div className="panel">
+      <h3>{a.id?'Modifier l\'article':'Nouvel article'}</h3>
+      <div className="field"><label>Titre *</label><input value={a.title} onChange={e=>set('title',e.target.value)} placeholder="Les Hawks dominent United…" /></div>
+      <div className="grid2">
+        <div className="field"><label>Étiquette (sur-titre)</label><input value={a.tag} onChange={e=>set('tag',e.target.value)} placeholder="COMPTE-RENDU" /></div>
+        <div className="field"><label>Catégorie</label>
+          <select value={a.category} onChange={e=>set('category',e.target.value)}>
+            <option value="Football">Football</option><option value="Basketball">Basket</option><option value="Shows">Émissions</option></select></div>
+      </div>
+      <div className="field"><label>Chapô (résumé)</label><textarea style={{minHeight:60}} value={a.dek} onChange={e=>set('dek',e.target.value)} /></div>
+      <div className="field"><label>Contenu</label><textarea style={{minHeight:200}} value={a.body} onChange={e=>set('body',e.target.value)} placeholder="Rédigez l'article. Laissez une ligne vide entre les paragraphes." /><div className="hint">Séparez les paragraphes par une ligne vide.</div></div>
+      <div className="grid2">
+        <div className="field"><label>Auteur</label><input value={a.author} onChange={e=>set('author',e.target.value)} /></div>
+        <div className="field"><label>Temps de lecture</label><input value={a.read_time} onChange={e=>set('read_time',e.target.value)} placeholder="6 min de lecture" /></div>
+      </div>
+      <div className="field"><label>URL de l'image principale (optionnel)</label><input value={a.image_url||''} onChange={e=>set('image_url',e.target.value)} placeholder="https://…/photo.jpg" /></div>
+      <div style={{display:'flex',gap:20,alignItems:'center',marginBottom:18,flexWrap:'wrap'}}>
+        <label style={{display:'flex',gap:8,alignItems:'center',fontWeight:600,fontSize:14}}><input type="checkbox" checked={a.is_hero} onChange={e=>set('is_hero',e.target.checked)} /> Mettre à la une</label>
+        <label style={{display:'flex',gap:8,alignItems:'center',fontWeight:600,fontSize:14}}><input type="checkbox" checked={a.published} onChange={e=>set('published',e.target.checked)} /> Publié</label>
+      </div>
+      <div style={{display:'flex',gap:10}}>
+        <button className="btn-primary" disabled={busy} onClick={save}>{busy?'Enregistrement…':(a.id?'Enregistrer':'Publier l\'article')}</button>
+        <button className="btn-ghost" onClick={onCancel}>Annuler</button>
+      </div>
+    </div>
+  );
+}
+
+function AdminArticles({ articles, reload, toast }){
+  const [editing,setEditing]=useState(null);
+  async function del(a){
+    if(!confirm(`Supprimer « ${a.title} » ?`)) return;
+    const { error }=await sb.from('articles').delete().eq('id',a.id);
+    if(error){ toast('Échec de la suppression'); return; }
+    toast('Article supprimé'); reload();
+  }
+  if(editing!==null) return <ArticleEditor initial={editing} onSave={()=>{setEditing(null);reload();}} onCancel={()=>setEditing(null)} toast={toast} />;
+  return (
+    <div className="panel">
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18}}>
+        <h3 style={{margin:0}}>Articles ({articles.length})</h3>
+        <button className="btn-primary" onClick={()=>setEditing(EMPTY_ARTICLE)}>+ Nouvel article</button>
+      </div>
+      {articles.length===0 ? <div className="empty">Aucun article. Publiez votre premier sujet.</div> :
+      <table className="admin-table"><thead><tr>
+        <th>Titre</th><th>Catégorie</th><th>Statut</th><th>Modifié</th><th></th>
+      </tr></thead><tbody>
+        {articles.map(a=>(
+          <tr key={a.id}>
+            <td style={{fontWeight:600,maxWidth:380}}>{a.is_hero && <span style={{color:'var(--red)',marginRight:6}}>★</span>}{a.title}</td>
+            <td>{a.category==='Basketball'?'Basket':a.category==='Shows'?'Émissions':a.category}</td>
+            <td><span className={"pill "+(a.published?'pub':'draft')}>{a.published?'Publié':'Brouillon'}</span></td>
+            <td style={{color:'var(--muted)'}}>{timeAgo(a.updated_at||a.created_at)}</td>
+            <td style={{textAlign:'right',whiteSpace:'nowrap'}}>
+              <button className="icon-btn" onClick={()=>setEditing(a)}>Modifier</button>
+              <button className="icon-btn del" onClick={()=>del(a)}>Supprimer</button>
+            </td>
+          </tr>
+        ))}
+      </tbody></table>}
+    </div>
+  );
+}
+
+// ============================================================
+//  ADMIN — SCORES & STANDINGS
+// ============================================================
+function AdminScores({ scores, standings, fixtures, reload, toast }){
+  const [ns,setNs]=useState({home:'',away:'',score:'0 - 0',status:"0'",is_live:true});
+  async function addScore(){
+    if(!ns.home||!ns.away){ toast('Renseignez les deux équipes'); return; }
+    const { error }=await sb.from('scores').insert([ns]);
+    if(error){ toast('Échec : '+error.message); return; }
+    setNs({home:'',away:'',score:'0 - 0',status:"0'",is_live:true}); toast('Score ajouté'); reload();
+  }
+  async function updScore(id,patch){
+    const { error }=await sb.from('scores').update(patch).eq('id',id);
+    if(error) toast('Échec de la mise à jour'); else reload();
+  }
+  async function delScore(id){
+    const { error }=await sb.from('scores').delete().eq('id',id);
+    if(error) toast('Échec de la suppression'); else { toast('Supprimé'); reload(); }
+  }
+  async function updStanding(id,patch){
+    const { error }=await sb.from('standings').update(patch).eq('id',id);
+    if(error) toast('Échec de la mise à jour'); else reload();
+  }
+  const rows=[...standings].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+
+  return (
+    <>
+      <div className="panel">
+        <h3>Scores en direct (bandeau)</h3>
+        <table className="admin-table"><thead><tr><th>Domicile</th><th>Score</th><th>Extérieur</th><th>Statut</th><th>Direct</th><th></th></tr></thead>
+        <tbody>
+          {scores.map(s=>(
+            <tr key={s.id}>
+              <td><input className="inline-edit wide" defaultValue={s.home} onBlur={e=>updScore(s.id,{home:e.target.value})} /></td>
+              <td><input className="inline-edit" defaultValue={s.score} onBlur={e=>updScore(s.id,{score:e.target.value})} /></td>
+              <td><input className="inline-edit wide" defaultValue={s.away} onBlur={e=>updScore(s.id,{away:e.target.value})} /></td>
+              <td><input className="inline-edit" defaultValue={s.status} onBlur={e=>updScore(s.id,{status:e.target.value})} /></td>
+              <td><input type="checkbox" defaultChecked={s.is_live} onChange={e=>updScore(s.id,{is_live:e.target.checked})} /></td>
+              <td style={{textAlign:'right'}}><button className="icon-btn del" onClick={()=>delScore(s.id)}>Retirer</button></td>
+            </tr>
+          ))}
+          <tr style={{background:'#fafbfc'}}>
+            <td><input className="inline-edit wide" placeholder="RIV" value={ns.home} onChange={e=>setNs({...ns,home:e.target.value})} /></td>
+            <td><input className="inline-edit" placeholder="0 - 0" value={ns.score} onChange={e=>setNs({...ns,score:e.target.value})} /></td>
+            <td><input className="inline-edit wide" placeholder="OAK" value={ns.away} onChange={e=>setNs({...ns,away:e.target.value})} /></td>
+            <td><input className="inline-edit" placeholder="78'" value={ns.status} onChange={e=>setNs({...ns,status:e.target.value})} /></td>
+            <td><input type="checkbox" checked={ns.is_live} onChange={e=>setNs({...ns,is_live:e.target.checked})} /></td>
+            <td style={{textAlign:'right'}}><button className="icon-btn" onClick={addScore}>+ Ajouter</button></td>
+          </tr>
+        </tbody></table>
+        <div className="hint" style={{marginTop:10,fontSize:12,color:'var(--muted)'}}>Les modifications sont enregistrées dès que vous quittez une cellule.</div>
+      </div>
+
+      <div className="panel">
+        <h3>Classement du championnat</h3>
+        <table className="admin-table"><thead><tr><th>#</th><th>Équipe</th><th>Abrév.</th><th>J</th><th>G</th><th>N</th><th>P</th><th>PTS</th></tr></thead>
+        <tbody>
+          {rows.map((t,i)=>(
+            <tr key={t.id}>
+              <td style={{color:'var(--muted)'}}>{i+1}</td>
+              <td><input className="inline-edit wide" defaultValue={t.team} onBlur={e=>updStanding(t.id,{team:e.target.value})} /></td>
+              <td><input className="inline-edit" style={{width:50}} defaultValue={t.abbr} onBlur={e=>updStanding(t.id,{abbr:e.target.value})} /></td>
+              <td><input className="inline-edit" style={{width:46}} type="number" defaultValue={t.played} onBlur={e=>updStanding(t.id,{played:+e.target.value})} /></td>
+              <td><input className="inline-edit" style={{width:46}} type="number" defaultValue={t.won} onBlur={e=>updStanding(t.id,{won:+e.target.value})} /></td>
+              <td><input className="inline-edit" style={{width:46}} type="number" defaultValue={t.drawn} onBlur={e=>updStanding(t.id,{drawn:+e.target.value})} /></td>
+              <td><input className="inline-edit" style={{width:46}} type="number" defaultValue={t.lost} onBlur={e=>updStanding(t.id,{lost:+e.target.value})} /></td>
+              <td><input className="inline-edit" style={{width:50}} type="number" defaultValue={t.points} onBlur={e=>updStanding(t.id,{points:+e.target.value})} /></td>
+            </tr>
+          ))}
+        </tbody></table>
+        <div className="hint" style={{marginTop:10,fontSize:12,color:'var(--muted)'}}>L'ordre suit la colonne sort_order. Modifiez les points et le classement public se met à jour au prochain chargement.</div>
+      </div>
+    </>
+  );
+}
+
+// ============================================================
+//  ADMIN — PARTNERS
+// ============================================================
+function AdminPartners({ partners, reload, toast }){
+  const [open,setOpen]=useState(null);
+  async function setStatus(id,status){
+    const { error }=await sb.from('partners').update({status}).eq('id',id);
+    if(error) toast('Échec de la mise à jour'); else { toast('Marqué : '+status); reload(); }
+  }
+  const statusLabel={ new:'nouveau', contacted:'contacté', won:'gagné', archived:'archivé' };
+  return (
+    <div className="panel">
+      <h3>Demandes de partenariat ({partners.length})</h3>
+      {partners.length===0 ? <div className="empty">Aucune demande pour l'instant. Elles s'afficheront ici dès qu'une entreprise remplira le formulaire partenaire.</div> :
+      <table className="admin-table"><thead><tr>
+        <th>Entreprise</th><th>Contact</th><th>Budget</th><th>Pack suggéré</th><th>Statut</th><th>Reçu</th><th></th>
+      </tr></thead><tbody>
+        {partners.map(p=>(
+          <React.Fragment key={p.id}>
+            <tr>
+              <td style={{fontWeight:600}}>{p.company}</td>
+              <td>{p.contact_name||'—'}<div style={{fontSize:12,color:'var(--muted)'}}>{p.email}</div></td>
+              <td>{p.budget||'—'}</td>
+              <td>{p.recommended||'—'}</td>
+              <td><span className={"pill "+(p.status==='new'?'new':p.status==='contacted'?'contacted':p.status==='won'?'won':'ft')}>{statusLabel[p.status]||p.status}</span></td>
+              <td style={{color:'var(--muted)'}}>{timeAgo(p.created_at)}</td>
+              <td style={{textAlign:'right',whiteSpace:'nowrap'}}><button className="icon-btn" onClick={()=>setOpen(open===p.id?null:p.id)}>{open===p.id?'Masquer':'Voir'}</button></td>
+            </tr>
+            {open===p.id && (
+              <tr><td colSpan={7} style={{background:'#fafbfc'}}>
+                <div style={{padding:'8px 4px',display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px 30px',fontSize:13.5}}>
+                  <div><strong>Secteur :</strong> {p.industry||'—'}</div>
+                  <div><strong>Téléphone :</strong> {p.phone||'—'}</div>
+                  <div><strong>Cible :</strong> {p.audience||'—'}</div>
+                  <div><strong>Échéance :</strong> {p.timeline||'—'}</div>
+                  <div style={{gridColumn:'1 / -1'}}><strong>Objectifs :</strong> {(p.goals||[]).join(', ')||'—'}</div>
+                  <div style={{gridColumn:'1 / -1'}}><strong>Message :</strong> {p.message||'—'}</div>
+                </div>
+                <div style={{display:'flex',gap:8,padding:'8px 4px'}}>
+                  <button className="icon-btn" onClick={()=>setStatus(p.id,'contacted')}>Marquer contacté</button>
+                  <button className="icon-btn" onClick={()=>setStatus(p.id,'won')}>Marquer gagné</button>
+                  <button className="icon-btn del" onClick={()=>setStatus(p.id,'archived')}>Archiver</button>
+                  <a className="icon-btn" href={`mailto:${p.email}?subject=Partenariat SportFM`}>E-mail →</a>
+                </div>
+              </td></tr>
+            )}
+          </React.Fragment>
+        ))}
+      </tbody></table>}
+    </div>
+  );
+}
+
+// ============================================================
+//  ADMIN SHELL
+// ============================================================
+function Admin({ session, onExit, data, reload, toast }){
+  const [tab,setTab]=useState('articles');
+  async function logout(){ await sb.auth.signOut(); onExit(); }
+  return (
+    <div className="admin">
+      <div className="admin-top"><div className="wrap">
+        <Logo onClick={()=>{}} /><span className="tag">ADMIN</span><div className="grow"></div>
+        <span style={{fontSize:13,color:'#cfd6ea'}}>{session.user.email}</span>
+        <button className="exit" onClick={onExit}>Voir le site →</button>
+        <button className="exit" onClick={logout}>Déconnexion</button>
+      </div></div>
+      <div className="admin-tabs"><div className="wrap">
+        <button className={tab==='articles'?'active':''} onClick={()=>setTab('articles')}>Articles</button>
+        <button className={tab==='scores'?'active':''} onClick={()=>setTab('scores')}>Scores &amp; Classement</button>
+        <button className={tab==='partners'?'active':''} onClick={()=>setTab('partners')}>Partenaires</button>
+      </div></div>
+      <div className="admin-body"><div className="wrap">
+        {tab==='articles' && <AdminArticles articles={data.articles} reload={reload} toast={toast} />}
+        {tab==='scores' && <AdminScores scores={data.scores} standings={data.standings} fixtures={data.fixtures} reload={reload} toast={toast} />}
+        {tab==='partners' && <AdminPartners partners={data.partners} reload={reload} toast={toast} />}
+      </div></div>
+    </div>
+  );
+}
+
+// ============================================================
+//  HELPERS
+// ============================================================
+function timeAgo(ts){
+  if(!ts) return '';
+  const d=new Date(ts), now=new Date(), s=Math.floor((now-d)/1000);
+  if(s<60) return "à l'instant";
+  const m=Math.floor(s/60); if(m<60) return 'il y a '+m+' min';
+  const h=Math.floor(m/60); if(h<24) return 'il y a '+h+' h';
+  const days=Math.floor(h/24); if(days<7) return 'il y a '+days+' j';
+  return d.toLocaleDateString('fr-FR',{day:'numeric',month:'short'});
+}
+
+// ============================================================
+//  ROOT APP
+// ============================================================
+function App(){
+  const [route,setRoute]=useState(()=> location.hash==='#admin' ? 'admin' : 'site');
+  const [nav,setNav]=useState('Home');
+  const [openArticle,setOpenArticle]=useState(null);
+  const [drawer,setDrawer]=useState(false);
+  const [loading,setLoading]=useState(true);
+  const [session,setSession]=useState(null);
+  const [authChecked,setAuthChecked]=useState(false);
+  const [toast,toastNode]=useToast();
+
+  const [data,setData]=useState({ articles:[],standings:[],scores:[],fixtures:[],partners:[] });
+
+  const loadPublic = useCallback(async ()=>{
+    const [art,st,sc,fx]=await Promise.all([
+      sb.from('articles').select('*').eq('published',true).order('created_at',{ascending:false}),
+      sb.from('standings').select('*'),
+      sb.from('scores').select('*').order('created_at',{ascending:false}),
+      sb.from('fixtures').select('*'),
+    ]);
+    setData(d=>({ ...d,
+      articles:art.data||[], standings:st.data||[], scores:sc.data||[], fixtures:fx.data||[] }));
+    setLoading(false);
+  },[]);
+
+  const loadAdmin = useCallback(async ()=>{
+    const [art,st,sc,fx,pt]=await Promise.all([
+      sb.from('articles').select('*').order('created_at',{ascending:false}),
+      sb.from('standings').select('*'),
+      sb.from('scores').select('*').order('created_at',{ascending:false}),
+      sb.from('fixtures').select('*'),
+      sb.from('partners').select('*').order('created_at',{ascending:false}),
+    ]);
+    setData({ articles:art.data||[], standings:st.data||[], scores:sc.data||[], fixtures:fx.data||[], partners:pt.data||[] });
+  },[]);
+
+  // auth bootstrap
+  useEffect(()=>{
+    sb.auth.getSession().then(({data})=>{ setSession(data.session); setAuthChecked(true); });
+    const { data:sub }=sb.auth.onAuthStateChange((_e,s)=>setSession(s));
+    return ()=>sub.subscription.unsubscribe();
+  },[]);
+
+  useEffect(()=>{ loadPublic(); },[loadPublic]);
+  useEffect(()=>{ if(route==='admin' && session) loadAdmin(); },[route,session,loadAdmin]);
+
+  // hash routing
+  useEffect(()=>{
+    const onHash=()=>setRoute(location.hash==='#admin'?'admin':'site');
+    window.addEventListener('hashchange',onHash); return ()=>window.removeEventListener('hashchange',onHash);
+  },[]);
+  const goAdmin=()=>{ location.hash='admin'; setRoute('admin'); };
+  const goSite=()=>{ location.hash=''; setRoute('site'); };
+
+  function navTo(n){ setNav(n); setOpenArticle(null); setDrawer(false); window.scrollTo({top:0,behavior:'smooth'}); }
+  function open(a){ setOpenArticle(a); window.scrollTo({top:0,behavior:'smooth'}); }
+
+  // ---------- ADMIN ROUTE ----------
+  if(route==='admin'){
+    if(!authChecked) return <div className="login-wrap"><div className="spinner" style={{borderTopColor:'#fff'}}/></div>;
+    if(!session) return <><AdminLogin onAuthed={s=>{setSession(s);loadAdmin();}} onExit={goSite} />{toastNode}</>;
+    return <><Admin session={session} onExit={goSite} data={data} reload={loadAdmin} toast={toast} />{toastNode}</>;
+  }
+
+  // ---------- PARTNER ROUTE ----------
+  const isPartner = nav==='Partner';
+
+  // ---------- PUBLIC SITE ----------
+  return (
+    <div className="app-pad">
+      <div className="util"><div className="wrap">
+        <div className="left">
+          <span className="live"><span className="dot"></span>Metro D1 · 18ᵉ journée</span>
+        </div>
+        <div className="right">
+          <span onClick={()=>navTo('Shows')}>Grille des programmes</span>
+          <span>Newsletter</span>
+          <span className="signin" onClick={goAdmin}>Admin</span>
+        </div>
+      </div></div>
+
+      <header><div className="wrap">
+        <button className="menu-btn" onClick={()=>setDrawer(true)} aria-label="Open menu"><i></i><i></i><i></i></button>
+        <Logo onClick={()=>navTo('Home')} />
+        <nav className="main">
+          {NAVS.map(n=><button key={n.key} className={(nav===n.key&&!isPartner)?'active':''} onClick={()=>navTo(n.key)}>{n.label}</button>)}
+        </nav>
+        <div className="grow"></div>
+        <label className="search">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9aa1b2" strokeWidth="2.4"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.5" y2="16.5"></line></svg>
+          <input placeholder="Rechercher" />
+        </label>
+        <button className="btn-partner" onClick={()=>navTo('Partner')}>Devenir partenaire</button>
+        <button className="listen" onClick={()=>{ document.querySelector('.play-btn')?.click(); toast('Connexion au '+STATION_FREQ); }}><span className="dot"></span>Écouter en direct</button>
+      </div></header>
+
+      {!isPartner && <Ticker scores={data.scores} />}
+
+      {loading ? <Spinner/> :
+        isPartner ? <PartnerView onBack={()=>navTo('Home')} toast={toast} /> :
+        openArticle ? <div className="wrap"><ArticleView article={openArticle} onBack={()=>setOpenArticle(null)} backLabel={navLabel(nav)} /></div> :
+        <div className="wrap">
+          {nav==='Home' && <Home articles={data.articles} standings={data.standings} fixtures={data.fixtures}
+            onOpen={open} onNav={navTo} onTrial={()=>navTo('Partner')} />}
+          {nav==='Standings' && <StandingsView standings={data.standings} />}
+          {(nav==='Football'||nav==='Basketball'||nav==='Shows') && <CategoryView cat={nav} articles={data.articles} onOpen={open} />}
+        </div>
+      }
+
+      <footer><div className="wrap">
+        <Logo onClick={()=>navTo('Home')} footer />
+        <div className="fnav">
+          <span onClick={()=>navTo('Partner')}>Devenir partenaire</span>
+          <span onClick={()=>navTo('Shows')}>Programmes</span>
+          <span>Publicité</span><span>Contact</span>
+        </div>
+        <div className="copy">© 2026 SportFM · Couverture Metro D1</div>
+      </div></footer>
+
+      <Player liveScores={data.scores} />
+
+      <div className={"drawer"+(drawer?" open":"")} onClick={e=>{if(e.target.className.includes('drawer'))setDrawer(false);}}>
+        <div className="panel-d">
+          {NAVS.map(n=><button key={n.key} onClick={()=>navTo(n.key)}>{n.label}</button>)}
+          <button onClick={()=>navTo('Partner')} style={{color:'var(--red)'}}>Devenir partenaire</button>
+        </div>
+      </div>
+
+      {toastNode}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
