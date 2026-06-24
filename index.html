@@ -51,8 +51,8 @@
   header{ background:#fff; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:40; }
   header .wrap{ display:flex; align-items:center; gap:30px; height:68px; }
   .logo{ display:flex; align-items:center; cursor:pointer; flex-shrink:0; }
-  .logo img{ display:block; height:38px; width:auto; object-fit:contain; }
-  .logo-footer img{ height:26px; }
+  .logo img{ display:block; height:52px; width:auto; object-fit:contain; }
+  .logo-footer img{ height:30px; }
   .logo-text{ font-family:'Barlow Semi Condensed',sans-serif; font-style:italic; font-weight:800;
     font-size:28px; letter-spacing:-.01em; color:var(--navy); align-items:center; line-height:1; }
   .logo-text .fm{ position:relative; padding-right:14px; }
@@ -728,19 +728,50 @@ function ArticleView({ article, onBack, backLabel }){
 // ============================================================
 //  PARTNER QUESTIONNAIRE
 // ============================================================
-const GOALS = ['Notoriété de marque','Sponsoring de match','Spots publicitaires à l\'antenne','Sponsoring d\'émission / podcast','Bannières display','Activation événementielle','Placement newsletter'];
-const BUDGETS = ['Moins de 1k€ / mois','1k€–5k€ / mois','5k€–15k€ / mois','15k€+ / mois','Campagne ponctuelle'];
-const INDUSTRIES = ['Commerce / e-commerce','Alimentaire & boissons','Automobile','Finance / assurance','Tech / SaaS','Services locaux','Paris / jeux','Autre'];
+const GOALS = ['Notoriété de marque','Spots radio à l\'antenne','Sponsoring d\'émission','Contenu digital / réseaux sociaux','Bannière site web','Publireportage / contenu de marque','Activation événementielle','Pack 360°'];
+const BUDGETS = ['Moins de 100 000 FCFA','100 000 – 300 000 FCFA','300 000 – 750 000 FCFA','750 000 – 1 500 000 FCFA','Plus de 1 500 000 FCFA','Campagne ponctuelle'];
+const INDUSTRIES = ['Commerce / e-commerce','Alimentaire & boissons','Automobile','Finance / assurance','Télécoms / Tech','Services locaux','Santé / Pharma','ONG / Institution','Autre'];
+
+// Packages avec prix (admin seulement) et description partenaire
+const PACKAGES = {
+  'Pack Test':           { price:'75 000 FCFA',         desc:'1 passage/jour en tranche ordinaire pendant 1 semaine.' },
+  'Pack Présence':       { price:'180 000 FCFA',        desc:'2 passages/jour en tranche ordinaire pendant 2 semaines.' },
+  'Pack Impact':         { price:'420 000 FCFA',        desc:'2 passages/jour + 1 top horaire/jour pendant 1 mois.' },
+  'Pack Domination':     { price:'750 000 FCFA',        desc:'3 passages/jour + 2 tops horaires/jour + 4 insertions premium.' },
+  'Sponsor Associé':     { price:'300 000 FCFA/mois',   desc:'Mention de soutien + 1 spot/jour lié à l\'émission de votre choix.' },
+  'Sponsor Officiel':    { price:'600 000 FCFA/mois',   desc:'2 spots/jour + 3–5 mentions animateur/semaine + présence sur visuels.' },
+  'Sponsor Exclusif':    { price:'1 000 000 FCFA/mois', desc:'2–3 spots/jour + visibilité digitale complète + 1 capsule vidéo/mois.' },
+  'Pack Web Visibilité': { price:'300 000 FCFA',        desc:'1 bannière accueil + 1 article sponsorisé + 1 publication Facebook.' },
+  'Découverte 360':      { price:'180 000 FCFA',        desc:'10 spots radio + 1 publication Facebook + 1 mention vidéo courte.' },
+  'Visibilité 360':      { price:'450 000 FCFA',        desc:'20 spots + 2 tops horaires + 2 publications Facebook + 2 vidéos sponsorisées.' },
+  'Impact 360':          { price:'900 000 FCFA',        desc:'30 spots + 4 passages premium + 1 publireportage + 4 publications + 2 vidéos + YouTube.' },
+  'Pack Marque Premium': { price:'450 000 FCFA',        desc:'Interview radio + publireportage + 1 vidéo courte sponsorisée.' },
+};
 
 function recommendPackage({ budget, goals }){
   const g = goals||[];
-  if(budget==='15k€+ / mois' || g.includes('Sponsoring de match') || g.includes('Activation événementielle'))
-    return { pkg:'Partenaire Matchday', why:'Sponsoring premium à l\'antenne et sur les matchs en direct, segments brandés, activation événementielle et couverture digitale complète sur chaque match de D1.' };
-  if(budget==='5k€–15k€ / mois' || g.includes('Sponsoring d\'émission / podcast') || g.includes('Spots publicitaires à l\'antenne'))
-    return { pkg:'Sponsor d\'émission', why:'Sponsoring dédié d\'une émission ou d\'un podcast, avec spots réguliers à l\'antenne et placement newsletter — une forte audience récurrente.' };
-  if(budget==='Moins de 1k€ / mois' || budget==='Campagne ponctuelle')
-    return { pkg:'Pack Découverte', why:'Un pack d\'entrée ciblé : display digital, un emplacement newsletter et une série de spots à l\'antenne pour tester l\'audience.' };
-  return { pkg:'Visibilité Digitale', why:'Bannières display et placement newsletter sur tout le site SportFM — flexible et facile à faire évoluer.' };
+  const has = (x)=>g.includes(x);
+
+  if(budget==='Plus de 1 500 000 FCFA'){
+    if(has('Sponsoring d\'émission')) return { pkg:'Sponsor Exclusif', why:'Avec votre budget, le Sponsor Exclusif vous offre la présence la plus forte à l\'antenne : 2–3 spots/jour, mentions animateur, visibilité digitale et une capsule vidéo mensuelle.' };
+    return { pkg:'Impact 360', why:'Le pack le plus complet de notre offre : 30 spots radio, passages premium, publireportage, 4 publications sociales, vidéos YouTube et TikTok — une présence totale sur toutes nos plateformes.' };
+  }
+  if(budget==='750 000 – 1 500 000 FCFA'){
+    if(has('Sponsoring d\'émission')) return { pkg:'Sponsor Officiel', why:'2 spots/jour + 3 à 5 mentions animateur par semaine + présence sur nos visuels — votre marque associée à une émission écoutée chaque semaine.' };
+    if(has('Pack 360°')) return { pkg:'Visibilité 360', why:'20 spots radio + 2 tops horaires + 2 publications Facebook + 2 vidéos sponsorisées + 1 placement de produit par émission — une présence multiplateforme cohérente.' };
+    return { pkg:'Pack Domination', why:'3 passages/jour + 2 tops horaires + 4 insertions premium — la présence radio la plus forte pour marquer l\'esprit des auditeurs.' };
+  }
+  if(budget==='300 000 – 750 000 FCFA'){
+    if(has('Contenu digital / réseaux sociaux') || has('Bannière site web')) return { pkg:'Pack Web Visibilité', why:'Bannière en page d\'accueil + article sponsorisé + publication Facebook — visibilité digitale ciblée sur notre audience web.' };
+    if(has('Publireportage / contenu de marque')) return { pkg:'Pack Marque Premium', why:'Interview radio + publireportage 5 min + vidéo courte sponsorisée — une association de contenu crédible et mémorable.' };
+    if(has('Sponsoring d\'émission')) return { pkg:'Sponsor Associé', why:'Mention de soutien + 1 spot/jour lié à l\'émission de votre choix — une présence régulière auprès d\'une audience fidèle et ciblée.' };
+    return { pkg:'Pack Impact', why:'2 passages/jour + 1 top horaire/jour pendant 1 mois — une présence soutenue qui installe votre marque dans les habitudes d\'écoute.' };
+  }
+  if(budget==='100 000 – 300 000 FCFA'){
+    if(has('Pack 360°')) return { pkg:'Découverte 360', why:'10 spots radio + 1 publication Facebook + 1 mention vidéo courte — le meilleur point d\'entrée pour tester notre audience sur plusieurs canaux.' };
+    return { pkg:'Pack Présence', why:'2 passages/jour en tranche ordinaire pendant 2 semaines — une exposition régulière pour installer votre message auprès des auditeurs.' };
+  }
+  return { pkg:'Pack Test', why:'1 passage/jour pendant 1 semaine — idéal pour découvrir notre audience et mesurer l\'impact avant un engagement plus long.' };
 }
 
 function PartnerView({ onBack, toast }){
@@ -1192,53 +1223,168 @@ function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail })
 // ============================================================
 //  ADMIN — PARTNERS
 // ============================================================
+const PARTNER_STATUSES = [
+  { key:'new',         label:'Nouveau',           cls:'new' },
+  { key:'contacted',   label:'Contacté',          cls:'contacted' },
+  { key:'in_discussion', label:'En discussion',   cls:'contacted' },
+  { key:'declined',    label:'A décliné',         cls:'draft' },
+  { key:'follow_up',   label:'Relance prévue',    cls:'pill' },
+  { key:'won',         label:'Gagné ✓',           cls:'won' },
+  { key:'archived',    label:'Archivé',           cls:'ft' },
+];
+
+function PartnerCRM({ p, onClose, toast, reload, adminEmail }){
+  const [status,setStatusL]=useState(p.status||'new');
+  const [declineReason,setDeclineReason]=useState(p.decline_reason||'');
+  const [followUp,setFollowUp]=useState(p.follow_up_date||'');
+  const [notes,setNotes]=useState(p.admin_notes||'');
+  const [saving,setSaving]=useState(false);
+
+  const pkg = PACKAGES[p.recommended] || null;
+
+  async function save(){
+    setSaving(true);
+    const patch = { status, decline_reason:declineReason||null, follow_up_date:followUp||null, admin_notes:notes||null };
+    const { error }=await sb.from('partners').update(patch).eq('id',p.id);
+    setSaving(false);
+    if(error){ toast('Erreur : '+error.message); return; }
+    await logAction(adminEmail,'CRM partenaire → '+status, p.company+(declineReason?' — '+declineReason:''));
+    toast('Mis à jour'); reload(); onClose();
+  }
+
+  return (
+    <div style={{background:'#f6f7fb',border:'1px solid var(--line)',borderRadius:12,padding:22,marginBottom:16}}>
+      {/* Header */}
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:18}}>
+        <div>
+          <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:20,color:'var(--navy)'}}>{p.company}</div>
+          <div style={{fontSize:13,color:'var(--muted)',marginTop:2}}>{p.contact_name} · {p.email} {p.phone&&'· '+p.phone}</div>
+        </div>
+        <button className="icon-btn" onClick={onClose}>✕ Fermer</button>
+      </div>
+
+      {/* Recommended pack with price (admin only) */}
+      {pkg && (
+        <div style={{background:'var(--navy)',borderRadius:10,padding:'14px 18px',marginBottom:18,display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:10}}>
+          <div>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:'.07em',color:'#7e8cb5',marginBottom:4}}>PACK RECOMMANDÉ</div>
+            <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:22,color:'#fff'}}>{p.recommended}</div>
+            <div style={{fontSize:12.5,color:'#b9c2dc',marginTop:3}}>{pkg.desc}</div>
+          </div>
+          <div style={{background:'var(--red)',borderRadius:8,padding:'8px 16px',fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:20,color:'#fff',whiteSpace:'nowrap'}}>
+            {pkg.price}
+          </div>
+        </div>
+      )}
+
+      {/* Client details */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'8px 20px',fontSize:13,marginBottom:18,background:'#fff',borderRadius:8,padding:14,border:'1px solid var(--line)'}}>
+        <div><span style={{color:'var(--muted)',fontSize:11,fontWeight:700,letterSpacing:'.04em'}}>BUDGET</span><br/><strong>{p.budget||'—'}</strong></div>
+        <div><span style={{color:'var(--muted)',fontSize:11,fontWeight:700,letterSpacing:'.04em'}}>SECTEUR</span><br/>{p.industry||'—'}</div>
+        <div><span style={{color:'var(--muted)',fontSize:11,fontWeight:700,letterSpacing:'.04em'}}>ÉCHÉANCE</span><br/>{p.timeline||'—'}</div>
+        <div style={{gridColumn:'1/-1'}}><span style={{color:'var(--muted)',fontSize:11,fontWeight:700,letterSpacing:'.04em'}}>OBJECTIFS</span><br/>{(p.goals||[]).join(' · ')||'—'}</div>
+        {p.message && <div style={{gridColumn:'1/-1'}}><span style={{color:'var(--muted)',fontSize:11,fontWeight:700,letterSpacing:'.04em'}}>MESSAGE</span><br/><em style={{color:'#5a6178'}}>{p.message}</em></div>}
+      </div>
+
+      {/* CRM controls */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginBottom:14}}>
+        <div className="field" style={{margin:0}}>
+          <label>Statut</label>
+          <select value={status} onChange={e=>setStatusL(e.target.value)} style={{width:'100%',padding:'10px 12px',border:'1px solid var(--line)',borderRadius:9,fontSize:14,outline:'none'}}>
+            {PARTNER_STATUSES.map(s=><option key={s.key} value={s.key}>{s.label}</option>)}
+          </select>
+        </div>
+        <div className="field" style={{margin:0}}>
+          <label>Date de relance</label>
+          <input type="date" value={followUp} onChange={e=>setFollowUp(e.target.value)}
+            style={{width:'100%',padding:'10px 12px',border:'1px solid var(--line)',borderRadius:9,fontSize:14,outline:'none'}} />
+        </div>
+      </div>
+
+      {status==='declined' && (
+        <div className="field">
+          <label>Raison du refus <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(à noter pour la relance)</span></label>
+          <input value={declineReason} onChange={e=>setDeclineReason(e.target.value)} placeholder="Ex : Budget insuffisant, mauvais timing, concurrent déjà partenaire…" />
+        </div>
+      )}
+
+      <div className="field">
+        <label>Notes internes <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(visibles admin uniquement)</span></label>
+        <textarea value={notes} onChange={e=>setNotes(e.target.value)} style={{minHeight:72}} placeholder="Compte-rendu d'appel, conditions négociées, prochaine étape…" />
+      </div>
+
+      <div style={{display:'flex',gap:10,alignItems:'center'}}>
+        <button className="btn-primary" disabled={saving} onClick={save}>{saving?'Enregistrement…':'Enregistrer'}</button>
+        <a className="btn-ghost" href={`mailto:${p.email}?subject=Votre demande de partenariat SportFM`} style={{display:'inline-flex',alignItems:'center',gap:6,textDecoration:'none'}}>
+          ✉ Envoyer un e-mail
+        </a>
+        {p.phone && <a className="btn-ghost" href={`tel:${p.phone}`} style={{display:'inline-flex',alignItems:'center',gap:6,textDecoration:'none'}}>📞 Appeler</a>}
+      </div>
+    </div>
+  );
+}
+
 function AdminPartners({ partners, reload, toast, adminEmail }){
   const [open,setOpen]=useState(null);
-  async function setStatus(id,status,company){
-    const { error }=await sb.from('partners').update({status}).eq('id',id);
-    if(error) toast('Échec de la mise à jour');
-    else { await logAction(adminEmail,'Statut partenaire → '+status,company); toast('Marqué : '+status); reload(); }
-  }
-  const statusLabel={ new:'nouveau', contacted:'contacté', won:'gagné', archived:'archivé' };
+  const [filter,setFilter]=useState('all');
+
+  const statusInfo=(s)=>PARTNER_STATUSES.find(x=>x.key===s)||{label:s,cls:'ft'};
+
+  const counts = PARTNER_STATUSES.reduce((acc,s)=>{
+    acc[s.key]=(partners.filter(p=>p.status===s.key)).length; return acc;
+  },{});
+  counts.all=partners.length;
+
+  const visible = filter==='all' ? partners : partners.filter(p=>p.status===filter);
+
   return (
-    <div className="panel">
-      <h3>Demandes de partenariat ({partners.length})</h3>
-      {partners.length===0 ? <div className="empty">Aucune demande pour l'instant. Elles s'afficheront ici dès qu'une entreprise remplira le formulaire partenaire.</div> :
-      <table className="admin-table"><thead><tr>
-        <th>Entreprise</th><th>Contact</th><th>Budget</th><th>Pack suggéré</th><th>Statut</th><th>Reçu</th><th></th>
-      </tr></thead><tbody>
-        {partners.map(p=>(
-          <React.Fragment key={p.id}>
-            <tr>
-              <td style={{fontWeight:600}}>{p.company}</td>
-              <td>{p.contact_name||'—'}<div style={{fontSize:12,color:'var(--muted)'}}>{p.email}</div></td>
-              <td>{p.budget||'—'}</td>
-              <td>{p.recommended||'—'}</td>
-              <td><span className={"pill "+(p.status==='new'?'new':p.status==='contacted'?'contacted':p.status==='won'?'won':'ft')}>{statusLabel[p.status]||p.status}</span></td>
-              <td style={{color:'var(--muted)'}}>{timeAgo(p.created_at)}</td>
-              <td style={{textAlign:'right',whiteSpace:'nowrap'}}><button className="icon-btn" onClick={()=>setOpen(open===p.id?null:p.id)}>{open===p.id?'Masquer':'Voir'}</button></td>
-            </tr>
-            {open===p.id && (
-              <tr><td colSpan={7} style={{background:'#fafbfc'}}>
-                <div style={{padding:'8px 4px',display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px 30px',fontSize:13.5}}>
-                  <div><strong>Secteur :</strong> {p.industry||'—'}</div>
-                  <div><strong>Téléphone :</strong> {p.phone||'—'}</div>
-                  <div><strong>Cible :</strong> {p.audience||'—'}</div>
-                  <div><strong>Échéance :</strong> {p.timeline||'—'}</div>
-                  <div style={{gridColumn:'1 / -1'}}><strong>Objectifs :</strong> {(p.goals||[]).join(', ')||'—'}</div>
-                  <div style={{gridColumn:'1 / -1'}}><strong>Message :</strong> {p.message||'—'}</div>
-                </div>
-                <div style={{display:'flex',gap:8,padding:'8px 4px'}}>
-                  <button className="icon-btn" onClick={()=>setStatus(p.id,'contacted',p.company)}>Marquer contacté</button>
-                  <button className="icon-btn" onClick={()=>setStatus(p.id,'won',p.company)}>Marquer gagné</button>
-                  <button className="icon-btn del" onClick={()=>setStatus(p.id,'archived',p.company)}>Archiver</button>
-                  <a className="icon-btn" href={`mailto:${p.email}?subject=Partenariat SportFM`}>E-mail →</a>
-                </div>
-              </td></tr>
-            )}
-          </React.Fragment>
+    <div>
+      {/* KPI bar */}
+      <div style={{display:'flex',gap:12,marginBottom:20,flexWrap:'wrap'}}>
+        {[{key:'all',label:'Tous',n:counts.all},
+          {key:'new',label:'Nouveaux',n:counts.new},
+          {key:'contacted',label:'Contactés',n:counts.contacted},
+          {key:'in_discussion',label:'En discussion',n:counts.in_discussion},
+          {key:'follow_up',label:'Relance',n:counts.follow_up},
+          {key:'won',label:'Gagnés',n:counts.won},
+          {key:'declined',label:'Déclinés',n:counts.declined},
+        ].map(k=>(
+          <button key={k.key} onClick={()=>setFilter(k.key)}
+            style={{padding:'7px 14px',borderRadius:20,fontSize:13,fontWeight:700,cursor:'pointer',border:'2px solid',
+              borderColor:filter===k.key?'var(--navy)':'var(--line)',
+              background:filter===k.key?'var(--navy)':'#fff',
+              color:filter===k.key?'#fff':'#4a5168'}}>
+            {k.label} <span style={{opacity:.7}}>({k.n})</span>
+          </button>
         ))}
-      </tbody></table>}
+      </div>
+
+      {visible.length===0 ? <div className="panel"><div className="empty">Aucune demande dans cette catégorie.</div></div> :
+      visible.map(p=>(
+        <React.Fragment key={p.id}>
+          {open===p.id
+            ? <PartnerCRM p={p} onClose={()=>setOpen(null)} toast={toast} reload={reload} adminEmail={adminEmail} />
+            : (
+              <div className="panel" style={{marginBottom:12,display:'flex',alignItems:'center',gap:16,flexWrap:'wrap'}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+                    <span style={{fontWeight:700,fontSize:15,color:'var(--navy)'}}>{p.company}</span>
+                    <span className={'pill '+statusInfo(p.status||'new').cls}>{statusInfo(p.status||'new').label}</span>
+                    {p.follow_up_date && <span style={{fontSize:11.5,color:'var(--muted)',fontWeight:600}}>🔔 Relance {new Date(p.follow_up_date).toLocaleDateString('fr-FR')}</span>}
+                  </div>
+                  <div style={{fontSize:12.5,color:'var(--muted)',marginTop:3}}>
+                    {p.contact_name&&p.contact_name+' · '}{p.budget} · Pack : <strong>{p.recommended||'—'}</strong>
+                    {PACKAGES[p.recommended]&&<span style={{color:'var(--red)',fontWeight:700}}> ({PACKAGES[p.recommended].price})</span>}
+                    {' · '}{timeAgo(p.created_at)}
+                  </div>
+                  {p.admin_notes && <div style={{fontSize:12,color:'#5a6178',marginTop:4,fontStyle:'italic'}}>📝 {p.admin_notes.slice(0,100)}{p.admin_notes.length>100?'…':''}</div>}
+                </div>
+                <button className="btn-ghost" style={{flexShrink:0}} onClick={()=>setOpen(p.id)}>Ouvrir le dossier →</button>
+              </div>
+            )
+          }
+        </React.Fragment>
+      ))}
     </div>
   );
 }
