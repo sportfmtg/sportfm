@@ -1705,6 +1705,7 @@ function AdminUsers({ adminEmail, toast }){
   const [users,setUsers]=useState([]);
   const [loading,setLoading]=useState(true);
   const [newEmail,setNewEmail]=useState('');
+  const [newName,setNewName]=useState('');
   const [newRole,setNewRole]=useState('journalist');
   const [saving,setSaving]=useState(false);
 
@@ -1717,10 +1718,11 @@ function AdminUsers({ adminEmail, toast }){
   async function addUser(){
     if(!newEmail.trim()){ toast('E-mail requis'); return; }
     setSaving(true);
-    const { error }=await sb.from('user_roles').upsert([{ email:newEmail.trim().toLowerCase(), role:newRole }],{onConflict:'email'});
+    const { error }=await sb.from('user_roles').upsert([{ email:newEmail.trim().toLowerCase(), role:newRole, name:newName.trim()||null }],{onConflict:'email'});
     setSaving(false);
     if(error){ toast('Erreur : '+error.message); return; }
     await logAction(adminEmail,'Rôle attribué — '+newRole, newEmail);
+    setNewName('');
     toast('Utilisateur enregistré'); setNewEmail(''); load();
   }
 
@@ -1750,11 +1752,12 @@ function AdminUsers({ adminEmail, toast }){
 
       {loading ? <Spinner/> :
       <table className="admin-table" style={{marginBottom:20}}><thead><tr>
-        <th>E-mail</th><th>Rôle</th><th>Depuis</th><th></th>
+        <th>Nom</th><th>E-mail</th><th>Rôle</th><th>Depuis</th><th></th>
       </tr></thead><tbody>
         {users.map(u=>(
           <tr key={u.id}>
-            <td style={{fontWeight:600}}>{u.email}{u.email===adminEmail&&<span style={{marginLeft:8,fontSize:11,color:'var(--muted)'}}>( vous )</span>}</td>
+            <td style={{fontWeight:700,color:'var(--navy)'}}>{u.name||<span style={{color:'var(--muted)',fontWeight:400,fontStyle:'italic'}}>—</span>}{u.email===adminEmail&&<span style={{marginLeft:8,fontSize:11,color:'var(--muted)',fontWeight:400,fontStyle:'normal'}}>( vous )</span>}</td>
+            <td style={{color:'#4a5168',fontSize:13}}>{u.email}</td>
             <td>
               <select value={u.role} onChange={e=>changeRole(u.id,u.email,e.target.value)}
                 disabled={u.email===adminEmail}
@@ -1775,6 +1778,12 @@ function AdminUsers({ adminEmail, toast }){
       <div style={{borderTop:'1px solid var(--line)',paddingTop:20}}>
         <h3 style={{fontSize:15,marginBottom:14}}>Ajouter un membre</h3>
         <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end'}}>
+          <div className="field" style={{margin:0,flex:1,minWidth:160}}>
+            <label>Prénom &amp; Nom</label>
+            <input value={newName} onChange={e=>setNewName(e.target.value)}
+              placeholder="Jean Dupont"
+              onKeyDown={e=>e.key==='Enter'&&addUser()} />
+          </div>
           <div className="field" style={{margin:0,flex:2,minWidth:200}}>
             <label>E-mail Supabase de l'utilisateur</label>
             <input value={newEmail} onChange={e=>setNewEmail(e.target.value)}
