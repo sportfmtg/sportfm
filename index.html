@@ -12,6 +12,7 @@
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js" crossorigin></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   :root{
     --navy:#0B245E; --navy-deep:#081A45; --red:#EF003F; --ink:#14182a;
@@ -1817,6 +1818,109 @@ function EmployeeForm({ emp, onSave, onCancel, adminEmail, toast }){
   );
 }
 
+function generatePaystubPDF(emp, stub){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'mm', format:'a4' });
+  const navy  = [13, 27, 77];
+  const red   = [239, 0, 63];
+  const gray  = [100, 100, 110];
+  const light = [245, 246, 250];
+  const W = 210, M = 18;
+
+  // Header background
+  doc.setFillColor(...navy);
+  doc.rect(0, 0, W, 40, 'F');
+
+  // Company name
+  doc.setTextColor(255,255,255);
+  doc.setFontSize(22); doc.setFont('helvetica','bold');
+  doc.text('SportFM', M, 16);
+  doc.setFontSize(10); doc.setFont('helvetica','normal');
+  doc.text('91.9 FM — Radio & Multimédia', M, 23);
+
+  // Title right side
+  doc.setFontSize(13); doc.setFont('helvetica','bold');
+  doc.text('FICHE DE PAIE', W - M, 16, {align:'right'});
+  doc.setFontSize(10); doc.setFont('helvetica','normal');
+  doc.text(`${stub.period_month} ${stub.period_year}`, W - M, 23, {align:'right'});
+
+  // Red accent bar
+  doc.setFillColor(...red);
+  doc.rect(0, 40, W, 2, 'F');
+
+  // Employee info box
+  let y = 52;
+  doc.setFillColor(...light);
+  doc.roundedRect(M, y, W - M*2, 28, 3, 3, 'F');
+  doc.setTextColor(...navy); doc.setFontSize(9); doc.setFont('helvetica','bold');
+  doc.text('EMPLOYÉ', M+6, y+8);
+  doc.setTextColor(30,30,30); doc.setFontSize(13); doc.setFont('helvetica','bold');
+  doc.text(emp.name || emp.email, M+6, y+16);
+  doc.setFontSize(9); doc.setFont('helvetica','normal'); doc.setTextColor(...gray);
+  const empMeta = [emp.position, emp.department].filter(Boolean).join(' — ');
+  if(empMeta) doc.text(empMeta, M+6, y+22);
+  doc.text(emp.email, M+6, y+27);
+
+  // Ref right
+  doc.setTextColor(...navy); doc.setFontSize(8); doc.setFont('helvetica','bold');
+  doc.text(`Période : ${stub.period_month} ${stub.period_year}`, W-M-6, y+16, {align:'right'});
+  doc.setFont('helvetica','normal'); doc.setTextColor(...gray); doc.setFontSize(8);
+  if(stub.reference) doc.text(`Réf : ${stub.reference}`, W-M-6, y+22, {align:'right'});
+
+  // Salary table
+  y += 36;
+  doc.setFillColor(...navy);
+  doc.rect(M, y, W-M*2, 9, 'F');
+  doc.setTextColor(255,255,255); doc.setFontSize(9); doc.setFont('helvetica','bold');
+  doc.text('DÉSIGNATION', M+5, y+6);
+  doc.text('MONTANT (FCFA)', W-M-5, y+6, {align:'right'});
+
+  const rows = [];
+  if(stub.gross) rows.push(['Salaire brut', Number(stub.gross).toLocaleString('fr-FR')]);
+  if(stub.cotisations) rows.push(['Cotisations sociales', '-'+Number(stub.cotisations).toLocaleString('fr-FR')]);
+  if(stub.impot) rows.push(['Impôt sur revenu', '-'+Number(stub.impot).toLocaleString('fr-FR')]);
+  if(stub.prime) rows.push(['Prime / Bonus', '+'+Number(stub.prime).toLocaleString('fr-FR')]);
+  if(stub.deduction) rows.push(['Déduction', '-'+Number(stub.deduction).toLocaleString('fr-FR')]);
+  if(rows.length===0 && stub.net) rows.push(['Rémunération', Number(stub.net).toLocaleString('fr-FR')]);
+
+  rows.forEach((row, i) => {
+    y += 9;
+    doc.setFillColor(i%2===0?255:248,i%2===0?255:249,i%2===0?255:252);
+    doc.rect(M, y, W-M*2, 9, 'F');
+    doc.setTextColor(30,30,30); doc.setFontSize(9); doc.setFont('helvetica','normal');
+    doc.text(row[0], M+5, y+6);
+    doc.text(row[1], W-M-5, y+6, {align:'right'});
+  });
+
+  // Net pay box
+  y += 14;
+  doc.setFillColor(...red);
+  doc.roundedRect(M, y, W-M*2, 16, 3, 3, 'F');
+  doc.setTextColor(255,255,255); doc.setFontSize(11); doc.setFont('helvetica','bold');
+  doc.text('NET À PAYER', M+6, y+10);
+  const netAmt = stub.net ? Number(stub.net).toLocaleString('fr-FR')+' FCFA' : '—';
+  doc.setFontSize(14);
+  doc.text(netAmt, W-M-6, y+10, {align:'right'});
+
+  // Note
+  if(stub.note){
+    y += 22;
+    doc.setTextColor(...gray); doc.setFontSize(8.5); doc.setFont('helvetica','italic');
+    doc.text('Note : '+stub.note, M, y);
+  }
+
+  // Footer
+  doc.setFillColor(...light);
+  doc.rect(0, 275, W, 22, 'F');
+  doc.setTextColor(...gray); doc.setFontSize(7.5); doc.setFont('helvetica','normal');
+  doc.text('Ce document est une fiche de paie officielle de SportFM. Confidentiel — ne pas diffuser.', W/2, 282, {align:'center'});
+  doc.text(`Généré le ${new Date().toLocaleDateString('fr-FR')}`, W/2, 288, {align:'center'});
+
+  const filename = `fiche-paie_${(emp.name||'employe').replace(/\s+/g,'-')}_${stub.period_month}-${stub.period_year}.pdf`;
+  doc.save(filename);
+  return filename;
+}
+
 function sendPaystubEmail(emp, stub){
   const subject = encodeURIComponent(`Votre fiche de paie — ${stub.period_month} ${stub.period_year} | SportFM`);
   const body = encodeURIComponent(
@@ -2007,6 +2111,12 @@ function AdminFinance({ adminEmail, userRole, toast }){
                             : <span style={{fontSize:11.5,fontWeight:700,color:'#9a6a00',background:'#fff4e0',borderRadius:20,padding:'3px 10px'}}>En attente</span>}
                         </td>
                         <td style={{textAlign:'right',paddingRight:16,whiteSpace:'nowrap'}}>
+                          {emp && (
+                            <button className="icon-btn" style={{color:'#2a5bd0',fontWeight:700}}
+                              onClick={()=>{ generatePaystubPDF(emp,s); toast('PDF téléchargé — '+emp.name); }}>
+                              📄 PDF
+                            </button>
+                          )}
                           {s.file_url && emp?.email && (
                             <button className="icon-btn" style={{color:'#1f7a48',fontWeight:700}} disabled={sending===s.id}
                               onClick={async()=>{
