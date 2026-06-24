@@ -1699,6 +1699,343 @@ function AdminPartners({ partners, reload, toast, adminEmail }){
 }
 
 // ============================================================
+//  FINANCE — PAYSTUBS
+// ============================================================
+const PAY_PERIODS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+const CURRENT_YEAR = new Date().getFullYear();
+
+function PaystubForm({ stub, employees, onSave, onCancel, adminEmail, toast }){
+  const [form,setForm]=useState(stub || { employee_id:'', period_month:'', period_year:String(CURRENT_YEAR), gross:'', net:'', note:'' });
+  const [file,setFile]=useState(null);
+  const [busy,setBusy]=useState(false);
+  const set=(k,v)=>setForm(p=>({...p,[k]:v}));
+
+  async function save(){
+    if(!form.employee_id){ toast('Sélectionnez un employé'); return; }
+    if(!form.period_month){ toast('Sélectionnez le mois'); return; }
+    if(!stub && !file){ toast('Fichier PDF requis pour une nouvelle fiche'); return; }
+    setBusy(true);
+
+    let file_url = stub?.file_url || null;
+    if(file){
+      const ext = file.name.split('.').pop();
+      const path = `paystubs/${Date.now()}_${form.employee_id}.${ext}`;
+      const { error: upErr } = await sb.storage.from('paystubs').upload(path, file, { upsert:true });
+      if(upErr){ toast('Erreur upload : '+upErr.message); setBusy(false); return; }
+      const { data: urlData } = sb.storage.from('paystubs').getPublicUrl(path);
+      file_url = urlData.publicUrl;
+    }
+
+    const payload = { employee_id:form.employee_id, period_month:form.period_month, period_year:Number(form.period_year),
+      gross:form.gross||null, net:form.net||null, note:form.note||null, file_url, updated_at:new Date().toISOString() };
+    let res;
+    if(stub?.id){ res = await sb.from('paystubs').update(payload).eq('id',stub.id); }
+    else { res = await sb.from('paystubs').insert([{...payload, created_by:adminEmail}]); }
+    setBusy(false);
+    if(res.error){ toast('Erreur : '+res.error.message); return; }
+    const emp = employees.find(e=>e.id===form.employee_id);
+    await logAction(adminEmail, stub?'Fiche modifiée':'Fiche créée', `${emp?.name||emp?.email} — ${form.period_month} ${form.period_year}`);
+    toast(stub?'Mis à jour':'Fiche créée'); onSave();
+  }
+
+  return (
+    <div className="panel">
+      <h3 style={{marginBottom:20}}>{stub?'Modifier la fiche de paie':'Nouvelle fiche de paie'}</h3>
+
+      <div className="field"><label>Employé *</label>
+        <select value={form.employee_id} onChange={e=>set('employee_id',e.target.value)}>
+          <option value="">— Sélectionner —</option>
+          {employees.map(e=><option key={e.id} value={e.id}>{e.name||e.email} {e.name?`(${e.email})`:''}</option>)}
+        </select></div>
+
+      <div className="grid2">
+        <div className="field"><label>Mois *</label>
+          <select value={form.period_month} onChange={e=>set('period_month',e.target.value)}>
+            <option value="">— Mois —</option>
+            {PAY_PERIODS.map(m=><option key={m}>{m}</option>)}
+          </select></div>
+        <div className="field"><label>Année *</label>
+          <input type="number" value={form.period_year} onChange={e=>set('period_year',e.target.value)} min="2020" max="2099" /></div>
+      </div>
+
+      <div className="grid2">
+        <div className="field"><label>Salaire brut (FCFA) <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label>
+          <input value={form.gross||''} onChange={e=>set('gross',e.target.value)} placeholder="Ex : 350 000" /></div>
+        <div className="field"><label>Salaire net (FCFA) <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label>
+          <input value={form.net||''} onChange={e=>set('net',e.target.value)} placeholder="Ex : 280 000" /></div>
+      </div>
+
+      <div className="field"><label>Fiche de paie (PDF) {stub&&<span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>— laisser vide pour garder l'existant</span>}</label>
+        <input type="file" accept=".pdf,application/pdf" onChange={e=>setFile(e.target.files[0]||null)}
+          style={{padding:'9px 0',fontSize:13.5}} />
+        {stub?.file_url && !file && <div style={{marginTop:6,fontSize:12.5}}><a href={stub.file_url} target="_blank" style={{color:'var(--navy)'}}>📄 Voir la fiche actuelle</a></div>}
+      </div>
+
+      <div className="field"><label>Note interne <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label>
+        <input value={form.note||''} onChange={e=>set('note',e.target.value)} placeholder="Prime, ajustement, congés…" /></div>
+
+      <div style={{display:'flex',gap:10,marginTop:4}}>
+        <button className="btn-primary" disabled={busy} onClick={save}>{busy?'…':(stub?'Enregistrer':'Créer')}</button>
+        <button className="btn-ghost" onClick={onCancel}>Annuler</button>
+      </div>
+    </div>
+  );
+}
+
+function EmployeeForm({ emp, onSave, onCancel, adminEmail, toast }){
+  const [form,setForm]=useState(emp||{name:'',email:'',department:'',position:'',phone:''});
+  const [busy,setBusy]=useState(false);
+  const set=(k,v)=>setForm(p=>({...p,[k]:v}));
+  async function save(){
+    if(!form.name.trim()||!form.email.trim()){ toast('Nom et e-mail requis'); return; }
+    setBusy(true);
+    let res;
+    if(emp?.id){ res=await sb.from('employees').update({...form,updated_at:new Date().toISOString()}).eq('id',emp.id); }
+    else { res=await sb.from('employees').insert([form]); }
+    setBusy(false);
+    if(res.error){ toast('Erreur : '+res.error.message); return; }
+    await logAction(adminEmail, emp?'Employé modifié':'Employé ajouté', form.name);
+    toast(emp?'Mis à jour':'Employé ajouté'); onSave();
+  }
+  return (
+    <div className="panel">
+      <h3 style={{marginBottom:20}}>{emp?'Modifier l\'employé':'Ajouter un employé'}</h3>
+      <div className="grid2">
+        <div className="field"><label>Nom complet *</label><input value={form.name} onChange={e=>set('name',e.target.value)} placeholder="Jean Dupont" /></div>
+        <div className="field"><label>E-mail *</label><input type="email" value={form.email} onChange={e=>set('email',e.target.value)} placeholder="jean@sportfm.com" /></div>
+      </div>
+      <div className="grid2">
+        <div className="field"><label>Département</label><input value={form.department||''} onChange={e=>set('department',e.target.value)} placeholder="Rédaction, Finance, Direction…" /></div>
+        <div className="field"><label>Poste</label><input value={form.position||''} onChange={e=>set('position',e.target.value)} placeholder="Journaliste web, Comptable…" /></div>
+      </div>
+      <div className="field"><label>Téléphone <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label><input value={form.phone||''} onChange={e=>set('phone',e.target.value)} placeholder="+228 90 00 00 00" /></div>
+      <div style={{display:'flex',gap:10,marginTop:4}}>
+        <button className="btn-primary" disabled={busy} onClick={save}>{busy?'…':(emp?'Enregistrer':'Ajouter')}</button>
+        <button className="btn-ghost" onClick={onCancel}>Annuler</button>
+      </div>
+    </div>
+  );
+}
+
+function sendPaystubEmail(emp, stub){
+  const subject = encodeURIComponent(`Votre fiche de paie — ${stub.period_month} ${stub.period_year} | SportFM`);
+  const body = encodeURIComponent(
+`Bonjour ${emp.name||emp.email},
+
+Veuillez trouver ci-dessous le lien vers votre fiche de paie pour le mois de ${stub.period_month} ${stub.period_year}.
+
+📄 Télécharger votre fiche de paie :
+${stub.file_url}
+
+${stub.gross?`Salaire brut : ${stub.gross} FCFA\n`:''}${stub.net?`Salaire net  : ${stub.net} FCFA\n`:''}${stub.note?`Note : ${stub.note}\n`:''}
+Ce document est strictement confidentiel.
+
+Cordialement,
+La Direction — SportFM 91.9 FM`
+  );
+  window.open(`mailto:${emp.email}?subject=${subject}&body=${body}`);
+}
+
+function AdminFinance({ adminEmail, userRole, toast }){
+  const [tab,setTab]=useState('stubs'); // 'stubs' | 'employees'
+  const [employees,setEmployees]=useState([]);
+  const [stubs,setStubs]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [editingEmp,setEditingEmp]=useState(null);   // null=list, {}=new, obj=edit
+  const [editingStub,setEditingStub]=useState(null);
+  const [filterEmp,setFilterEmp]=useState('all');
+  const [filterYear,setFilterYear]=useState(String(CURRENT_YEAR));
+  const [sending,setSending]=useState(null);
+
+  async function load(){
+    const [eRes,sRes]=await Promise.all([
+      sb.from('employees').select('*').order('name'),
+      sb.from('paystubs').select('*').order('period_year',{ascending:false}).order('created_at',{ascending:false}),
+    ]);
+    setEmployees(eRes.data||[]); setStubs(sRes.data||[]); setLoading(false);
+  }
+  useEffect(()=>{ load(); },[]);
+
+  async function deleteStub(id,label){
+    if(!confirm('Supprimer cette fiche de paie ?')) return;
+    await sb.from('paystubs').delete().eq('id',id);
+    await logAction(adminEmail,'Fiche supprimée',label); toast('Supprimé'); load();
+  }
+  async function deleteEmp(id,name){
+    if(!confirm(`Supprimer ${name} ? Ses fiches de paie seront également supprimées.`)) return;
+    await sb.from('paystubs').delete().eq('employee_id',id);
+    await sb.from('employees').delete().eq('id',id);
+    await logAction(adminEmail,'Employé supprimé',name); toast('Supprimé'); load();
+  }
+
+  const visibleStubs = stubs.filter(s=>
+    (filterEmp==='all'||s.employee_id===filterEmp) &&
+    (!filterYear||String(s.period_year)===filterYear)
+  );
+  const empMap = Object.fromEntries(employees.map(e=>[e.id,e]));
+  const years = [...new Set(stubs.map(s=>s.period_year))].sort((a,b)=>b-a);
+  if(years.length===0) years.push(CURRENT_YEAR);
+
+  if(editingStub!==null) return <PaystubForm stub={editingStub.id?editingStub:null} employees={employees}
+    onSave={()=>{setEditingStub(null);load();}} onCancel={()=>setEditingStub(null)}
+    adminEmail={adminEmail} toast={toast} />;
+  if(editingEmp!==null) return <EmployeeForm emp={editingEmp.id?editingEmp:null}
+    onSave={()=>{setEditingEmp(null);load();}} onCancel={()=>setEditingEmp(null)}
+    adminEmail={adminEmail} toast={toast} />;
+
+  // KPI
+  const sentCount = stubs.filter(s=>s.sent_at).length;
+
+  return (
+    <div>
+      {/* KPI */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:12,marginBottom:22}}>
+        {[
+          {label:'Employés',n:employees.length,color:'var(--navy)',bg:'#fff'},
+          {label:'Fiches créées',n:stubs.length,color:'#2a5bd0',bg:'#e7eefc'},
+          {label:'Envoyées',n:sentCount,color:'#1f7a48',bg:'#e3f6ea'},
+          {label:'En attente',n:stubs.length-sentCount,color:'#9a6a00',bg:'#fff4e0'},
+        ].map((k,i)=>(
+          <div key={i} style={{background:k.bg,border:'1px solid var(--line)',borderRadius:10,padding:'12px 16px'}}>
+            <div style={{fontSize:11,fontWeight:700,letterSpacing:'.05em',color:k.color,opacity:.8}}>{k.label.toUpperCase()}</div>
+            <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:26,color:k.color,marginTop:2}}>{k.n}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Sub-tabs */}
+      <div style={{display:'flex',gap:8,marginBottom:20,borderBottom:'1px solid var(--line)',paddingBottom:0}}>
+        {[{k:'stubs',l:'📄 Fiches de paie'},{k:'employees',l:'👥 Employés'}].map(t=>(
+          <button key={t.k} onClick={()=>setTab(t.k)}
+            style={{padding:'10px 18px',border:'none',borderBottom:tab===t.k?'2px solid var(--navy)':'2px solid transparent',
+              background:'none',fontWeight:700,fontSize:14,color:tab===t.k?'var(--navy)':'var(--muted)',cursor:'pointer',marginBottom:'-1px'}}>
+            {t.l}
+          </button>
+        ))}
+      </div>
+
+      {loading ? <Spinner/> : tab==='employees' ? (
+        /* ---- EMPLOYEES LIST ---- */
+        <div>
+          <div style={{display:'flex',justifyContent:'flex-end',marginBottom:14}}>
+            <button className="btn-primary" onClick={()=>setEditingEmp({})}>+ Ajouter un employé</button>
+          </div>
+          {employees.length===0 ? <div className="panel"><div className="empty">Aucun employé. Ajoutez des membres de l'équipe.</div></div> : (
+            <div className="panel" style={{padding:0,overflow:'hidden'}}>
+              <table className="admin-table" style={{tableLayout:'fixed',width:'100%'}}>
+                <thead><tr>
+                  <th style={{paddingLeft:16}}>Nom</th>
+                  <th>E-mail</th>
+                  <th>Département</th>
+                  <th>Poste</th>
+                  <th style={{textAlign:'right',paddingRight:16}}>Fiches</th>
+                  <th style={{width:120,textAlign:'right',paddingRight:16}}></th>
+                </tr></thead>
+                <tbody>
+                  {employees.map(e=>{
+                    const empStubs=stubs.filter(s=>s.employee_id===e.id);
+                    return (
+                      <tr key={e.id}>
+                        <td style={{paddingLeft:16,fontWeight:700,color:'var(--navy)'}}>{e.name}</td>
+                        <td style={{fontSize:13,color:'#4a5168'}}>{e.email}</td>
+                        <td style={{fontSize:13}}>{e.department||'—'}</td>
+                        <td style={{fontSize:13}}>{e.position||'—'}</td>
+                        <td style={{textAlign:'right',paddingRight:16}}>
+                          <span style={{fontSize:13,fontWeight:700,color:'#2a5bd0',background:'#e7eefc',borderRadius:20,padding:'2px 10px'}}>{empStubs.length}</span>
+                        </td>
+                        <td style={{textAlign:'right',paddingRight:16,whiteSpace:'nowrap'}}>
+                          <button className="icon-btn" onClick={()=>setEditingEmp(e)}>Modifier</button>
+                          <button className="icon-btn del" onClick={()=>deleteEmp(e.id,e.name)}>✕</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ) : (
+        /* ---- PAYSTUBS LIST ---- */
+        <div>
+          <div style={{display:'flex',gap:10,marginBottom:16,flexWrap:'wrap',alignItems:'center'}}>
+            <button className="btn-primary" onClick={()=>setEditingStub({})}>+ Nouvelle fiche</button>
+            <select value={filterEmp} onChange={e=>setFilterEmp(e.target.value)}
+              style={{padding:'9px 12px',border:'1px solid var(--line)',borderRadius:9,fontSize:13.5,background:'#fff',outline:'none'}}>
+              <option value="all">Tous les employés</option>
+              {employees.map(e=><option key={e.id} value={e.id}>{e.name||e.email}</option>)}
+            </select>
+            <select value={filterYear} onChange={e=>setFilterYear(e.target.value)}
+              style={{padding:'9px 12px',border:'1px solid var(--line)',borderRadius:9,fontSize:13.5,background:'#fff',outline:'none'}}>
+              {years.map(y=><option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+
+          {visibleStubs.length===0 ? <div className="panel"><div className="empty">Aucune fiche de paie pour ce filtre.</div></div> : (
+            <div className="panel" style={{padding:0,overflow:'hidden'}}>
+              <table className="admin-table" style={{tableLayout:'fixed',width:'100%'}}>
+                <thead><tr>
+                  <th style={{paddingLeft:16,width:'22%'}}>Employé</th>
+                  <th style={{width:'14%'}}>Période</th>
+                  <th style={{width:'14%'}}>Brut</th>
+                  <th style={{width:'14%'}}>Net</th>
+                  <th style={{width:'10%'}}>Fichier</th>
+                  <th style={{width:'12%'}}>Statut</th>
+                  <th style={{width:'14%',textAlign:'right',paddingRight:16}}></th>
+                </tr></thead>
+                <tbody>
+                  {visibleStubs.map(s=>{
+                    const emp=empMap[s.employee_id];
+                    const label=`${emp?.name||'?'} — ${s.period_month} ${s.period_year}`;
+                    return (
+                      <tr key={s.id}>
+                        <td style={{paddingLeft:16}}>
+                          <div style={{fontWeight:700,color:'var(--navy)',fontSize:13.5}}>{emp?.name||'—'}</div>
+                          <div style={{fontSize:11.5,color:'var(--muted)'}}>{emp?.position||emp?.department||''}</div>
+                        </td>
+                        <td style={{fontWeight:600,fontSize:13}}>{s.period_month} {s.period_year}</td>
+                        <td style={{fontSize:13,color:'#4a5168'}}>{s.gross||'—'}</td>
+                        <td style={{fontSize:13,color:'#4a5168'}}>{s.net||'—'}</td>
+                        <td>
+                          {s.file_url
+                            ? <a href={s.file_url} target="_blank" style={{fontSize:22,textDecoration:'none'}} title="Voir le PDF">📄</a>
+                            : <span style={{color:'var(--muted)',fontSize:12}}>—</span>}
+                        </td>
+                        <td>
+                          {s.sent_at
+                            ? <span style={{fontSize:11.5,fontWeight:700,color:'#1f7a48',background:'#e3f6ea',borderRadius:20,padding:'3px 10px'}}>Envoyée ✓</span>
+                            : <span style={{fontSize:11.5,fontWeight:700,color:'#9a6a00',background:'#fff4e0',borderRadius:20,padding:'3px 10px'}}>En attente</span>}
+                        </td>
+                        <td style={{textAlign:'right',paddingRight:16,whiteSpace:'nowrap'}}>
+                          {s.file_url && emp?.email && (
+                            <button className="icon-btn" style={{color:'#1f7a48',fontWeight:700}} disabled={sending===s.id}
+                              onClick={async()=>{
+                                setSending(s.id);
+                                sendPaystubEmail(emp,s);
+                                await sb.from('paystubs').update({sent_at:new Date().toISOString()}).eq('id',s.id);
+                                await logAction(adminEmail,'Fiche envoyée',label);
+                                toast('E-mail ouvert pour '+emp.name); load(); setSending(null);
+                              }}>
+                              {sending===s.id?'…':'✉ Envoyer'}
+                            </button>
+                          )}
+                          <button className="icon-btn" onClick={()=>setEditingStub(s)}>Modifier</button>
+                          <button className="icon-btn del" onClick={()=>deleteStub(s.id,label)}>✕</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
 //  ADMIN SHELL
 // ============================================================
 function AdminUsers({ adminEmail, toast }){
@@ -1739,15 +2076,16 @@ function AdminUsers({ adminEmail, toast }){
     toast('Retiré'); load();
   }
 
-  const roleLabel={ admin:'Administrateur', journalist:'Journaliste web' };
-  const rolePill={ admin:'pub', journalist:'contacted' };
+  const roleLabel={ admin:'Administrateur', journalist:'Journaliste web', finance:'Finance' };
+  const rolePill={ admin:'pub', journalist:'contacted', finance:'won' };
 
   return (
     <div className="panel">
       <h3>Équipe &amp; rôles</h3>
       <div style={{background:'rgba(239,0,63,.05)',border:'1px solid rgba(239,0,63,.2)',borderRadius:10,padding:'12px 16px',marginBottom:20,fontSize:13.5,color:'#5a6178',lineHeight:1.5}}>
         <strong style={{color:'var(--navy)'}}>Administrateur</strong> — accès complet (articles, scores, partenaires, publicités, journal, équipe).<br/>
-        <strong style={{color:'var(--navy)'}}>Journaliste web</strong> — accès limité : articles et scores uniquement. Partenaires et publicités masqués.
+        <strong style={{color:'var(--navy)'}}>Journaliste web</strong> — accès limité : articles, scores et contenu. Partenaires et publicités masqués.<br/>
+        <strong style={{color:'var(--navy)'}}>Finance</strong> — accès exclusif à la gestion des fiches de paie et des employés.
       </div>
 
       {loading ? <Spinner/> :
@@ -1764,6 +2102,7 @@ function AdminUsers({ adminEmail, toast }){
                 style={{padding:'5px 10px',border:'1px solid var(--line)',borderRadius:7,fontSize:13,background:'#fff',cursor:'pointer'}}>
                 <option value="admin">Administrateur</option>
                 <option value="journalist">Journaliste web</option>
+                <option value="finance">Finance</option>
               </select>
             </td>
             <td style={{color:'var(--muted)',fontSize:12.5}}>{timeAgo(u.created_at)}</td>
@@ -1795,6 +2134,7 @@ function AdminUsers({ adminEmail, toast }){
             <select value={newRole} onChange={e=>setNewRole(e.target.value)}
               style={{width:'100%',padding:'11px 13px',border:'1px solid var(--line)',borderRadius:9,fontSize:14,outline:'none'}}>
               <option value="journalist">Journaliste web</option>
+              <option value="finance">Finance</option>
               <option value="admin">Administrateur</option>
             </select>
           </div>
@@ -1809,15 +2149,19 @@ function AdminUsers({ adminEmail, toast }){
 }
 
 function Admin({ session, onExit, data, reload, toast, userRole }){
-  const isAdmin = userRole==='admin';
-  const [tab,setTab]=useState('articles');
+  const isAdmin   = userRole==='admin';
+  const isFinance = userRole==='finance';
+  const [tab,setTab]=useState(isFinance?'finance':'articles');
   const adminEmail = session.user.email;
   async function logout(){ await sb.auth.signOut(); onExit(); }
 
-  // If journalist somehow lands on a restricted tab, redirect
+  const ROLE_LABELS = { admin:'ADMINISTRATEUR', journalist:'JOURNALISTE', finance:'FINANCE' };
+
+  // Redirect to allowed tab if landing on a restricted one
   useEffect(()=>{
-    if(!isAdmin && (tab==='partners'||tab==='ads'||tab==='users'||tab==='logs')) setTab('articles');
-  },[isAdmin,tab]);
+    if(isFinance && tab!=='finance') setTab('finance');
+    if(!isAdmin && !isFinance && (tab==='partners'||tab==='ads'||tab==='users'||tab==='logs'||tab==='finance')) setTab('articles');
+  },[isAdmin,isFinance,tab]);
 
   return (
     <div className="admin">
@@ -1825,19 +2169,20 @@ function Admin({ session, onExit, data, reload, toast, userRole }){
         <Logo onClick={()=>{}} /><span className="tag">ADMIN</span><div className="grow"></div>
         <span style={{fontSize:13,color:'#cfd6ea'}}>{adminEmail}</span>
         <span style={{fontSize:11,background:'rgba(255,255,255,.12)',color:'#cfd6ea',padding:'3px 8px',borderRadius:5,fontWeight:700,letterSpacing:'.04em'}}>
-          {isAdmin?'ADMINISTRATEUR':'JOURNALISTE'}
+          {ROLE_LABELS[userRole]||'JOURNALISTE'}
         </span>
         <button className="exit" onClick={onExit}>Voir le site →</button>
         <button className="exit" onClick={logout}>Déconnexion</button>
       </div></div>
       <div className="admin-tabs"><div className="wrap">
-        <button className={tab==='articles'?'active':''} onClick={()=>setTab('articles')}>Articles</button>
-        <button className={tab==='scores'?'active':''} onClick={()=>setTab('scores')}>Scores &amp; Classement</button>
+        {!isFinance && <button className={tab==='articles'?'active':''} onClick={()=>setTab('articles')}>Articles</button>}
+        {!isFinance && <button className={tab==='scores'?'active':''} onClick={()=>setTab('scores')}>Scores &amp; Classement</button>}
         {isAdmin && <button className={tab==='partners'?'active':''} onClick={()=>setTab('partners')}>Partenaires</button>}
         {isAdmin && <button className={tab==='ads'?'active':''} onClick={()=>setTab('ads')}>Publicités</button>}
         {isAdmin && <button className={tab==='users'?'active':''} onClick={()=>setTab('users')}>Équipe</button>}
         {isAdmin && <button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}>Journal</button>}
-        <button className={tab==='content'?'active':''} onClick={()=>setTab('content')}>📋 Contenu</button>
+        {!isFinance && <button className={tab==='content'?'active':''} onClick={()=>setTab('content')}>📋 Contenu</button>}
+        {(isAdmin||isFinance) && <button className={tab==='finance'?'active':''} onClick={()=>setTab('finance')}>💰 Finance</button>}
       </div></div>
       <div className="admin-body"><div className="wrap">
         {tab==='articles' && <AdminArticles articles={data.articles} reload={reload} toast={toast} adminEmail={adminEmail} />}
@@ -1847,6 +2192,7 @@ function Admin({ session, onExit, data, reload, toast, userRole }){
         {tab==='users' && isAdmin && <AdminUsers adminEmail={adminEmail} toast={toast} />}
         {tab==='logs' && isAdmin && <AdminLogs />}
         {tab==='content' && <AdminContent adminEmail={adminEmail} userRole={userRole} toast={toast} />}
+        {tab==='finance' && (isAdmin||isFinance) && <AdminFinance adminEmail={adminEmail} userRole={userRole} toast={toast} />}
       </div></div>
     </div>
   );
