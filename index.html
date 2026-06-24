@@ -602,8 +602,43 @@ function Home({ articles, standings, fixtures, onOpen, onNav, onTrial, ads }){
   );
 }
 
-function CategoryView({ cat, articles, onOpen }){
+function CategoryView({ cat, articles, onOpen, shows }){
   if(cat==='Shows'){
+    // If DB shows loaded, group them by their `group_title` field
+    if(shows && shows.length>0){
+      const groups={};
+      shows.forEach(s=>{
+        const g=s.group_title||'Émissions';
+        if(!groups[g]) groups[g]=[];
+        groups[g].push(s);
+      });
+      return (
+        <div style={{maxWidth:960,paddingTop:26,paddingBottom:60}}>
+          {Object.entries(groups).map(([title,items],gi)=>(
+            <div key={gi}>
+              <div className="sechead" style={{marginTop:gi===0?0:36}}>
+                <h2 style={{fontSize:17}}>{title}</h2><div className="line"></div>
+              </div>
+              <div className="grid3">
+                {items.map((s,i)=>(
+                  <div className="gcard" key={i}>
+                    <div style={{aspectRatio:'16/10',borderRadius:9,overflow:'hidden',background:'repeating-linear-gradient(135deg,#e9ebf2,#e9ebf2 11px,#e3e6ef 11px,#e3e6ef 22px)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                      {s.image_url
+                        ? <img src={s.image_url} alt={s.name} style={{width:'100%',height:'100%',objectFit:'cover'}} />
+                        : <span style={{fontSize:11,color:'#9aa1b6',fontFamily:'ui-monospace,monospace'}}>[ photo ]</span>}
+                    </div>
+                    <div className="eyebrow" style={{marginTop:10}}>{s.tag}</div>
+                    <h4 style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:700,fontSize:17,lineHeight:1.15,letterSpacing:'-.005em',margin:0,color:'var(--navy)'}}>{s.name}</h4>
+                    <div className="meta" style={{fontSize:12,color:'var(--muted-2)',marginTop:5}}>{s.schedule}</div>
+                    <div style={{fontSize:12.5,color:'#5a6178',marginTop:5,lineHeight:1.4}}>{s.description}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
     const showGroups = [
       { title:'Émissions sportives de référence', items:[
         { name:'Happy Day', sub:'MATINALE', meta:'Lun–Ven 06h–08h · Jules Gamligo', desc:'Matinale sportive qui accompagne les auditeurs au début de la journée.' },
@@ -1706,15 +1741,21 @@ const PAY_PERIODS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet',
 const CURRENT_YEAR = new Date().getFullYear();
 
 function PaystubForm({ stub, employees, onSave, onCancel, adminEmail, toast }){
-  const [form,setForm]=useState(stub || { employee_id:'', period_month:'', period_year:String(CURRENT_YEAR), gross:'', net:'', note:'' });
+  const [form,setForm]=useState(stub || { employee_id:'', period_month:'', period_year:String(CURRENT_YEAR), gross:'', cotisations:'', impot:'', prime:'', deduction:'', net:'', note:'' });
   const [file,setFile]=useState(null);
   const [busy,setBusy]=useState(false);
   const set=(k,v)=>setForm(p=>({...p,[k]:v}));
 
+  // Auto-compute net when gross/deductions change
+  const computedNet = ()=>{
+    const g=Number(form.gross)||0, c=Number(form.cotisations)||0,
+      i=Number(form.impot)||0, d=Number(form.deduction)||0, pr=Number(form.prime)||0;
+    return g>0 ? String(g - c - i - d + pr) : form.net;
+  };
+
   async function save(){
     if(!form.employee_id){ toast('Sélectionnez un employé'); return; }
     if(!form.period_month){ toast('Sélectionnez le mois'); return; }
-    if(!stub && !file){ toast('Fichier PDF requis pour une nouvelle fiche'); return; }
     setBusy(true);
 
     let file_url = stub?.file_url || null;
@@ -1727,8 +1768,11 @@ function PaystubForm({ stub, employees, onSave, onCancel, adminEmail, toast }){
       file_url = urlData.publicUrl;
     }
 
+    const netFinal = form.net || computedNet();
     const payload = { employee_id:form.employee_id, period_month:form.period_month, period_year:Number(form.period_year),
-      gross:form.gross||null, net:form.net||null, note:form.note||null, file_url, updated_at:new Date().toISOString() };
+      gross:form.gross||null, cotisations:form.cotisations||null, impot:form.impot||null,
+      prime:form.prime||null, deduction:form.deduction||null,
+      net:netFinal||null, note:form.note||null, file_url, updated_at:new Date().toISOString() };
     let res;
     if(stub?.id){ res = await sb.from('paystubs').update(payload).eq('id',stub.id); }
     else { res = await sb.from('paystubs').insert([{...payload, created_by:adminEmail}]); }
@@ -1738,6 +1782,8 @@ function PaystubForm({ stub, employees, onSave, onCancel, adminEmail, toast }){
     await logAction(adminEmail, stub?'Fiche modifiée':'Fiche créée', `${emp?.name||emp?.email} — ${form.period_month} ${form.period_year}`);
     toast(stub?'Mis à jour':'Fiche créée'); onSave();
   }
+
+  const opt = {fontWeight:400,color:'var(--muted)',fontSize:12};
 
   return (
     <div className="panel">
@@ -1759,21 +1805,45 @@ function PaystubForm({ stub, employees, onSave, onCancel, adminEmail, toast }){
           <input type="number" value={form.period_year} onChange={e=>set('period_year',e.target.value)} min="2020" max="2099" /></div>
       </div>
 
-      <div className="grid2">
-        <div className="field"><label>Salaire brut (FCFA) <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label>
-          <input value={form.gross||''} onChange={e=>set('gross',e.target.value)} placeholder="Ex : 350 000" /></div>
-        <div className="field"><label>Salaire net (FCFA) <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label>
-          <input value={form.net||''} onChange={e=>set('net',e.target.value)} placeholder="Ex : 280 000" /></div>
+      <div style={{borderTop:'1px solid var(--line)',margin:'10px 0 14px',paddingTop:14}}>
+        <div style={{fontSize:12,fontWeight:700,letterSpacing:'.05em',color:'var(--muted)',marginBottom:10}}>DÉTAIL DE LA RÉMUNÉRATION</div>
+        <div className="grid2">
+          <div className="field"><label>Salaire brut (FCFA)</label>
+            <input type="number" value={form.gross||''} onChange={e=>set('gross',e.target.value)} placeholder="Ex : 350 000" min="0" /></div>
+          <div className="field"><label>Prime / Bonus <span style={opt}>(+ ajout)</span></label>
+            <input type="number" value={form.prime||''} onChange={e=>set('prime',e.target.value)} placeholder="Ex : 25 000" min="0" /></div>
+        </div>
+        <div className="grid2">
+          <div className="field"><label>Cotisations sociales <span style={opt}>(– retenue)</span></label>
+            <input type="number" value={form.cotisations||''} onChange={e=>set('cotisations',e.target.value)} placeholder="Ex : 30 000" min="0" /></div>
+          <div className="field"><label>Impôt sur revenu <span style={opt}>(– retenue)</span></label>
+            <input type="number" value={form.impot||''} onChange={e=>set('impot',e.target.value)} placeholder="Ex : 20 000" min="0" /></div>
+        </div>
+        <div className="grid2">
+          <div className="field"><label>Autre déduction <span style={opt}>(– retenue)</span></label>
+            <input type="number" value={form.deduction||''} onChange={e=>set('deduction',e.target.value)} placeholder="Ex : 5 000" min="0" /></div>
+          <div className="field">
+            <label>Net à payer (FCFA)
+              {(form.gross) && <button type="button" onClick={()=>set('net',computedNet())}
+                style={{marginLeft:8,fontSize:11,padding:'1px 8px',background:'var(--navy)',color:'#fff',border:'none',borderRadius:5,cursor:'pointer'}}>
+                Calculer
+              </button>}
+            </label>
+            <input type="number" value={form.net||''} onChange={e=>set('net',e.target.value)}
+              placeholder="Ex : 280 000" min="0"
+              style={{fontWeight:700,borderColor:form.net?'var(--navy)':'var(--line)'}} />
+          </div>
+        </div>
       </div>
 
-      <div className="field"><label>Fiche de paie (PDF) {stub&&<span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>— laisser vide pour garder l'existant</span>}</label>
+      <div className="field"><label>Fiche de paie (PDF) <span style={opt}>{stub?'— laisser vide pour garder l\'existant':'— optionnel, un PDF sera généré automatiquement'}</span></label>
         <input type="file" accept=".pdf,application/pdf" onChange={e=>setFile(e.target.files[0]||null)}
           style={{padding:'9px 0',fontSize:13.5}} />
         {stub?.file_url && !file && <div style={{marginTop:6,fontSize:12.5}}><a href={stub.file_url} target="_blank" style={{color:'var(--navy)'}}>📄 Voir la fiche actuelle</a></div>}
       </div>
 
-      <div className="field"><label>Note interne <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label>
-        <input value={form.note||''} onChange={e=>set('note',e.target.value)} placeholder="Prime, ajustement, congés…" /></div>
+      <div className="field"><label>Note interne <span style={opt}>(optionnel)</span></label>
+        <input value={form.note||''} onChange={e=>set('note',e.target.value)} placeholder="Prime exceptionnelle, congés payés, ajustement…" /></div>
 
       <div style={{display:'flex',gap:10,marginTop:4}}>
         <button className="btn-primary" disabled={busy} onClick={save}>{busy?'…':(stub?'Enregistrer':'Créer')}</button>
@@ -2198,7 +2268,8 @@ function AdminUsers({ adminEmail, toast }){
         <strong style={{color:'var(--navy)'}}>Animateur / Présentateur</strong> — articles, scores, planning contenu.<br/>
         <strong style={{color:'var(--navy)'}}>Média &amp; Réseaux sociaux</strong> — articles, scores, planning contenu.<br/>
         <strong style={{color:'var(--navy)'}}>Sécurité</strong> — accès lecture seule au planning contenu.<br/>
-        <strong style={{color:'var(--navy)'}}>Finance</strong> — accès exclusif à la gestion des fiches de paie et des employés.
+        <strong style={{color:'var(--navy)'}}>Secrétaire</strong> — articles, contenu et gestion des émissions.<br/>
+        <strong style={{color:'var(--navy)'}}>Finance</strong> — fiches de paie, comptabilité, partenaires et publicités.
       </div>
 
       {loading ? <Spinner/> :
@@ -2218,6 +2289,7 @@ function AdminUsers({ adminEmail, toast }){
                 <option value="animateur">Animateur / Présentateur</option>
                 <option value="media">Média &amp; Réseaux sociaux</option>
                 <option value="securite">Sécurité</option>
+                <option value="secretaire">Secrétaire</option>
                 <option value="finance">Finance</option>
               </select>
             </td>
@@ -2253,6 +2325,7 @@ function AdminUsers({ adminEmail, toast }){
               <option value="animateur">Animateur / Présentateur</option>
               <option value="media">Média &amp; Réseaux sociaux</option>
               <option value="securite">Sécurité</option>
+              <option value="secretaire">Secrétaire</option>
               <option value="finance">Finance</option>
               <option value="admin">Administrateur</option>
             </select>
@@ -2622,6 +2695,149 @@ function AdminAccounting({ adminEmail, toast }){
   );
 }
 
+// ============================================================
+//  ADMIN EMISSIONS
+// ============================================================
+const SHOW_GROUPS = [
+  'Émissions sportives de référence',
+  'Société, interaction et communautés',
+  'Éducation, impact, culture et divertissement',
+];
+
+function ShowForm({ show, onSave, onCancel, adminEmail, toast }){
+  const [form,setForm]=useState(show||{ name:'', tag:'', schedule:'', description:'', group_title:SHOW_GROUPS[0], image_url:'', sort_order:0 });
+  const [file,setFile]=useState(null);
+  const [busy,setBusy]=useState(false);
+  const set=(k,v)=>setForm(p=>({...p,[k]:v}));
+
+  async function save(){
+    if(!form.name.trim()){ toast('Nom requis'); return; }
+    setBusy(true);
+    let image_url = form.image_url||null;
+    if(file){
+      const path=`shows/${Date.now()}_${file.name}`;
+      const { error:upErr }=await sb.storage.from('article-images').upload(path,file,{upsert:true});
+      if(upErr){ toast('Upload : '+upErr.message); setBusy(false); return; }
+      const { data:u }=sb.storage.from('article-images').getPublicUrl(path);
+      image_url=u.publicUrl;
+    }
+    const payload={...form, image_url, sort_order:Number(form.sort_order)||0, updated_at:new Date().toISOString()};
+    let res;
+    if(show?.id){ res=await sb.from('shows').update(payload).eq('id',show.id); }
+    else { res=await sb.from('shows').insert([payload]); }
+    setBusy(false);
+    if(res.error){ toast('Erreur : '+res.error.message); return; }
+    await logAction(adminEmail, show?'Émission modifiée':'Émission ajoutée', form.name);
+    toast(show?'Mis à jour':'Émission ajoutée'); onSave();
+  }
+
+  return (
+    <div className="panel">
+      <h3 style={{marginBottom:20}}>{show?'Modifier l\'émission':'Nouvelle émission'}</h3>
+      <div className="grid2">
+        <div className="field"><label>Nom de l'émission *</label>
+          <input value={form.name} onChange={e=>set('name',e.target.value)} placeholder="Ex : Happy Day" /></div>
+        <div className="field"><label>Tag / Sous-titre</label>
+          <input value={form.tag||''} onChange={e=>set('tag',e.target.value)} placeholder="Ex : MATINALE" /></div>
+      </div>
+      <div className="field"><label>Horaire &amp; Présentateur</label>
+        <input value={form.schedule||''} onChange={e=>set('schedule',e.target.value)} placeholder="Ex : Lun–Ven 06h–08h · Jules Gamligo" /></div>
+      <div className="field"><label>Description</label>
+        <textarea value={form.description||''} onChange={e=>set('description',e.target.value)}
+          placeholder="Décrivez l'émission…" style={{minHeight:70}} /></div>
+      <div className="grid2">
+        <div className="field"><label>Groupe / Catégorie</label>
+          <select value={form.group_title||''} onChange={e=>set('group_title',e.target.value)}>
+            {SHOW_GROUPS.map(g=><option key={g}>{g}</option>)}
+            <option value="Autre">Autre</option>
+          </select></div>
+        <div className="field"><label>Ordre d'affichage</label>
+          <input type="number" value={form.sort_order||0} onChange={e=>set('sort_order',e.target.value)} min="0" /></div>
+      </div>
+      <div className="field"><label>Photo de l'émission</label>
+        <input type="file" accept="image/*" onChange={e=>setFile(e.target.files[0]||null)} style={{padding:'9px 0',fontSize:13.5}} />
+        {form.image_url&&!file&&<div style={{marginTop:8}}><img src={form.image_url} style={{height:60,borderRadius:6,objectFit:'cover'}} /></div>}
+      </div>
+      <div style={{display:'flex',gap:10,marginTop:4}}>
+        <button className="btn-primary" disabled={busy} onClick={save}>{busy?'…':(show?'Enregistrer':'Ajouter')}</button>
+        <button className="btn-ghost" onClick={onCancel}>Annuler</button>
+      </div>
+    </div>
+  );
+}
+
+function AdminEmissions({ adminEmail, toast, shows, reload }){
+  const [editing,setEditing]=useState(null);
+  const [search,setSearch]=useState('');
+
+  async function deleteShow(id,name){
+    if(!confirm(`Supprimer "${name}" ?`)) return;
+    await sb.from('shows').delete().eq('id',id);
+    await logAction(adminEmail,'Émission supprimée',name);
+    toast('Supprimée'); reload();
+  }
+
+  if(editing!==null) return <ShowForm show={editing.id?editing:null}
+    onSave={()=>{setEditing(null);reload();}} onCancel={()=>setEditing(null)}
+    adminEmail={adminEmail} toast={toast} />;
+
+  const filtered=shows.filter(s=>s.name.toLowerCase().includes(search.toLowerCase())||
+    (s.schedule||'').toLowerCase().includes(search.toLowerCase()));
+
+  const groups={};
+  filtered.forEach(s=>{ const g=s.group_title||'Autre'; if(!groups[g]) groups[g]=[]; groups[g].push(s); });
+
+  return (
+    <div>
+      <div style={{display:'flex',gap:10,marginBottom:20,alignItems:'center',flexWrap:'wrap'}}>
+        <input value={search} onChange={e=>setSearch(e.target.value)}
+          placeholder="Rechercher une émission…"
+          style={{flex:1,minWidth:200,padding:'10px 14px',border:'1px solid var(--line)',borderRadius:9,fontSize:14,outline:'none'}} />
+        <button className="btn-primary" onClick={()=>setEditing({})}>+ Nouvelle émission</button>
+      </div>
+
+      {filtered.length===0 ? (
+        <div className="panel"><div className="empty">Aucune émission. Cliquez sur "+ Nouvelle émission" pour commencer.</div></div>
+      ) : Object.entries(groups).map(([grp,items])=>(
+        <div key={grp} style={{marginBottom:28}}>
+          <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:15,color:'var(--navy)',letterSpacing:'.02em',marginBottom:12,textTransform:'uppercase'}}>{grp}</div>
+          <div className="panel" style={{padding:0,overflow:'hidden'}}>
+            <table className="admin-table" style={{width:'100%'}}>
+              <thead><tr>
+                <th style={{paddingLeft:16,width:40}}>#</th>
+                <th>Nom</th>
+                <th>Tag</th>
+                <th>Horaire &amp; Présentateur</th>
+                <th style={{width:80,textAlign:'center'}}>Photo</th>
+                <th style={{textAlign:'right',paddingRight:16,width:120}}></th>
+              </tr></thead>
+              <tbody>
+                {items.map(s=>(
+                  <tr key={s.id}>
+                    <td style={{paddingLeft:16,color:'var(--muted)',fontSize:12}}>{s.sort_order||0}</td>
+                    <td style={{fontWeight:700,color:'var(--navy)'}}>{s.name}</td>
+                    <td><span style={{fontSize:11,fontWeight:700,background:'var(--navy)',color:'#fff',padding:'2px 8px',borderRadius:20}}>{s.tag||'—'}</span></td>
+                    <td style={{fontSize:12.5,color:'#5a6178'}}>{s.schedule||'—'}</td>
+                    <td style={{textAlign:'center'}}>
+                      {s.image_url
+                        ? <img src={s.image_url} style={{height:36,width:56,objectFit:'cover',borderRadius:5}} />
+                        : <span style={{fontSize:11,color:'var(--muted)'}}>—</span>}
+                    </td>
+                    <td style={{textAlign:'right',paddingRight:16,whiteSpace:'nowrap'}}>
+                      <button className="icon-btn" onClick={()=>setEditing(s)}>Modifier</button>
+                      <button className="icon-btn del" onClick={()=>deleteShow(s.id,s.name)}>✕</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Admin({ session, onExit, data, reload, toast, userRole }){
   const isAdmin   = userRole==='admin';
   const isFinance = userRole==='finance';
@@ -2629,18 +2845,21 @@ function Admin({ session, onExit, data, reload, toast, userRole }){
   const adminEmail = session.user.email;
   async function logout(){ await sb.auth.signOut(); onExit(); }
 
-  const ROLE_LABELS = { admin:'ADMINISTRATEUR', journalist:'JOURNALISTE', animateur:'ANIMATEUR', media:'MÉDIA', securite:'SÉCURITÉ', finance:'FINANCE' };
+  const ROLE_LABELS = { admin:'ADMINISTRATEUR', journalist:'JOURNALISTE', animateur:'ANIMATEUR', media:'MÉDIA', securite:'SÉCURITÉ', finance:'FINANCE', secretaire:'SECRÉTAIRE' };
 
+  const isSecretaire = userRole==='secretaire';
   const isEditorialRole = ['journalist','animateur','media'].includes(userRole);
   const isSecurite = userRole==='securite';
+  const canEditEmissions = isAdmin || isSecretaire;
 
-  // Redirect to allowed tab if landing on a restricted one
   const FINANCE_TABS = ['finance','accounting','partners','ads'];
+  const SECRETAIRE_TABS = ['emissions','articles','content'];
   useEffect(()=>{
     if(isFinance && !FINANCE_TABS.includes(tab)) setTab('accounting');
     if(isSecurite && tab!=='content') setTab('content');
-    if(isEditorialRole && (tab==='partners'||tab==='ads'||tab==='users'||tab==='logs'||tab==='finance'||tab==='accounting')) setTab('articles');
-  },[isAdmin,isFinance,isSecurite,isEditorialRole,tab]);
+    if(isSecretaire && !SECRETAIRE_TABS.includes(tab)) setTab('emissions');
+    if(isEditorialRole && (tab==='partners'||tab==='ads'||tab==='users'||tab==='logs'||tab==='finance'||tab==='accounting'||tab==='emissions')) setTab('articles');
+  },[isAdmin,isFinance,isSecurite,isSecretaire,isEditorialRole,tab]);
 
   return (
     <div className="admin">
@@ -2654,13 +2873,14 @@ function Admin({ session, onExit, data, reload, toast, userRole }){
         <button className="exit" onClick={logout}>Déconnexion</button>
       </div></div>
       <div className="admin-tabs"><div className="wrap">
-        {(isAdmin||isEditorialRole||isSecurite) && !isFinance && <button className={tab==='articles'?'active':''} onClick={()=>setTab('articles')}>Articles</button>}
+        {(isAdmin||isEditorialRole||isSecurite||isSecretaire) && !isFinance && <button className={tab==='articles'?'active':''} onClick={()=>setTab('articles')}>Articles</button>}
         {(isAdmin||isEditorialRole) && <button className={tab==='scores'?'active':''} onClick={()=>setTab('scores')}>Scores &amp; Classement</button>}
         {(isAdmin||isFinance) && <button className={tab==='partners'?'active':''} onClick={()=>setTab('partners')}>Partenaires</button>}
         {(isAdmin||isFinance) && <button className={tab==='ads'?'active':''} onClick={()=>setTab('ads')}>Publicités</button>}
         {isAdmin && <button className={tab==='users'?'active':''} onClick={()=>setTab('users')}>Équipe</button>}
         {isAdmin && <button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}>Journal</button>}
         {!isFinance && <button className={tab==='content'?'active':''} onClick={()=>setTab('content')}>📋 Contenu</button>}
+        {canEditEmissions && <button className={tab==='emissions'?'active':''} onClick={()=>setTab('emissions')}>📻 Émissions</button>}
         {(isAdmin||isFinance) && <button className={tab==='finance'?'active':''} onClick={()=>setTab('finance')}>💰 Paie</button>}
         {(isAdmin||isFinance) && <button className={tab==='accounting'?'active':''} onClick={()=>setTab('accounting')}>📊 Comptabilité</button>}
       </div></div>
@@ -2672,6 +2892,7 @@ function Admin({ session, onExit, data, reload, toast, userRole }){
         {tab==='users' && isAdmin && <AdminUsers adminEmail={adminEmail} toast={toast} />}
         {tab==='logs' && isAdmin && <AdminLogs />}
         {tab==='content' && <AdminContent adminEmail={adminEmail} userRole={userRole} toast={toast} />}
+        {tab==='emissions' && canEditEmissions && <AdminEmissions shows={data.shows||[]} reload={reload} toast={toast} adminEmail={adminEmail} />}
         {tab==='finance' && (isAdmin||isFinance) && <AdminFinance adminEmail={adminEmail} userRole={userRole} toast={toast} />}
         {tab==='accounting' && (isAdmin||isFinance) && <AdminAccounting adminEmail={adminEmail} toast={toast} />}
       </div></div>
@@ -2903,33 +3124,35 @@ function App(){
   const [userRole,setUserRole]=useState(null); // null = loading, 'admin' | 'journalist'
   const [toast,toastNode]=useToast();
 
-  const [data,setData]=useState({ articles:[],standings:[],scores:[],fixtures:[],partners:[],ads:[] });
+  const [data,setData]=useState({ articles:[],standings:[],scores:[],fixtures:[],partners:[],ads:[],shows:[] });
 
   const loadPublic = useCallback(async ()=>{
-    const [art,st,sc,fx,ads]=await Promise.all([
+    const [art,st,sc,fx,ads,sh]=await Promise.all([
       sb.from('articles').select('*').eq('published',true).order('created_at',{ascending:false}),
       sb.from('standings').select('*'),
       sb.from('scores').select('*').order('created_at',{ascending:false}),
       sb.from('fixtures').select('*'),
       sb.from('ads').select('*').eq('active',true).order('sort_order',{ascending:true}),
+      sb.from('shows').select('*').order('sort_order',{ascending:true}),
     ]);
     setData(d=>({ ...d,
       articles:art.data||[], standings:st.data||[], scores:sc.data||[],
-      fixtures:fx.data||[], ads:ads.data||[] }));
+      fixtures:fx.data||[], ads:ads.data||[], shows:sh.data||[] }));
     setLoading(false);
   },[]);
 
   const loadAdmin = useCallback(async ()=>{
-    const [art,st,sc,fx,pt,ads]=await Promise.all([
+    const [art,st,sc,fx,pt,ads,sh]=await Promise.all([
       sb.from('articles').select('*').order('created_at',{ascending:false}),
       sb.from('standings').select('*'),
       sb.from('scores').select('*').order('created_at',{ascending:false}),
       sb.from('fixtures').select('*'),
       sb.from('partners').select('*').order('created_at',{ascending:false}),
       sb.from('ads').select('*').order('sort_order',{ascending:true}),
+      sb.from('shows').select('*').order('sort_order',{ascending:true}),
     ]);
     setData({ articles:art.data||[], standings:st.data||[], scores:sc.data||[],
-      fixtures:fx.data||[], partners:pt.data||[], ads:ads.data||[] });
+      fixtures:fx.data||[], partners:pt.data||[], ads:ads.data||[], shows:sh.data||[] });
   },[]);
 
   // auth bootstrap + role fetch
@@ -3015,7 +3238,7 @@ function App(){
           {nav==='Home' && <Home articles={data.articles} standings={data.standings} fixtures={data.fixtures}
             ads={data.ads} onOpen={open} onNav={navTo} onTrial={()=>navTo('Partner')} />}
           {nav==='Standings' && <StandingsView standings={data.standings} />}
-          {(nav==='Football'||nav==='Basketball'||nav==='Shows') && <CategoryView cat={nav} articles={data.articles} onOpen={open} />}
+          {(nav==='Football'||nav==='Basketball'||nav==='Shows') && <CategoryView cat={nav} articles={data.articles} onOpen={open} shows={data.shows||[]} />}
         </div>
       }
 
