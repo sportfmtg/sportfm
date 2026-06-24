@@ -2157,6 +2157,361 @@ function AdminUsers({ adminEmail, toast }){
   );
 }
 
+// ============================================================
+//  ACCOUNTING — AP / AR / EXPENSES / REPORTS
+// ============================================================
+const ENTRY_CATEGORIES = {
+  AR: ['Publicité radio','Partenariat sponsoring','Abonnement numérique','Prestation événement','Don / Subvention','Autre recette'],
+  AP: ['Salaires & charges','Loyer & charges locatives','Équipement technique','Marketing & impression','Logiciels & abonnements','Déplacement & transport','Eau / Électricité / Internet','Sous-traitance','Impôts & taxes','Autre dépense'],
+};
+const ENTRY_STATUSES = ['En attente','Payé','Partiel','En retard','Annulé'];
+const STATUS_COLORS  = {'En attente':'#9a6a00','Payé':'#1f7a48','Partiel':'#2a5bd0','En retard':'#c0392b','Annulé':'#888'};
+const STATUS_BG      = {'En attente':'#fff4e0','Payé':'#e3f6ea','Partiel':'#e7eefc','En retard':'#fce8e8','Annulé':'#f0f0f0'};
+const MONTHS_FR = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
+
+function fmtFCFA(n){ if(!n&&n!==0) return '—'; return Number(n).toLocaleString('fr-FR')+ ' FCFA'; }
+
+function EntryForm({ entry, onSave, onCancel, adminEmail, toast }){
+  const defaultType = entry?.type || 'AR';
+  const [form,setForm]=useState({
+    type: defaultType, category: entry?.category||'', label: entry?.label||'',
+    amount: entry?.amount||'', date: entry?.date||new Date().toISOString().slice(0,10),
+    due_date: entry?.due_date||'', status: entry?.status||'En attente',
+    reference: entry?.reference||'', notes: entry?.notes||'', ...(entry||{})
+  });
+  const [busy,setBusy]=useState(false);
+  const set=(k,v)=>setForm(p=>({...p,[k]:v, ...(k==='type'?{category:''}:{})}));
+
+  async function save(){
+    if(!form.label.trim()){ toast('Libellé requis'); return; }
+    if(!form.amount||isNaN(Number(form.amount))){ toast('Montant invalide'); return; }
+    if(!form.date){ toast('Date requise'); return; }
+    setBusy(true);
+    const payload = {...form, amount:Number(form.amount), updated_at:new Date().toISOString()};
+    let res;
+    if(entry?.id){ res = await sb.from('accounting_entries').update(payload).eq('id',entry.id); }
+    else { res = await sb.from('accounting_entries').insert([{...payload, created_by:adminEmail}]); }
+    setBusy(false);
+    if(res.error){ toast('Erreur : '+res.error.message); return; }
+    await logAction(adminEmail, entry?'Écriture modifiée':'Écriture créée', `${form.type} — ${form.label} — ${fmtFCFA(form.amount)}`);
+    toast(entry?'Mis à jour':'Écriture enregistrée'); onSave();
+  }
+
+  return (
+    <div className="panel">
+      <h3 style={{marginBottom:20}}>{entry?'Modifier l\'écriture':'Nouvelle écriture comptable'}</h3>
+
+      <div style={{display:'flex',gap:10,marginBottom:18}}>
+        {['AR','AP'].map(t=>(
+          <button key={t} onClick={()=>set('type',t)}
+            style={{flex:1,padding:'12px',border:`2px solid ${form.type===t?(t==='AR'?'#1f7a48':'#c0392b'):'var(--line)'}`,
+              borderRadius:10,background:form.type===t?(t==='AR'?'#e3f6ea':'#fce8e8'):'#fff',
+              fontWeight:800,fontSize:15,color:form.type===t?(t==='AR'?'#1f7a48':'#c0392b'):'var(--muted)',cursor:'pointer'}}>
+            {t==='AR'?'💚 Recette (AR)':'🔴 Dépense (AP)'}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid2">
+        <div className="field"><label>Catégorie</label>
+          <select value={form.category} onChange={e=>set('category',e.target.value)}>
+            <option value="">— Catégorie —</option>
+            {(ENTRY_CATEGORIES[form.type]||[]).map(c=><option key={c}>{c}</option>)}
+          </select></div>
+        <div className="field"><label>Libellé *</label>
+          <input value={form.label} onChange={e=>set('label',e.target.value)} placeholder="Ex : Facture MTN Mobile Money" /></div>
+      </div>
+
+      <div className="grid2">
+        <div className="field"><label>Montant (FCFA) *</label>
+          <input type="number" value={form.amount} onChange={e=>set('amount',e.target.value)} placeholder="0" min="0" /></div>
+        <div className="field"><label>Statut</label>
+          <select value={form.status} onChange={e=>set('status',e.target.value)}>
+            {ENTRY_STATUSES.map(s=><option key={s}>{s}</option>)}
+          </select></div>
+      </div>
+
+      <div className="grid2">
+        <div className="field"><label>Date *</label>
+          <input type="date" value={form.date} onChange={e=>set('date',e.target.value)} /></div>
+        <div className="field"><label>Date d'échéance <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label>
+          <input type="date" value={form.due_date||''} onChange={e=>set('due_date',e.target.value)} /></div>
+      </div>
+
+      <div className="grid2">
+        <div className="field"><label>Référence / N° facture <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label>
+          <input value={form.reference||''} onChange={e=>set('reference',e.target.value)} placeholder="INV-2026-001" /></div>
+        <div className="field"><label>Notes internes <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label>
+          <input value={form.notes||''} onChange={e=>set('notes',e.target.value)} placeholder="Remarques…" /></div>
+      </div>
+
+      <div style={{display:'flex',gap:10,marginTop:4}}>
+        <button className="btn-primary" disabled={busy} onClick={save}>{busy?'…':(entry?'Enregistrer':'Créer')}</button>
+        <button className="btn-ghost" onClick={onCancel}>Annuler</button>
+      </div>
+    </div>
+  );
+}
+
+function MiniBarChart({ data, color }){
+  if(!data||data.length===0) return null;
+  const max = Math.max(...data.map(d=>d.v),1);
+  return (
+    <div style={{display:'flex',alignItems:'flex-end',gap:3,height:48,marginTop:8}}>
+      {data.map((d,i)=>(
+        <div key={i} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
+          <div style={{width:'100%',background:color,borderRadius:'3px 3px 0 0',height:Math.max(2,Math.round((d.v/max)*44))+'px',opacity:.85}} />
+          <div style={{fontSize:9,color:'var(--muted)',whiteSpace:'nowrap'}}>{d.l}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AdminAccounting({ adminEmail, toast }){
+  const [entries,setEntries]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [editing,setEditing]=useState(null);
+  const [tab,setTab]=useState('dashboard'); // dashboard | ar | ap
+  const [filterStatus,setFilterStatus]=useState('all');
+  const [filterMonth,setFilterMonth]=useState('all');
+  const [filterYear,setFilterYear]=useState(String(new Date().getFullYear()));
+
+  async function load(){
+    const { data }=await sb.from('accounting_entries').select('*').order('date',{ascending:false});
+    setEntries(data||[]); setLoading(false);
+  }
+  useEffect(()=>{ load(); },[]);
+
+  async function deleteEntry(id,label){
+    if(!confirm(`Supprimer "${label}" ?`)) return;
+    await sb.from('accounting_entries').delete().eq('id',id);
+    await logAction(adminEmail,'Écriture supprimée',label);
+    toast('Supprimé'); load();
+  }
+
+  if(editing!==null) return <EntryForm entry={editing.id?editing:null}
+    onSave={()=>{setEditing(null);load();}} onCancel={()=>setEditing(null)}
+    adminEmail={adminEmail} toast={toast} />;
+
+  // ---- Computed metrics ----
+  const now = new Date();
+  const thisMonth = now.getMonth();
+  const thisYear  = now.getFullYear();
+  const yearEntries = entries.filter(e=>new Date(e.date).getFullYear()===thisYear);
+  const totalAR   = yearEntries.filter(e=>e.type==='AR').reduce((s,e)=>s+Number(e.amount||0),0);
+  const totalAP   = yearEntries.filter(e=>e.type==='AP').reduce((s,e)=>s+Number(e.amount||0),0);
+  const net       = totalAR - totalAP;
+  const pendingAR = entries.filter(e=>e.type==='AR'&&e.status==='En attente').reduce((s,e)=>s+Number(e.amount||0),0);
+  const pendingAP = entries.filter(e=>e.type==='AP'&&e.status==='En attente').reduce((s,e)=>s+Number(e.amount||0),0);
+  const overdueAP = entries.filter(e=>e.type==='AP'&&e.status==='En retard').reduce((s,e)=>s+Number(e.amount||0),0);
+
+  // Monthly AR/AP for current year (chart)
+  const monthlyData = Array.from({length:12},(_,m)=>({
+    l: MONTHS_FR[m],
+    ar: yearEntries.filter(e=>e.type==='AR'&&new Date(e.date).getMonth()===m).reduce((s,e)=>s+Number(e.amount||0),0),
+    ap: yearEntries.filter(e=>e.type==='AP'&&new Date(e.date).getMonth()===m).reduce((s,e)=>s+Number(e.amount||0),0),
+  }));
+
+  // Category breakdown
+  const catAP = {};
+  yearEntries.filter(e=>e.type==='AP').forEach(e=>{ catAP[e.category||'Autre']=(catAP[e.category||'Autre']||0)+Number(e.amount||0); });
+  const catAPSorted = Object.entries(catAP).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const catAPMax = catAPSorted[0]?.[1]||1;
+
+  // Filtered list entries
+  const years = [...new Set(entries.map(e=>new Date(e.date).getFullYear()))].sort((a,b)=>b-a);
+  if(!years.includes(thisYear)) years.unshift(thisYear);
+  const listType = tab==='ar'?'AR':tab==='ap'?'AP':null;
+  const filtered = entries.filter(e=>{
+    const d=new Date(e.date);
+    return (!listType||e.type===listType)
+      && (filterStatus==='all'||e.status===filterStatus)
+      && (filterYear==='all'||d.getFullYear()===Number(filterYear))
+      && (filterMonth==='all'||d.getMonth()===Number(filterMonth));
+  });
+
+  return (
+    <div>
+      {/* Sub-tabs */}
+      <div style={{display:'flex',gap:0,marginBottom:24,borderBottom:'2px solid var(--line)'}}>
+        {[{k:'dashboard',l:'📊 Tableau de bord'},{k:'ar',l:'💚 Recettes (AR)'},{k:'ap',l:'🔴 Dépenses (AP)'}].map(t=>(
+          <button key={t.k} onClick={()=>setTab(t.k)}
+            style={{padding:'10px 20px',border:'none',borderBottom:tab===t.k?'2px solid var(--navy)':'2px solid transparent',
+              background:'none',fontWeight:700,fontSize:13.5,color:tab===t.k?'var(--navy)':'var(--muted)',cursor:'pointer',marginBottom:'-2px'}}>
+            {t.l}
+          </button>
+        ))}
+        <div style={{flex:1}} />
+        <button className="btn-primary" style={{marginBottom:6,marginRight:0}} onClick={()=>setEditing({})}>+ Nouvelle écriture</button>
+      </div>
+
+      {loading ? <Spinner/> : tab==='dashboard' ? (
+        /* ===== DASHBOARD ===== */
+        <div>
+          {/* KPI row */}
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:12,marginBottom:24}}>
+            {[
+              {l:'Recettes YTD',     n:totalAR,  c:'#1f7a48', bg:'#e3f6ea', sign:'+'},
+              {l:'Dépenses YTD',     n:totalAP,  c:'#c0392b', bg:'#fce8e8', sign:'-'},
+              {l:'Résultat net',     n:net,       c:net>=0?'#1f7a48':'#c0392b', bg:net>=0?'#e3f6ea':'#fce8e8', sign:net>=0?'+':'-'},
+              {l:'AR en attente',    n:pendingAR, c:'#9a6a00', bg:'#fff4e0', sign:''},
+              {l:'AP en attente',    n:pendingAP, c:'#9a6a00', bg:'#fff4e0', sign:''},
+              {l:'AP en retard',     n:overdueAP, c:'#c0392b', bg:'#fce8e8', sign:'⚠'},
+            ].map((k,i)=>(
+              <div key={i} style={{background:k.bg,border:`1px solid ${k.c}22`,borderRadius:10,padding:'14px 16px'}}>
+                <div style={{fontSize:10.5,fontWeight:700,letterSpacing:'.05em',color:k.c,opacity:.8,marginBottom:4}}>{k.l.toUpperCase()}</div>
+                <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:22,color:k.c,lineHeight:1}}>
+                  {k.sign==='⚠'&&k.n>0?'⚠ ':''}{Number(k.n).toLocaleString('fr-FR')}
+                </div>
+                <div style={{fontSize:10,color:k.c,opacity:.7,marginTop:2}}>FCFA</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Charts row */}
+          <div style={{display:'grid',gridTemplateColumns:'2fr 1fr',gap:16,marginBottom:20}}>
+            {/* Monthly bar chart */}
+            <div className="panel" style={{padding:'18px 20px'}}>
+              <div style={{fontWeight:700,fontSize:14,color:'var(--navy)',marginBottom:4}}>Évolution mensuelle {thisYear}</div>
+              <div style={{display:'flex',gap:12,marginBottom:8}}>
+                <span style={{fontSize:11,color:'#1f7a48',fontWeight:700}}>■ Recettes</span>
+                <span style={{fontSize:11,color:'#c0392b',fontWeight:700}}>■ Dépenses</span>
+              </div>
+              <div style={{display:'flex',alignItems:'flex-end',gap:4,height:80}}>
+                {monthlyData.map((d,i)=>{
+                  const maxVal=Math.max(...monthlyData.map(x=>Math.max(x.ar,x.ap)),1);
+                  return (
+                    <div key={i} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:1}}>
+                      <div style={{width:'100%',display:'flex',gap:1,alignItems:'flex-end',height:66}}>
+                        <div style={{flex:1,background:'#1f7a48',borderRadius:'2px 2px 0 0',height:Math.max(2,Math.round((d.ar/maxVal)*64))+'px',opacity:.8}} />
+                        <div style={{flex:1,background:'#c0392b',borderRadius:'2px 2px 0 0',height:Math.max(2,Math.round((d.ap/maxVal)*64))+'px',opacity:.8}} />
+                      </div>
+                      <div style={{fontSize:8.5,color:'var(--muted)'}}>{d.l}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Top expense categories */}
+            <div className="panel" style={{padding:'18px 20px'}}>
+              <div style={{fontWeight:700,fontSize:14,color:'var(--navy)',marginBottom:14}}>Top dépenses {thisYear}</div>
+              {catAPSorted.length===0 ? <div style={{color:'var(--muted)',fontSize:13}}>Aucune dépense enregistrée.</div> :
+                catAPSorted.map(([cat,amt],i)=>(
+                  <div key={i} style={{marginBottom:10}}>
+                    <div style={{display:'flex',justifyContent:'space-between',marginBottom:3}}>
+                      <span style={{fontSize:12,fontWeight:600,color:'var(--navy)'}}>{cat}</span>
+                      <span style={{fontSize:12,color:'#c0392b',fontWeight:700}}>{Number(amt).toLocaleString('fr-FR')}</span>
+                    </div>
+                    <div style={{height:5,background:'#f0f0f0',borderRadius:3}}>
+                      <div style={{height:'100%',background:'#c0392b',borderRadius:3,width:(amt/catAPMax*100)+'%',opacity:.7}} />
+                    </div>
+                  </div>
+                ))
+              }
+            </div>
+          </div>
+
+          {/* Recent entries */}
+          <div className="panel" style={{padding:0,overflow:'hidden'}}>
+            <div style={{padding:'14px 18px',fontWeight:700,fontSize:14,color:'var(--navy)',borderBottom:'1px solid var(--line)'}}>Dernières écritures</div>
+            <table className="admin-table"><thead><tr>
+              <th>Date</th><th>Type</th><th>Catégorie</th><th>Libellé</th><th>Montant</th><th>Statut</th><th style={{textAlign:'right',paddingRight:16}}></th>
+            </tr></thead><tbody>
+              {entries.slice(0,8).map(e=>(
+                <tr key={e.id}>
+                  <td style={{fontSize:12.5,color:'var(--muted)'}}>{e.date}</td>
+                  <td><span style={{fontSize:11,fontWeight:800,padding:'2px 8px',borderRadius:20,background:e.type==='AR'?'#e3f6ea':'#fce8e8',color:e.type==='AR'?'#1f7a48':'#c0392b'}}>{e.type}</span></td>
+                  <td style={{fontSize:12.5}}>{e.category||'—'}</td>
+                  <td style={{fontWeight:600,fontSize:13}}>{e.label}</td>
+                  <td style={{fontWeight:700,color:e.type==='AR'?'#1f7a48':'#c0392b'}}>{Number(e.amount).toLocaleString('fr-FR')} FCFA</td>
+                  <td><span style={{fontSize:11,fontWeight:700,padding:'2px 9px',borderRadius:20,background:STATUS_BG[e.status]||'#f0f0f0',color:STATUS_COLORS[e.status]||'#888'}}>{e.status}</span></td>
+                  <td style={{textAlign:'right',paddingRight:16}}>
+                    <button className="icon-btn" onClick={()=>setEditing(e)}>Modifier</button>
+                    <button className="icon-btn del" onClick={()=>deleteEntry(e.id,e.label)}>✕</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody></table>
+          </div>
+        </div>
+      ) : (
+        /* ===== AR / AP LIST ===== */
+        <div>
+          <div style={{display:'flex',gap:10,marginBottom:16,flexWrap:'wrap',alignItems:'center'}}>
+            <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}
+              style={{padding:'9px 12px',border:'1px solid var(--line)',borderRadius:9,fontSize:13.5,background:'#fff',outline:'none'}}>
+              <option value="all">Tous les statuts</option>
+              {ENTRY_STATUSES.map(s=><option key={s}>{s}</option>)}
+            </select>
+            <select value={filterYear} onChange={e=>setFilterYear(e.target.value)}
+              style={{padding:'9px 12px',border:'1px solid var(--line)',borderRadius:9,fontSize:13.5,background:'#fff',outline:'none'}}>
+              <option value="all">Toutes les années</option>
+              {years.map(y=><option key={y} value={y}>{y}</option>)}
+            </select>
+            <select value={filterMonth} onChange={e=>setFilterMonth(e.target.value)}
+              style={{padding:'9px 12px',border:'1px solid var(--line)',borderRadius:9,fontSize:13.5,background:'#fff',outline:'none'}}>
+              <option value="all">Tous les mois</option>
+              {MONTHS_FR.map((m,i)=><option key={i} value={i}>{m}</option>)}
+            </select>
+            <div style={{marginLeft:'auto',fontWeight:700,fontSize:13.5,color:tab==='ar'?'#1f7a48':'#c0392b'}}>
+              Total filtré : {filtered.reduce((s,e)=>s+Number(e.amount||0),0).toLocaleString('fr-FR')} FCFA
+            </div>
+          </div>
+
+          {filtered.length===0 ? <div className="panel"><div className="empty">Aucune écriture pour ce filtre.</div></div> : (
+            <div className="panel" style={{padding:0,overflow:'hidden'}}>
+              <table className="admin-table" style={{tableLayout:'fixed',width:'100%'}}>
+                <thead><tr>
+                  <th style={{paddingLeft:16,width:'10%'}}>Date</th>
+                  <th style={{width:'16%'}}>Catégorie</th>
+                  <th style={{width:'22%'}}>Libellé</th>
+                  <th style={{width:'8%'}}>Réf.</th>
+                  <th style={{width:'14%',textAlign:'right'}}>Montant</th>
+                  <th style={{width:'10%'}}>Échéance</th>
+                  <th style={{width:'12%'}}>Statut</th>
+                  <th style={{width:'8%',textAlign:'right',paddingRight:16}}></th>
+                </tr></thead>
+                <tbody>
+                  {filtered.map(e=>{
+                    const overdue = e.status==='En attente'&&e.due_date&&new Date(e.due_date)<new Date();
+                    return (
+                      <tr key={e.id} style={{background:overdue?'#fff8f8':''}}>
+                        <td style={{paddingLeft:16,fontSize:12.5,color:'var(--muted)'}}>{e.date}</td>
+                        <td style={{fontSize:12.5}}>{e.category||'—'}</td>
+                        <td style={{fontWeight:600}}>
+                          {overdue&&<span style={{color:'#c0392b',marginRight:5,fontSize:12}}>⚠</span>}
+                          {e.label}
+                          {e.notes&&<div style={{fontSize:11,color:'var(--muted)',fontWeight:400}}>{e.notes}</div>}
+                        </td>
+                        <td style={{fontSize:11.5,color:'var(--muted)'}}>{e.reference||'—'}</td>
+                        <td style={{textAlign:'right',fontWeight:700,fontSize:13.5,color:tab==='ar'?'#1f7a48':'#c0392b'}}>{Number(e.amount).toLocaleString('fr-FR')}</td>
+                        <td style={{fontSize:12,color:overdue?'#c0392b':'var(--muted)',fontWeight:overdue?700:400}}>{e.due_date||'—'}</td>
+                        <td>
+                          <select value={e.status}
+                            onChange={async ev=>{ await sb.from('accounting_entries').update({status:ev.target.value}).eq('id',e.id); load(); }}
+                            style={{fontSize:11,padding:'3px 7px',border:'1px solid var(--line)',borderRadius:6,background:STATUS_BG[e.status]||'#f0f0f0',color:STATUS_COLORS[e.status]||'#888',fontWeight:700,cursor:'pointer'}}>
+                            {ENTRY_STATUSES.map(s=><option key={s}>{s}</option>)}
+                          </select>
+                        </td>
+                        <td style={{textAlign:'right',paddingRight:16,whiteSpace:'nowrap'}}>
+                          <button className="icon-btn" onClick={()=>setEditing(e)}>Modifier</button>
+                          <button className="icon-btn del" onClick={()=>deleteEntry(e.id,e.label)}>✕</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Admin({ session, onExit, data, reload, toast, userRole }){
   const isAdmin   = userRole==='admin';
   const isFinance = userRole==='finance';
@@ -2170,10 +2525,11 @@ function Admin({ session, onExit, data, reload, toast, userRole }){
   const isSecurite = userRole==='securite';
 
   // Redirect to allowed tab if landing on a restricted one
+  const FINANCE_TABS = ['finance','accounting','partners','ads'];
   useEffect(()=>{
-    if(isFinance && tab!=='finance') setTab('finance');
+    if(isFinance && !FINANCE_TABS.includes(tab)) setTab('accounting');
     if(isSecurite && tab!=='content') setTab('content');
-    if(isEditorialRole && (tab==='partners'||tab==='ads'||tab==='users'||tab==='logs'||tab==='finance')) setTab('articles');
+    if(isEditorialRole && (tab==='partners'||tab==='ads'||tab==='users'||tab==='logs'||tab==='finance'||tab==='accounting')) setTab('articles');
   },[isAdmin,isFinance,isSecurite,isEditorialRole,tab]);
 
   return (
@@ -2190,22 +2546,24 @@ function Admin({ session, onExit, data, reload, toast, userRole }){
       <div className="admin-tabs"><div className="wrap">
         {(isAdmin||isEditorialRole||isSecurite) && !isFinance && <button className={tab==='articles'?'active':''} onClick={()=>setTab('articles')}>Articles</button>}
         {(isAdmin||isEditorialRole) && <button className={tab==='scores'?'active':''} onClick={()=>setTab('scores')}>Scores &amp; Classement</button>}
-        {isAdmin && <button className={tab==='partners'?'active':''} onClick={()=>setTab('partners')}>Partenaires</button>}
-        {isAdmin && <button className={tab==='ads'?'active':''} onClick={()=>setTab('ads')}>Publicités</button>}
+        {(isAdmin||isFinance) && <button className={tab==='partners'?'active':''} onClick={()=>setTab('partners')}>Partenaires</button>}
+        {(isAdmin||isFinance) && <button className={tab==='ads'?'active':''} onClick={()=>setTab('ads')}>Publicités</button>}
         {isAdmin && <button className={tab==='users'?'active':''} onClick={()=>setTab('users')}>Équipe</button>}
         {isAdmin && <button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}>Journal</button>}
         {!isFinance && <button className={tab==='content'?'active':''} onClick={()=>setTab('content')}>📋 Contenu</button>}
-        {(isAdmin||isFinance) && <button className={tab==='finance'?'active':''} onClick={()=>setTab('finance')}>💰 Finance</button>}
+        {(isAdmin||isFinance) && <button className={tab==='finance'?'active':''} onClick={()=>setTab('finance')}>💰 Paie</button>}
+        {(isAdmin||isFinance) && <button className={tab==='accounting'?'active':''} onClick={()=>setTab('accounting')}>📊 Comptabilité</button>}
       </div></div>
       <div className="admin-body"><div className="wrap">
         {tab==='articles' && <AdminArticles articles={data.articles} reload={reload} toast={toast} adminEmail={adminEmail} />}
         {tab==='scores' && <AdminScores scores={data.scores} standings={data.standings} fixtures={data.fixtures} reload={reload} toast={toast} adminEmail={adminEmail} />}
-        {tab==='partners' && isAdmin && <AdminPartners partners={data.partners} reload={reload} toast={toast} adminEmail={adminEmail} />}
-        {tab==='ads' && isAdmin && <AdminAds ads={data.ads||[]} reload={reload} toast={toast} adminEmail={adminEmail} />}
+        {tab==='partners' && (isAdmin||isFinance) && <AdminPartners partners={data.partners} reload={reload} toast={toast} adminEmail={adminEmail} />}
+        {tab==='ads' && (isAdmin||isFinance) && <AdminAds ads={data.ads||[]} reload={reload} toast={toast} adminEmail={adminEmail} />}
         {tab==='users' && isAdmin && <AdminUsers adminEmail={adminEmail} toast={toast} />}
         {tab==='logs' && isAdmin && <AdminLogs />}
         {tab==='content' && <AdminContent adminEmail={adminEmail} userRole={userRole} toast={toast} />}
         {tab==='finance' && (isAdmin||isFinance) && <AdminFinance adminEmail={adminEmail} userRole={userRole} toast={toast} />}
+        {tab==='accounting' && (isAdmin||isFinance) && <AdminAccounting adminEmail={adminEmail} toast={toast} />}
       </div></div>
     </div>
   );
