@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SportFM · Couverture Metro D1</title>
+<title>SportFM</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230B245E'/><text x='15' y='23' font-family='Arial' font-style='italic' font-weight='900' font-size='20' fill='white' text-anchor='middle'>S</text><circle cx='25' cy='8' r='5' fill='%23EF003F'/></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:ital,wght@0,400;0,500;0,600;0,700;1,800&family=Barlow+Semi+Condensed:ital,wght@0,600;0,700;0,800;1,800&display=swap" rel="stylesheet">
@@ -52,7 +53,7 @@
   .logo{ font-family:'Barlow Semi Condensed',sans-serif; font-style:italic; font-weight:800;
     font-size:28px; letter-spacing:-.01em; color:var(--navy); display:flex; align-items:center;
     line-height:1; cursor:pointer; }
-  .logo .fm{ position:relative; padding-right:4px; }
+  .logo .fm{ position:relative; padding-right:14px; }
   .logo .swoosh{ position:absolute; top:-2px; right:-7px; width:11px; height:11px;
     border:3.5px solid var(--red); border-left-color:transparent; border-bottom-color:transparent;
     border-top-right-radius:11px; transform:rotate(10deg); }
@@ -363,9 +364,9 @@ const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 // on utilise l'URL de flux direct, qui se lit dans une balise <audio>.
 const RADIO_STREAM_URL = "https://listen.radioking.com/radio/512377/stream/570244";
 const RADIO_STREAM_FALLBACK = "https://api.radioking.io/radio/512377/listen.m3u";
-const STATION_NAME = "Le Direct Matchday";
-const STATION_HOSTS = "avec Dan Pryce & Mara Voss";
-const STATION_FREQ  = "90.3 FM";
+const STATION_NAME = "SportFM";
+const STATION_HOSTS = "Radio · Web · Réseaux sociaux";
+const STATION_FREQ  = "91.9 FM";
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 const crests = ['#0B245E','#10307a','#3a4a6b','#5a3b8a','#1f6b4a','#7a4a1f','#444c5e','#6b1f3a'];
@@ -443,7 +444,7 @@ function Player({ liveScores }){
         </div>
         <div className="wave"><i></i><i></i><i></i><i></i><i></i><i></i></div>
         <div className="progress">
-          <span className="listeners"><span className="dot"></span>{liveCount} match{liveCount===1?'':'s'} en direct</span>
+          <span className="listeners"><span className="dot"></span>{liveCount} personne{liveCount===1?'':'s'} en ligne</span>
         </div>
         <div className="vol">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9fb0d8" strokeWidth="2"><path d="M3 10v4h4l5 4V6L7 10H3z"></path><path d="M16 8a5 5 0 0 1 0 8"></path></svg>
@@ -481,7 +482,7 @@ function Rail({ standings, fixtures, onNav, onTrial }){
   return (
     <aside>
       <div className="card">
-        <div className="head"><div className="title"><span className="dot"></span>Classement Metro D1</div>
+        <div className="head"><div className="title"><span className="dot"></span>Classement D1</div>
           <span className="more" onClick={()=>onNav('Standings')}>Tout</span></div>
         <div className="tbl-head"><span>#</span><span>CLUB</span><span>J</span><span>PTS</span></div>
         {rows.map((t,i)=>(
@@ -567,18 +568,64 @@ function Home({ articles, standings, fixtures, onOpen, onNav, onTrial }){
 
 function CategoryView({ cat, articles, onOpen }){
   if(cat==='Shows'){
-    const shows=[
-      ['Le Direct Matchday','EN DIRECT','90.3 FM · tous les jours'],['Le Réveil Coup d\'envoi','EN SEMAINE','06h00–09h00'],
-      ['Le Bureau du Mercato','TRANSFERTS','Vendredi 18h00'],['L\'Antenne d\'après-match','AUDITEURS','Après chaque match'],
-      ['Vision Parquet','BASKET','Mar & Jeu'],['Le Récap du Dimanche','HEBDO','Dim 20h00'],
+    const showGroups = [
+      { title:'Émissions sportives de référence', items:[
+        { name:'Happy Day', sub:'MATINALE', meta:'Lun–Ven 06h–08h · Jules Gamligo', desc:'Matinale sportive qui accompagne les auditeurs au début de la journée.' },
+        { name:'Carrefour des Sports', sub:'SPORT', meta:'Mar 18h–19h · Latif Yorouma', desc:'Découverte des disciplines sportives, règles, arbitrage et fédérations.' },
+        { name:'Samedi Sport', sub:'DÉBAT', meta:'Sam 09h–12h · Franck Nunyama', desc:'Grand débat sportif national avec invités et analyses.' },
+        { name:'Dingue de Sport', sub:'ACTU', meta:'Lun & Mer 14h–15h · Franck Nunyama', desc:'Débat, critique et actualité sportive du Togo au monde.' },
+        { name:'Hand Sport', sub:'MAGAZINE', meta:'Lun 18h–19h · Grégoire Attignon', desc:'Magazine dédié aux sports de main.' },
+        { name:'Coup Franc', sub:'DÉBAT', meta:'Jeu 18h–19h · Grégoire Attignon', desc:'Débat sportif autour d\'un sujet défini.' },
+        { name:'Plateau Foot Europe', sub:'FOOTBALL', meta:'Lun & Ven 09h–10h · Latif Yorouma', desc:'Actualité du football européen.' },
+        { name:'Equipe d\'Afrique', sub:'AFRIQUE', meta:'Mar 10h30–12h · Roméo Yetor', desc:'Magazine sur l\'actualité sportive africaine.' },
+        { name:'Defana-Eza Sport', sub:'TEM', meta:'Sam 12h–13h · Latif Yorouma', desc:'Débat contradictoire en langue tem.' },
+        { name:'Jour de Foot', sub:'HEBDO', meta:'Dim 20h30–21h · Rédaction', desc:'Condensé des championnats nationaux.' },
+        { name:'Sport en Mouvement', sub:'DIRECT', meta:'Dim 15h–17h · Rédaction', desc:'Retransmission en direct des matchs du championnat national.' },
+      ]},
+      { title:'Société, interaction et communautés', items:[
+        { name:'NAGBE – Donne ton opinion', sub:'INTERACTIF', meta:'Lun/Mar/Jeu · JP Tata Agbézoukin', desc:'Émission interactive où les auditeurs donnent leurs avis.' },
+        { name:'Ekabo', sub:'EWE', meta:'Lun/Jeu/Dim · Tata Francisca', desc:'Émission sociale et citoyenne en ewe.' },
+        { name:'Kametégnawo', sub:'MINA', meta:'Ven 16h30–18h · JP Tata', desc:'Magazine sportif en langue mina avec personnes ressources.' },
+        { name:'Dusu Dini', sub:'TEM', meta:'Mer 09h–10h · Latif Yorouma', desc:'Actualité sportive en langue tem avec parole aux auditeurs.' },
+        { name:'Né Mi Gbloadé', sub:'MINA', meta:'Mer 10h30–12h · Francisca & JP Tata', desc:'Programme en mina sur l\'actualité sportive et sociale.' },
+        { name:'Agbantalo', sub:'IFE', meta:'Jeu 20h–21h · Kintche', desc:'Émission interactive en ife sur les valeurs morales et culturelles.' },
+        { name:'English Show', sub:'ENGLISH', meta:'Mardi · Neema & Olatunde', desc:'Émission en anglais couvrant SportFM à des publics et partenaires anglophones.' },
+      ]},
+      { title:'Éducation, impact, culture et divertissement', items:[
+        { name:'Sport et Nutrition', sub:'SANTÉ', meta:'Jeu 10h–11h · Aicha Coulibaly', desc:'Conseils sur la nutrition et l\'activité physique.' },
+        { name:'Priorité Éducation', sub:'ÉDUCATION', meta:'Jeu 17h–18h · Roméo Yetor', desc:'Tribune pour les enseignants et les formateurs.' },
+        { name:'Milawoe', sub:'ENVIRONNEMENT', meta:'Mar 16h–17h · Aicha Coulibaly', desc:'Programme sur l\'environnement, l\'agriculture et le climat.' },
+        { name:'Togo Tempo', sub:'MUSIQUE', meta:'Mar 15h–16h · Théo Ajavon', desc:'Nouvelles sorties musicales au Togo.' },
+        { name:'La Culture en +', sub:'CULTURE', meta:'Jeu 15h–16h · Joanita Blavo-Tsri', desc:'Vitrine de l\'actualité culturelle.' },
+        { name:'Cocktail Stars', sub:'MUSIQUE', meta:'Ven 18h–19h · Roméo Yetor', desc:'Émission musicale et culturelle pour lancer le week-end.' },
+        { name:'N\'HUN', sub:'HUMOUR', meta:'Sam 08h–09h · Rodé', desc:'Programme 100 % humour en ewe.' },
+        { name:'Week-end Discothèque', sub:'MUSIQUE', meta:'Sam 20h–22h · Théo Ajavon', desc:'Musique, nouveautés et dédicaces.' },
+        { name:'Gbadéogbé', sub:'MINA', meta:'Dim 08h30–10h · Nufafa Assafo', desc:'Retour sur le passé en musique en mina.' },
+        { name:'Célébration', sub:'GOSPEL', meta:'Dim 12h30–13h30 · Jules Gamligo', desc:'Programme de chansons gospel avec dédicaces.' },
+      ]},
     ];
     return (
-      <div className="article" style={{maxWidth:880}}>
-        <div className="sechead" style={{marginTop:0}}><h2 style={{fontSize:22}}>Nos émissions</h2><div className="line"></div></div>
-        <div className="grid3">{shows.map((s,i)=>(
-          <div className="gcard" key={i}><div className="img shot"></div>
-            <div className="eyebrow">{s[1]}</div><h4>{s[0]}</h4><div className="meta">{s[2]}</div></div>
-        ))}</div>
+      <div style={{maxWidth:960,paddingTop:26,paddingBottom:60}}>
+        {showGroups.map((grp,gi)=>(
+          <div key={gi}>
+            <div className="sechead" style={{marginTop:gi===0?0:36}}>
+              <h2 style={{fontSize:17}}>{grp.title}</h2><div className="line"></div>
+            </div>
+            <div className="grid3">
+              {grp.items.map((s,i)=>(
+                <div className="gcard" key={i}>
+                  <div style={{aspectRatio:'16/10',borderRadius:9,overflow:'hidden',background:'repeating-linear-gradient(135deg,#e9ebf2,#e9ebf2 11px,#e3e6ef 11px,#e3e6ef 22px)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                    <span style={{fontSize:11,color:'#9aa1b6',fontFamily:'ui-monospace,monospace'}}>[ photo ]</span>
+                  </div>
+                  <div className="eyebrow" style={{marginTop:10}}>{s.sub}</div>
+                  <h4 style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:700,fontSize:17,lineHeight:1.15,letterSpacing:'-.005em',margin:0,color:'var(--navy)'}}>{s.name}</h4>
+                  <div className="meta" style={{fontSize:12,color:'var(--muted-2)',marginTop:5}}>{s.meta}</div>
+                  <div style={{fontSize:12.5,color:'#5a6178',marginTop:5,lineHeight:1.4}}>{s.desc}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
     );
   }
@@ -605,7 +652,7 @@ function StandingsView({ standings }){
   const cols="34px 1fr 36px 36px 36px 36px 44px";
   return (
     <div className="article" style={{maxWidth:880}}>
-      <div className="sechead" style={{marginTop:0}}><h2 style={{fontSize:22}}>Metro D1 — Classement complet</h2><div className="line"></div></div>
+      <div className="sechead" style={{marginTop:0}}><h2 style={{fontSize:22}}>Classement D1</h2><div className="line"></div></div>
       <div className="card">
         <div style={{display:'grid',gridTemplateColumns:cols,padding:'10px 18px',fontSize:11,fontWeight:700,letterSpacing:'.05em',color:'var(--muted-2)',borderBottom:'1px solid #eef0f4'}}>
           <span>#</span><span>CLUB</span><span style={{textAlign:'center'}}>J</span><span style={{textAlign:'center'}}>G</span><span style={{textAlign:'center'}}>N</span><span style={{textAlign:'center'}}>P</span><span style={{textAlign:'right'}}>PTS</span>
@@ -698,13 +745,51 @@ function PartnerView({ onBack, toast }){
         <div className="swoosh-big"></div>
         <div className="wrap">
           <div className="kicker">Devenir partenaire</div>
-          <h1>Placez votre marque au cœur de la Metro D1</h1>
-          <p>SportFM touche des milliers de passionnés de sport local à chaque journée — à l'antenne, en ligne et dans leur boîte mail. Parlez-nous de vos objectifs et nous construirons le pack qui vous correspond.</p>
+          <h1>Associez votre marque à la voix du sport au Togo</h1>
+          <p>Depuis 25 ans, SportFM est la référence sport au Togo — à l'antenne sur 91.9 FM, sur le web et sur les réseaux sociaux. Une plateforme multimédia en 6 langues qui touche des audiences variées, engagées et fidèles.</p>
           <div className="partner-stats">
-            <div className="st"><div className="n">48k</div><div className="l">auditeurs / mois</div></div>
-            <div className="st"><div className="n">120k</div><div className="l">visites / mois</div></div>
-            <div className="st"><div className="n">9k</div><div className="l">abonnés newsletter</div></div>
-            <div className="st"><div className="n">100%</div><div className="l">focus D1 local</div></div>
+            <div className="st"><div className="n">493k</div><div className="l">vues TikTok</div></div>
+            <div className="st"><div className="n">213k</div><div className="l">vues Facebook</div></div>
+            <div className="st"><div className="n">85k</div><div className="l">vues YouTube</div></div>
+            <div className="st"><div className="n">25 ans</div><div className="l">de crédibilité</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div className="wrap" style={{paddingTop:40,paddingBottom:0}}>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:20,marginBottom:40}}>
+          <div style={{background:'#fff',border:'1px solid var(--line)',borderRadius:14,padding:24}}>
+            <div style={{fontSize:28,marginBottom:8}}>📻</div>
+            <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:18,color:'var(--navy)',marginBottom:6}}>Radio 91.9 FM</div>
+            <p style={{fontSize:13.5,color:'#5a6178',lineHeight:1.5,margin:0}}>Diffusion en direct sur 91.9 FM. Spots, sponsoring d'émission, jingles brandés — votre message entre dans les foyers, les voitures et les lieux de travail.</p>
+          </div>
+          <div style={{background:'#fff',border:'1px solid var(--line)',borderRadius:14,padding:24}}>
+            <div style={{fontSize:28,marginBottom:8}}>🌐</div>
+            <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:18,color:'var(--navy)',marginBottom:6}}>Site web</div>
+            <p style={{fontSize:13.5,color:'#5a6178',lineHeight:1.5,margin:0}}>Bannières display, articles sponsorisés, intégrations éditoriales. Votre marque visible sur chaque article, chaque résultat, chaque classement.</p>
+          </div>
+          <div style={{background:'#fff',border:'1px solid var(--line)',borderRadius:14,padding:24}}>
+            <div style={{fontSize:28,marginBottom:8}}>📱</div>
+            <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:18,color:'var(--navy)',marginBottom:6}}>Réseaux sociaux</div>
+            <p style={{fontSize:13.5,color:'#5a6178',lineHeight:1.5,margin:0}}>TikTok, Facebook, YouTube — 405 commentaires d'engagement moyen. Contenus vidéo brandés qui se propagent sur toute l'Afrique de l'Ouest et la diaspora.</p>
+          </div>
+        </div>
+
+        <div style={{background:'var(--navy)',borderRadius:14,padding:28,marginBottom:40,display:'grid',gridTemplateColumns:'1fr 1fr',gap:30,alignItems:'center'}}>
+          <div>
+            <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:13,letterSpacing:'.08em',color:'#7e8cb5',marginBottom:8}}>6 LANGUES · 1 PLATEFORME</div>
+            <h2 style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:26,color:'#fff',margin:'0 0 10px',lineHeight:1.1}}>Une force rare : parler à plusieurs communautés</h2>
+            <p style={{fontSize:14,color:'#b9c2dc',margin:'0 0 16px',lineHeight:1.5}}>Français · Ewe · Mina · Tem · Ife · Anglais. Votre marque s'exprime dans la langue de chaque auditeur — une proximité impossible à reproduire en achetant de la publicité générique.</p>
+            <div style={{fontSize:12.5,color:'#7e8cb5'}}>Répartition géographique : Togo 32,5 % · Côte d'Ivoire 9,6 % · Sénégal 8,2 % · France 6 % · États-Unis 3 %</div>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+            {[['TikTok','493 000 vues','27 000 likes · 3 197 partages'],['Facebook','212 900 vues','7 600 interactions · 603 abonnés'],['YouTube','84 600 vues','+352 nouveaux abonnés'],['Engagement','405 commentaires','Audience active et réactive']].map(([pl,n,sub])=>(
+              <div key={pl} style={{background:'rgba(255,255,255,.07)',borderRadius:10,padding:14}}>
+                <div style={{fontSize:11,fontWeight:700,letterSpacing:'.06em',color:'#7e8cb5',marginBottom:4}}>{pl}</div>
+                <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:20,color:'#fff'}}>{n}</div>
+                <div style={{fontSize:11.5,color:'#9fb0d8',marginTop:3}}>{sub}</div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -831,7 +916,7 @@ function ArticleEditor({ initial, onSave, onCancel, toast }){
     setBusy(false);
     if(res.error){ toast('Échec de l\'enregistrement — '+res.error.message); return; }
     toast(a.id?'Article mis à jour':'Article publié');
-    onSave();
+    onSave(a.title);
   }
   return (
     <div className="panel">
@@ -862,15 +947,16 @@ function ArticleEditor({ initial, onSave, onCancel, toast }){
   );
 }
 
-function AdminArticles({ articles, reload, toast }){
+function AdminArticles({ articles, reload, toast, adminEmail }){
   const [editing,setEditing]=useState(null);
   async function del(a){
     if(!confirm(`Supprimer « ${a.title} » ?`)) return;
     const { error }=await sb.from('articles').delete().eq('id',a.id);
     if(error){ toast('Échec de la suppression'); return; }
+    await logAction(adminEmail,'Suppression article',a.title);
     toast('Article supprimé'); reload();
   }
-  if(editing!==null) return <ArticleEditor initial={editing} onSave={()=>{setEditing(null);reload();}} onCancel={()=>setEditing(null)} toast={toast} />;
+  if(editing!==null) return <ArticleEditor initial={editing} onSave={async(msg)=>{await logAction(adminEmail,editing.id?'Modification article':'Nouvel article',editing.title||msg);setEditing(null);reload();}} onCancel={()=>setEditing(null)} toast={toast} />;
   return (
     <div className="panel">
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18}}>
@@ -901,27 +987,51 @@ function AdminArticles({ articles, reload, toast }){
 // ============================================================
 //  ADMIN — SCORES & STANDINGS
 // ============================================================
-function AdminScores({ scores, standings, fixtures, reload, toast }){
+function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail }){
   const [ns,setNs]=useState({home:'',away:'',score:'0 - 0',status:"0'",is_live:true});
+  const [nf,setNf]=useState({home:'',away:'',kickoff_time:'',kickoff_day:'',sort_order:0});
+
   async function addScore(){
     if(!ns.home||!ns.away){ toast('Renseignez les deux équipes'); return; }
     const { error }=await sb.from('scores').insert([ns]);
     if(error){ toast('Échec : '+error.message); return; }
+    await logAction(adminEmail,'Score ajouté',`${ns.home} vs ${ns.away}`);
     setNs({home:'',away:'',score:'0 - 0',status:"0'",is_live:true}); toast('Score ajouté'); reload();
   }
   async function updScore(id,patch){
     const { error }=await sb.from('scores').update(patch).eq('id',id);
     if(error) toast('Échec de la mise à jour'); else reload();
   }
-  async function delScore(id){
+  async function delScore(id,label){
     const { error }=await sb.from('scores').delete().eq('id',id);
-    if(error) toast('Échec de la suppression'); else { toast('Supprimé'); reload(); }
+    if(error) toast('Échec de la suppression');
+    else { await logAction(adminEmail,'Score supprimé',label); toast('Supprimé'); reload(); }
   }
-  async function updStanding(id,patch){
+  async function updStanding(id,patch,team){
     const { error }=await sb.from('standings').update(patch).eq('id',id);
+    if(error) toast('Échec de la mise à jour');
+    else { await logAction(adminEmail,'Classement modifié',team+' — '+JSON.stringify(patch)); reload(); }
+  }
+
+  async function addFixture(){
+    if(!nf.home||!nf.away){ toast('Renseignez les deux équipes'); return; }
+    const { error }=await sb.from('fixtures').insert([nf]);
+    if(error){ toast('Échec : '+error.message); return; }
+    await logAction(adminEmail,'Match ajouté',`${nf.home} vs ${nf.away} — ${nf.kickoff_day}`);
+    setNf({home:'',away:'',kickoff_time:'',kickoff_day:'',sort_order:0}); toast('Match ajouté'); reload();
+  }
+  async function updFixture(id,patch){
+    const { error }=await sb.from('fixtures').update(patch).eq('id',id);
     if(error) toast('Échec de la mise à jour'); else reload();
   }
+  async function delFixture(id,label){
+    const { error }=await sb.from('fixtures').delete().eq('id',id);
+    if(error) toast('Échec de la suppression');
+    else { await logAction(adminEmail,'Match supprimé',label); toast('Supprimé'); reload(); }
+  }
+
   const rows=[...standings].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+  const fixRows=[...fixtures].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
 
   return (
     <>
@@ -936,7 +1046,7 @@ function AdminScores({ scores, standings, fixtures, reload, toast }){
               <td><input className="inline-edit wide" defaultValue={s.away} onBlur={e=>updScore(s.id,{away:e.target.value})} /></td>
               <td><input className="inline-edit" defaultValue={s.status} onBlur={e=>updScore(s.id,{status:e.target.value})} /></td>
               <td><input type="checkbox" defaultChecked={s.is_live} onChange={e=>updScore(s.id,{is_live:e.target.checked})} /></td>
-              <td style={{textAlign:'right'}}><button className="icon-btn del" onClick={()=>delScore(s.id)}>Retirer</button></td>
+              <td style={{textAlign:'right'}}><button className="icon-btn del" onClick={()=>delScore(s.id,`${s.home} vs ${s.away}`)}>Retirer</button></td>
             </tr>
           ))}
           <tr style={{background:'#fafbfc'}}>
@@ -952,19 +1062,45 @@ function AdminScores({ scores, standings, fixtures, reload, toast }){
       </div>
 
       <div className="panel">
+        <h3>Prochains matchs</h3>
+        <table className="admin-table"><thead><tr><th>Domicile</th><th>Extérieur</th><th>Heure</th><th>Jour</th><th>Ordre</th><th></th></tr></thead>
+        <tbody>
+          {fixRows.map(f=>(
+            <tr key={f.id}>
+              <td><input className="inline-edit wide" defaultValue={f.home} onBlur={e=>updFixture(f.id,{home:e.target.value})} /></td>
+              <td><input className="inline-edit wide" defaultValue={f.away} onBlur={e=>updFixture(f.id,{away:e.target.value})} /></td>
+              <td><input className="inline-edit" defaultValue={f.kickoff_time} onBlur={e=>updFixture(f.id,{kickoff_time:e.target.value})} placeholder="20h30" /></td>
+              <td><input className="inline-edit wide" defaultValue={f.kickoff_day} onBlur={e=>updFixture(f.id,{kickoff_day:e.target.value})} placeholder="Sam 28 juin" /></td>
+              <td><input className="inline-edit" style={{width:46}} type="number" defaultValue={f.sort_order||0} onBlur={e=>updFixture(f.id,{sort_order:+e.target.value})} /></td>
+              <td style={{textAlign:'right'}}><button className="icon-btn del" onClick={()=>delFixture(f.id,`${f.home} vs ${f.away}`)}>Retirer</button></td>
+            </tr>
+          ))}
+          <tr style={{background:'#fafbfc'}}>
+            <td><input className="inline-edit wide" placeholder="Hawks FC" value={nf.home} onChange={e=>setNf({...nf,home:e.target.value})} /></td>
+            <td><input className="inline-edit wide" placeholder="United SC" value={nf.away} onChange={e=>setNf({...nf,away:e.target.value})} /></td>
+            <td><input className="inline-edit" placeholder="20h30" value={nf.kickoff_time} onChange={e=>setNf({...nf,kickoff_time:e.target.value})} /></td>
+            <td><input className="inline-edit wide" placeholder="Sam 28 juin" value={nf.kickoff_day} onChange={e=>setNf({...nf,kickoff_day:e.target.value})} /></td>
+            <td><input className="inline-edit" style={{width:46}} type="number" value={nf.sort_order} onChange={e=>setNf({...nf,sort_order:+e.target.value})} /></td>
+            <td style={{textAlign:'right'}}><button className="icon-btn" onClick={addFixture}>+ Ajouter</button></td>
+          </tr>
+        </tbody></table>
+        <div className="hint" style={{marginTop:10,fontSize:12,color:'var(--muted)'}}>Les modifications sont enregistrées dès que vous quittez une cellule. L'ordre d'affichage suit la colonne Ordre.</div>
+      </div>
+
+      <div className="panel">
         <h3>Classement du championnat</h3>
         <table className="admin-table"><thead><tr><th>#</th><th>Équipe</th><th>Abrév.</th><th>J</th><th>G</th><th>N</th><th>P</th><th>PTS</th></tr></thead>
         <tbody>
           {rows.map((t,i)=>(
             <tr key={t.id}>
               <td style={{color:'var(--muted)'}}>{i+1}</td>
-              <td><input className="inline-edit wide" defaultValue={t.team} onBlur={e=>updStanding(t.id,{team:e.target.value})} /></td>
-              <td><input className="inline-edit" style={{width:50}} defaultValue={t.abbr} onBlur={e=>updStanding(t.id,{abbr:e.target.value})} /></td>
-              <td><input className="inline-edit" style={{width:46}} type="number" defaultValue={t.played} onBlur={e=>updStanding(t.id,{played:+e.target.value})} /></td>
-              <td><input className="inline-edit" style={{width:46}} type="number" defaultValue={t.won} onBlur={e=>updStanding(t.id,{won:+e.target.value})} /></td>
-              <td><input className="inline-edit" style={{width:46}} type="number" defaultValue={t.drawn} onBlur={e=>updStanding(t.id,{drawn:+e.target.value})} /></td>
-              <td><input className="inline-edit" style={{width:46}} type="number" defaultValue={t.lost} onBlur={e=>updStanding(t.id,{lost:+e.target.value})} /></td>
-              <td><input className="inline-edit" style={{width:50}} type="number" defaultValue={t.points} onBlur={e=>updStanding(t.id,{points:+e.target.value})} /></td>
+              <td><input className="inline-edit wide" defaultValue={t.team} onBlur={e=>updStanding(t.id,{team:e.target.value},t.team)} /></td>
+              <td><input className="inline-edit" style={{width:50}} defaultValue={t.abbr} onBlur={e=>updStanding(t.id,{abbr:e.target.value},t.team)} /></td>
+              <td><input className="inline-edit" style={{width:46}} type="number" defaultValue={t.played} onBlur={e=>updStanding(t.id,{played:+e.target.value},t.team)} /></td>
+              <td><input className="inline-edit" style={{width:46}} type="number" defaultValue={t.won} onBlur={e=>updStanding(t.id,{won:+e.target.value},t.team)} /></td>
+              <td><input className="inline-edit" style={{width:46}} type="number" defaultValue={t.drawn} onBlur={e=>updStanding(t.id,{drawn:+e.target.value},t.team)} /></td>
+              <td><input className="inline-edit" style={{width:46}} type="number" defaultValue={t.lost} onBlur={e=>updStanding(t.id,{lost:+e.target.value},t.team)} /></td>
+              <td><input className="inline-edit" style={{width:50}} type="number" defaultValue={t.points} onBlur={e=>updStanding(t.id,{points:+e.target.value},t.team)} /></td>
             </tr>
           ))}
         </tbody></table>
@@ -977,11 +1113,12 @@ function AdminScores({ scores, standings, fixtures, reload, toast }){
 // ============================================================
 //  ADMIN — PARTNERS
 // ============================================================
-function AdminPartners({ partners, reload, toast }){
+function AdminPartners({ partners, reload, toast, adminEmail }){
   const [open,setOpen]=useState(null);
-  async function setStatus(id,status){
+  async function setStatus(id,status,company){
     const { error }=await sb.from('partners').update({status}).eq('id',id);
-    if(error) toast('Échec de la mise à jour'); else { toast('Marqué : '+status); reload(); }
+    if(error) toast('Échec de la mise à jour');
+    else { await logAction(adminEmail,'Statut partenaire → '+status,company); toast('Marqué : '+status); reload(); }
   }
   const statusLabel={ new:'nouveau', contacted:'contacté', won:'gagné', archived:'archivé' };
   return (
@@ -1013,9 +1150,9 @@ function AdminPartners({ partners, reload, toast }){
                   <div style={{gridColumn:'1 / -1'}}><strong>Message :</strong> {p.message||'—'}</div>
                 </div>
                 <div style={{display:'flex',gap:8,padding:'8px 4px'}}>
-                  <button className="icon-btn" onClick={()=>setStatus(p.id,'contacted')}>Marquer contacté</button>
-                  <button className="icon-btn" onClick={()=>setStatus(p.id,'won')}>Marquer gagné</button>
-                  <button className="icon-btn del" onClick={()=>setStatus(p.id,'archived')}>Archiver</button>
+                  <button className="icon-btn" onClick={()=>setStatus(p.id,'contacted',p.company)}>Marquer contacté</button>
+                  <button className="icon-btn" onClick={()=>setStatus(p.id,'won',p.company)}>Marquer gagné</button>
+                  <button className="icon-btn del" onClick={()=>setStatus(p.id,'archived',p.company)}>Archiver</button>
                   <a className="icon-btn" href={`mailto:${p.email}?subject=Partenariat SportFM`}>E-mail →</a>
                 </div>
               </td></tr>
@@ -1032,12 +1169,13 @@ function AdminPartners({ partners, reload, toast }){
 // ============================================================
 function Admin({ session, onExit, data, reload, toast }){
   const [tab,setTab]=useState('articles');
+  const adminEmail = session.user.email;
   async function logout(){ await sb.auth.signOut(); onExit(); }
   return (
     <div className="admin">
       <div className="admin-top"><div className="wrap">
         <Logo onClick={()=>{}} /><span className="tag">ADMIN</span><div className="grow"></div>
-        <span style={{fontSize:13,color:'#cfd6ea'}}>{session.user.email}</span>
+        <span style={{fontSize:13,color:'#cfd6ea'}}>{adminEmail}</span>
         <button className="exit" onClick={onExit}>Voir le site →</button>
         <button className="exit" onClick={logout}>Déconnexion</button>
       </div></div>
@@ -1045,11 +1183,13 @@ function Admin({ session, onExit, data, reload, toast }){
         <button className={tab==='articles'?'active':''} onClick={()=>setTab('articles')}>Articles</button>
         <button className={tab==='scores'?'active':''} onClick={()=>setTab('scores')}>Scores &amp; Classement</button>
         <button className={tab==='partners'?'active':''} onClick={()=>setTab('partners')}>Partenaires</button>
+        <button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}>Journal</button>
       </div></div>
       <div className="admin-body"><div className="wrap">
-        {tab==='articles' && <AdminArticles articles={data.articles} reload={reload} toast={toast} />}
-        {tab==='scores' && <AdminScores scores={data.scores} standings={data.standings} fixtures={data.fixtures} reload={reload} toast={toast} />}
-        {tab==='partners' && <AdminPartners partners={data.partners} reload={reload} toast={toast} />}
+        {tab==='articles' && <AdminArticles articles={data.articles} reload={reload} toast={toast} adminEmail={adminEmail} />}
+        {tab==='scores' && <AdminScores scores={data.scores} standings={data.standings} fixtures={data.fixtures} reload={reload} toast={toast} adminEmail={adminEmail} />}
+        {tab==='partners' && <AdminPartners partners={data.partners} reload={reload} toast={toast} adminEmail={adminEmail} />}
+        {tab==='logs' && <AdminLogs />}
       </div></div>
     </div>
   );
@@ -1058,6 +1198,40 @@ function Admin({ session, onExit, data, reload, toast }){
 // ============================================================
 //  HELPERS
 // ============================================================
+async function logAction(adminEmail, action, details=''){
+  try {
+    await sb.from('admin_logs').insert([{ admin_email:adminEmail, action, details:details||null }]);
+  } catch(e){}
+}
+
+function AdminLogs(){
+  const [logs,setLogs]=useState([]);
+  const [busy,setBusy]=useState(true);
+  useEffect(()=>{
+    sb.from('admin_logs').select('*').order('created_at',{ascending:false}).limit(200)
+      .then(({data})=>{ setLogs(data||[]); setBusy(false); });
+  },[]);
+  if(busy) return <Spinner/>;
+  return (
+    <div className="panel">
+      <h3>Journal d'activité ({logs.length})</h3>
+      {logs.length===0 ? <div className="empty">Aucune action enregistrée pour l'instant.</div> :
+      <table className="admin-table"><thead><tr>
+        <th>Admin</th><th>Action</th><th>Détails</th><th>Date</th>
+      </tr></thead><tbody>
+        {logs.map(l=>(
+          <tr key={l.id}>
+            <td style={{fontWeight:600,fontSize:12.5,color:'var(--navy)'}}>{l.admin_email}</td>
+            <td><span className="pill pub" style={{whiteSpace:'nowrap'}}>{l.action}</span></td>
+            <td style={{fontSize:12.5,color:'var(--muted)',maxWidth:340}}>{l.details||'—'}</td>
+            <td style={{color:'var(--muted)',fontSize:12.5,whiteSpace:'nowrap'}}>{timeAgo(l.created_at)}</td>
+          </tr>
+        ))}
+      </tbody></table>}
+    </div>
+  );
+}
+
 function timeAgo(ts){
   if(!ts) return '';
   const d=new Date(ts), now=new Date(), s=Math.floor((now-d)/1000);
@@ -1142,7 +1316,7 @@ function App(){
     <div className="app-pad">
       <div className="util"><div className="wrap">
         <div className="left">
-          <span className="live"><span className="dot"></span>Metro D1 · 18ᵉ journée</span>
+          <span></span>
         </div>
         <div className="right">
           <span onClick={()=>navTo('Shows')}>Grille des programmes</span>
@@ -1186,7 +1360,7 @@ function App(){
           <span onClick={()=>navTo('Shows')}>Programmes</span>
           <span>Publicité</span><span>Contact</span>
         </div>
-        <div className="copy">© 2026 SportFM · Couverture Metro D1</div>
+        <div className="copy">© 2026 SportFM</div>
       </div></footer>
 
       <Player liveScores={data.scores} />
