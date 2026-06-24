@@ -1392,31 +1392,141 @@ function AdminPartners({ partners, reload, toast, adminEmail }){
 // ============================================================
 //  ADMIN SHELL
 // ============================================================
-function Admin({ session, onExit, data, reload, toast }){
+function AdminUsers({ adminEmail, toast }){
+  const [users,setUsers]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [newEmail,setNewEmail]=useState('');
+  const [newRole,setNewRole]=useState('journalist');
+  const [saving,setSaving]=useState(false);
+
+  async function load(){
+    const { data }=await sb.from('user_roles').select('*').order('created_at',{ascending:true});
+    setUsers(data||[]); setLoading(false);
+  }
+  useEffect(()=>{ load(); },[]);
+
+  async function addUser(){
+    if(!newEmail.trim()){ toast('E-mail requis'); return; }
+    setSaving(true);
+    const { error }=await sb.from('user_roles').upsert([{ email:newEmail.trim().toLowerCase(), role:newRole }],{onConflict:'email'});
+    setSaving(false);
+    if(error){ toast('Erreur : '+error.message); return; }
+    await logAction(adminEmail,'Rôle attribué — '+newRole, newEmail);
+    toast('Utilisateur enregistré'); setNewEmail(''); load();
+  }
+
+  async function changeRole(id, email, role){
+    await sb.from('user_roles').update({role}).eq('id',id);
+    await logAction(adminEmail,'Rôle modifié → '+role, email);
+    toast('Rôle mis à jour'); load();
+  }
+
+  async function removeUser(id, email){
+    if(!confirm(`Retirer ${email} de l'équipe ?`)) return;
+    await sb.from('user_roles').delete().eq('id',id);
+    await logAction(adminEmail,'Utilisateur retiré', email);
+    toast('Retiré'); load();
+  }
+
+  const roleLabel={ admin:'Administrateur', journalist:'Journaliste web' };
+  const rolePill={ admin:'pub', journalist:'contacted' };
+
+  return (
+    <div className="panel">
+      <h3>Équipe &amp; rôles</h3>
+      <div style={{background:'rgba(239,0,63,.05)',border:'1px solid rgba(239,0,63,.2)',borderRadius:10,padding:'12px 16px',marginBottom:20,fontSize:13.5,color:'#5a6178',lineHeight:1.5}}>
+        <strong style={{color:'var(--navy)'}}>Administrateur</strong> — accès complet (articles, scores, partenaires, publicités, journal, équipe).<br/>
+        <strong style={{color:'var(--navy)'}}>Journaliste web</strong> — accès limité : articles et scores uniquement. Partenaires et publicités masqués.
+      </div>
+
+      {loading ? <Spinner/> :
+      <table className="admin-table" style={{marginBottom:20}}><thead><tr>
+        <th>E-mail</th><th>Rôle</th><th>Depuis</th><th></th>
+      </tr></thead><tbody>
+        {users.map(u=>(
+          <tr key={u.id}>
+            <td style={{fontWeight:600}}>{u.email}{u.email===adminEmail&&<span style={{marginLeft:8,fontSize:11,color:'var(--muted)'}}>( vous )</span>}</td>
+            <td>
+              <select value={u.role} onChange={e=>changeRole(u.id,u.email,e.target.value)}
+                disabled={u.email===adminEmail}
+                style={{padding:'5px 10px',border:'1px solid var(--line)',borderRadius:7,fontSize:13,background:'#fff',cursor:'pointer'}}>
+                <option value="admin">Administrateur</option>
+                <option value="journalist">Journaliste web</option>
+              </select>
+            </td>
+            <td style={{color:'var(--muted)',fontSize:12.5}}>{timeAgo(u.created_at)}</td>
+            <td style={{textAlign:'right'}}>
+              {u.email!==adminEmail &&
+                <button className="icon-btn del" onClick={()=>removeUser(u.id,u.email)}>Retirer</button>}
+            </td>
+          </tr>
+        ))}
+      </tbody></table>}
+
+      <div style={{borderTop:'1px solid var(--line)',paddingTop:20}}>
+        <h3 style={{fontSize:15,marginBottom:14}}>Ajouter un membre</h3>
+        <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end'}}>
+          <div className="field" style={{margin:0,flex:2,minWidth:200}}>
+            <label>E-mail Supabase de l'utilisateur</label>
+            <input value={newEmail} onChange={e=>setNewEmail(e.target.value)}
+              placeholder="journaliste@sportfm.com"
+              onKeyDown={e=>e.key==='Enter'&&addUser()} />
+          </div>
+          <div className="field" style={{margin:0,flex:1,minWidth:160}}>
+            <label>Rôle</label>
+            <select value={newRole} onChange={e=>setNewRole(e.target.value)}
+              style={{width:'100%',padding:'11px 13px',border:'1px solid var(--line)',borderRadius:9,fontSize:14,outline:'none'}}>
+              <option value="journalist">Journaliste web</option>
+              <option value="admin">Administrateur</option>
+            </select>
+          </div>
+          <button className="btn-primary" disabled={saving} onClick={addUser} style={{marginBottom:1}}>
+            {saving?'…':'+ Ajouter'}
+          </button>
+        </div>
+        <div className="hint" style={{marginTop:8}}>L'utilisateur doit d'abord exister dans Supabase → Authentication → Users.</div>
+      </div>
+    </div>
+  );
+}
+
+function Admin({ session, onExit, data, reload, toast, userRole }){
+  const isAdmin = userRole==='admin';
   const [tab,setTab]=useState('articles');
   const adminEmail = session.user.email;
   async function logout(){ await sb.auth.signOut(); onExit(); }
+
+  // If journalist somehow lands on a restricted tab, redirect
+  useEffect(()=>{
+    if(!isAdmin && (tab==='partners'||tab==='ads'||tab==='users'||tab==='logs')) setTab('articles');
+  },[isAdmin,tab]);
+
   return (
     <div className="admin">
       <div className="admin-top"><div className="wrap">
         <Logo onClick={()=>{}} /><span className="tag">ADMIN</span><div className="grow"></div>
         <span style={{fontSize:13,color:'#cfd6ea'}}>{adminEmail}</span>
+        <span style={{fontSize:11,background:'rgba(255,255,255,.12)',color:'#cfd6ea',padding:'3px 8px',borderRadius:5,fontWeight:700,letterSpacing:'.04em'}}>
+          {isAdmin?'ADMINISTRATEUR':'JOURNALISTE'}
+        </span>
         <button className="exit" onClick={onExit}>Voir le site →</button>
         <button className="exit" onClick={logout}>Déconnexion</button>
       </div></div>
       <div className="admin-tabs"><div className="wrap">
         <button className={tab==='articles'?'active':''} onClick={()=>setTab('articles')}>Articles</button>
         <button className={tab==='scores'?'active':''} onClick={()=>setTab('scores')}>Scores &amp; Classement</button>
-        <button className={tab==='partners'?'active':''} onClick={()=>setTab('partners')}>Partenaires</button>
-        <button className={tab==='ads'?'active':''} onClick={()=>setTab('ads')}>Publicités</button>
-        <button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}>Journal</button>
+        {isAdmin && <button className={tab==='partners'?'active':''} onClick={()=>setTab('partners')}>Partenaires</button>}
+        {isAdmin && <button className={tab==='ads'?'active':''} onClick={()=>setTab('ads')}>Publicités</button>}
+        {isAdmin && <button className={tab==='users'?'active':''} onClick={()=>setTab('users')}>Équipe</button>}
+        {isAdmin && <button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}>Journal</button>}
       </div></div>
       <div className="admin-body"><div className="wrap">
         {tab==='articles' && <AdminArticles articles={data.articles} reload={reload} toast={toast} adminEmail={adminEmail} />}
         {tab==='scores' && <AdminScores scores={data.scores} standings={data.standings} fixtures={data.fixtures} reload={reload} toast={toast} adminEmail={adminEmail} />}
-        {tab==='partners' && <AdminPartners partners={data.partners} reload={reload} toast={toast} adminEmail={adminEmail} />}
-        {tab==='ads' && <AdminAds ads={data.ads||[]} reload={reload} toast={toast} adminEmail={adminEmail} />}
-        {tab==='logs' && <AdminLogs />}
+        {tab==='partners' && isAdmin && <AdminPartners partners={data.partners} reload={reload} toast={toast} adminEmail={adminEmail} />}
+        {tab==='ads' && isAdmin && <AdminAds ads={data.ads||[]} reload={reload} toast={toast} adminEmail={adminEmail} />}
+        {tab==='users' && isAdmin && <AdminUsers adminEmail={adminEmail} toast={toast} />}
+        {tab==='logs' && isAdmin && <AdminLogs />}
       </div></div>
     </div>
   );
@@ -1643,6 +1753,7 @@ function App(){
   const [loading,setLoading]=useState(true);
   const [session,setSession]=useState(null);
   const [authChecked,setAuthChecked]=useState(false);
+  const [userRole,setUserRole]=useState(null); // null = loading, 'admin' | 'journalist'
   const [toast,toastNode]=useToast();
 
   const [data,setData]=useState({ articles:[],standings:[],scores:[],fixtures:[],partners:[],ads:[] });
@@ -1674,12 +1785,25 @@ function App(){
       fixtures:fx.data||[], partners:pt.data||[], ads:ads.data||[] });
   },[]);
 
-  // auth bootstrap
+  // auth bootstrap + role fetch
   useEffect(()=>{
-    sb.auth.getSession().then(({data})=>{ setSession(data.session); setAuthChecked(true); });
-    const { data:sub }=sb.auth.onAuthStateChange((_e,s)=>setSession(s));
+    sb.auth.getSession().then(({data})=>{
+      const s = data.session;
+      setSession(s); setAuthChecked(true);
+      if(s) fetchRole(s.user.email);
+    });
+    const { data:sub }=sb.auth.onAuthStateChange((_e,s)=>{
+      setSession(s);
+      if(s) fetchRole(s.user.email); else setUserRole(null);
+    });
     return ()=>sub.subscription.unsubscribe();
   },[]);
+
+  async function fetchRole(email){
+    const { data }=await sb.from('user_roles').select('role').eq('email',email).maybeSingle();
+    // No record → treat as admin (backward compat for existing users)
+    setUserRole(data?.role || 'admin');
+  }
 
   useEffect(()=>{ loadPublic(); },[loadPublic]);
   useEffect(()=>{ if(route==='admin' && session) loadAdmin(); },[route,session,loadAdmin]);
@@ -1699,7 +1823,8 @@ function App(){
   if(route==='admin'){
     if(!authChecked) return <div className="login-wrap"><div className="spinner" style={{borderTopColor:'#fff'}}/></div>;
     if(!session) return <><AdminLogin onAuthed={s=>{setSession(s);loadAdmin();}} onExit={goSite} />{toastNode}</>;
-    return <><Admin session={session} onExit={goSite} data={data} reload={loadAdmin} toast={toast} />{toastNode}</>;
+    if(userRole===null) return <div className="login-wrap"><div className="spinner" style={{borderTopColor:'#fff'}}/></div>;
+    return <><Admin session={session} onExit={goSite} data={data} reload={loadAdmin} toast={toast} userRole={userRole} />{toastNode}</>;
   }
 
   // ---------- PARTNER ROUTE ----------
