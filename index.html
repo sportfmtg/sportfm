@@ -2312,7 +2312,7 @@ function AdminUsers({ adminEmail, toast }){
               onKeyDown={e=>e.key==='Enter'&&addUser()} />
           </div>
           <div className="field" style={{margin:0,flex:2,minWidth:200}}>
-            <label>E-mail Supabase de l'utilisateur</label>
+            <label>E-mail</label>
             <input value={newEmail} onChange={e=>setNewEmail(e.target.value)}
               placeholder="journaliste@sportfm.com"
               onKeyDown={e=>e.key==='Enter'&&addUser()} />
@@ -2334,7 +2334,6 @@ function AdminUsers({ adminEmail, toast }){
             {saving?'…':'+ Ajouter'}
           </button>
         </div>
-        <div className="hint" style={{marginTop:8}}>L'utilisateur doit d'abord exister dans Supabase → Authentication → Users.</div>
       </div>
     </div>
   );
