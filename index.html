@@ -2979,6 +2979,7 @@ function MonEspace({ session, userPerms, onClose, toast, initialTab }){
   const [newPw,setNewPw]=useState(''); const [confirmPw,setConfirmPw]=useState('');
   const [pwBusy,setPwBusy]=useState(false);
   const [paystubs,setPaystubs]=useState([]);
+  const [linkedEmp,setLinkedEmp]=useState(null);
   const [announcements,setAnnouncements]=useState([]);
   const [notifications,setNotifications]=useState([]);
   const [uploading,setUploading]=useState(false);
@@ -3008,7 +3009,10 @@ function MonEspace({ session, userPerms, onClose, toast, initialTab }){
   useEffect(()=>{
     sb.from('user_roles').select('*').eq('email',email).maybeSingle().then(({data})=>setProfile(data||{}));
     sb.from('employees').select('*').eq('linked_user_email',email).maybeSingle().then(({data})=>{
-      if(data?.id) sb.from('paystubs').select('*').eq('employee_id',data.id).order('period_year',{ascending:false}).then(({data:s})=>setPaystubs(s||[]));
+      if(data?.id){
+        setLinkedEmp(data);
+        sb.from('paystubs').select('*').eq('employee_id',data.id).order('period_year',{ascending:false}).order('period_month',{ascending:false}).then(({data:s})=>setPaystubs(s||[]));
+      }
     });
     sb.from('announcements').select('*').order('pinned',{ascending:false}).order('created_at',{ascending:false}).limit(30)
       .then(({data})=>setAnnouncements(data||[]));
@@ -3189,25 +3193,45 @@ function MonEspace({ session, userPerms, onClose, toast, initialTab }){
 
           {/* PAYSTUBS TAB */}
           {tab==='paystubs' && (
-            <div className="panel">
-              <h3>Mes fiches de paie</h3>
+            <div>
               {paystubs.length===0
-                ? <div className="empty">Aucune fiche de paie disponible.</div>
-                : <table className="admin-table"><thead><tr><th>Période</th><th>Brut</th><th>Net</th><th>Fichier</th></tr></thead>
-                  <tbody>
-                    {paystubs.map(s=>(
-                      <tr key={s.id}>
-                        <td style={{fontWeight:600}}>{s.period_month} {s.period_year}</td>
-                        <td>{s.gross?Number(s.gross).toLocaleString('fr-FR')+' FCFA':'—'}</td>
-                        <td style={{fontWeight:700,color:'#1f7a48'}}>{s.net?Number(s.net).toLocaleString('fr-FR')+' FCFA':'—'}</td>
-                        <td>
-                          {s.file_url
-                            ? <a href={s.file_url} target="_blank" className="btn-ghost" style={{fontSize:12.5,padding:'5px 12px',display:'inline-block',textDecoration:'none'}}>📄 Télécharger</a>
-                            : <span style={{color:'var(--muted)',fontSize:12}}>—</span>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody></table>}
+                ? <div className="panel"><div className="empty">Aucune fiche de paie disponible.</div></div>
+                : paystubs.map(s=>{
+                    const fmt=n=>n?Number(n).toLocaleString('fr-FR')+' FCFA':'—';
+                    const retTotal=(Number(s.cotisations)||0)+(Number(s.impot)||0)+(Number(s.deduction)||0);
+                    return (
+                      <div key={s.id} className="panel" style={{marginBottom:14}}>
+                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:10,marginBottom:14}}>
+                          <div>
+                            <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:18,color:'var(--navy)'}}>{s.period_month} {s.period_year}</div>
+                            {s.reference&&<div style={{fontSize:12,color:'var(--muted)',marginTop:2}}>Réf : {s.reference}</div>}
+                          </div>
+                          <button className="btn-primary" style={{fontSize:13,padding:'8px 16px'}}
+                            onClick={()=>{ if(linkedEmp) generatePaystubPDF(linkedEmp,s); else toast('Données employé introuvables'); }}>
+                            📄 Télécharger PDF
+                          </button>
+                        </div>
+                        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(130px,1fr))',gap:10}}>
+                          {[
+                            {label:'Salaire brut',    value:fmt(s.gross),         color:'#1f7a48'},
+                            {label:'CNSS salarié',    value:fmt(s.cotisations),   color:'#c0392b'},
+                            {label:'TCS',             value:fmt(s.impot),         color:'#c0392b'},
+                            {label:'TS',              value:fmt(s.deduction),     color:'#c0392b'},
+                            s.prime?{label:'Prime',   value:fmt(s.prime),         color:'#1f7a48'}:null,
+                            {label:'Total retenues',  value:retTotal?Number(retTotal).toLocaleString('fr-FR')+' FCFA':'—', color:'#c0392b'},
+                            {label:'NET À PAYER',     value:fmt(s.net),           color:'var(--navy)', big:true},
+                          ].filter(Boolean).map((item,i)=>(
+                            <div key={i} style={{background:item.big?'var(--navy)':'#f6f7f9',borderRadius:8,padding:'10px 14px',border:'1px solid var(--line)'}}>
+                              <div style={{fontSize:10.5,fontWeight:700,letterSpacing:'.04em',color:item.big?'rgba(255,255,255,.7)':'var(--muted)',marginBottom:4}}>{item.label.toUpperCase()}</div>
+                              <div style={{fontWeight:800,fontSize:item.big?16:14,color:item.big?'#fff':item.color}}>{item.value}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {s.note&&<div style={{marginTop:12,fontSize:12.5,color:'#5a6178',borderTop:'1px solid var(--line)',paddingTop:10}}>📝 {s.note}</div>}
+                      </div>
+                    );
+                  })
+              }
             </div>
           )}
 
