@@ -532,12 +532,12 @@ const STATION_FREQ  = "91.9 FM";
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 const crests = ['#0B245E','#10307a','#3a4a6b','#5a3b8a','#1f6b4a','#7a4a1f','#444c5e','#6b1f3a'];
 const NAVS = [
-  { key:'Home', label:'Accueil' },
-  { key:'Football', label:'Football' },
-  { key:'Basketball', label:'Basket' },
+  { key:'Home',      label:'Accueil' },
+  { key:'Articles',  label:'Articles' },
   { key:'Standings', label:'Classement' },
-  { key:'Shows', label:'Émissions' },
+  { key:'Shows',     label:'Émissions' },
 ];
+const ARTICLE_CATS = ['Tout','Football','Basket','Actu','Émissions','CDM','Autre'];
 const navLabel = (key)=> (NAVS.find(n=>n.key===key)||{}).label || key;
 
 // ============================================================
@@ -884,6 +884,90 @@ function StandingsView({ standings }){
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function ArticlesPage({ articles, onOpen }){
+  const [activeCat, setActiveCat] = useState('Tout');
+  const cdmCats = ['cdm','coupe du monde','world cup'];
+
+  const filtered = (articles||[]).filter(a=>{
+    if(!a.published) return false;
+    if(activeCat==='Tout') return true;
+    const c = (a.category||'').toLowerCase();
+    if(activeCat==='CDM')      return cdmCats.includes(c);
+    if(activeCat==='Football') return c==='football';
+    if(activeCat==='Basket')   return c==='basketball'||c==='basket';
+    if(activeCat==='Actu')     return c==='actu'||c===''||!a.category;
+    if(activeCat==='Émissions')return c==='shows'||c==='émissions'||c==='emissions';
+    return c!=='football'&&c!=='basketball'&&c!=='basket'&&!cdmCats.includes(c)&&c!=='shows'&&c!=='émissions';
+  });
+
+  const cats = ['Tout','Football','Basket','Actu','CDM','Émissions','Autre'];
+  const catCount = (cat) => {
+    if(cat==='Tout') return (articles||[]).filter(a=>a.published).length;
+    return (articles||[]).filter(a=>{
+      if(!a.published) return false;
+      const c=(a.category||'').toLowerCase();
+      if(cat==='CDM') return cdmCats.includes(c);
+      if(cat==='Football') return c==='football';
+      if(cat==='Basket') return c==='basketball'||c==='basket';
+      if(cat==='Actu') return c==='actu'||c===''||!a.category;
+      if(cat==='Émissions') return c==='shows'||c==='émissions'||c==='emissions';
+      return c!=='football'&&c!=='basketball'&&c!=='basket'&&!cdmCats.includes(c)&&c!=='shows'&&c!=='émissions';
+    }).length;
+  };
+
+  return (
+    <div>
+      {/* Category filter tabs */}
+      <div style={{borderBottom:'1px solid var(--line)',marginBottom:28,overflowX:'auto'}}>
+        <div style={{display:'flex',gap:0,minWidth:'max-content'}}>
+          {cats.map(cat=>{
+            const count = catCount(cat);
+            if(count===0 && cat!=='Tout') return null;
+            return (
+              <button key={cat} onClick={()=>setActiveCat(cat)}
+                style={{padding:'12px 18px',border:'none',background:'none',cursor:'pointer',fontWeight:activeCat===cat?800:500,
+                  fontSize:14,color:activeCat===cat?'var(--navy)':'var(--muted)',
+                  borderBottom:activeCat===cat?'3px solid var(--navy)':'3px solid transparent',
+                  transition:'all .15s',whiteSpace:'nowrap'}}>
+                {cat}
+                <span style={{marginLeft:6,fontSize:11,fontWeight:600,
+                  background:activeCat===cat?'var(--navy)':'#e8eaf0',
+                  color:activeCat===cat?'#fff':'var(--muted)',
+                  padding:'2px 7px',borderRadius:20}}>{count}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Results */}
+      {filtered.length===0 ? (
+        <div style={{textAlign:'center',padding:'48px 0',color:'var(--muted)'}}>
+          <div style={{fontSize:36,marginBottom:12}}>📰</div>
+          <div style={{fontWeight:700}}>Aucun article dans cette catégorie</div>
+        </div>
+      ) : (
+        <div className="grid3">
+          {filtered.map(a=>(
+            <article key={a.id} className="gcard" onClick={()=>onOpen(a)} style={{cursor:'pointer'}}>
+              <div className={`img shot${a.image_url?' has-img':''}`}
+                style={a.image_url?{'--img':`url(${a.image_url})`}:null} />
+              <div className="eyebrow" style={{marginTop:10}}>{a.tag||a.category}</div>
+              <h4 style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:700,fontSize:17,lineHeight:1.15,margin:0,color:'var(--navy)'}}>{a.title}</h4>
+              {a.dek && <p style={{fontSize:13.5,color:'var(--muted-2)',marginTop:6,lineHeight:1.45,display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>{a.dek}</p>}
+              <div className="meta" style={{fontSize:12,color:'var(--muted-2)',marginTop:8,display:'flex',gap:8,alignItems:'center'}}>
+                <span>{a.author||'Rédaction SportFM'}</span>
+                <span>·</span>
+                <span>{a.read_time||'3 min'}</span>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -3873,7 +3957,16 @@ function AdBlock({ ad }){
     : card;
 }
 
-const EMPTY_AD = { title:'', type:'banner', image_url:'', video_url:'', link_url:'', active:true, position:'sidebar', sort_order:0 };
+const EMPTY_AD = { title:'', type:'banner', image_url:'', video_url:'', link_url:'', active:true, position:'sidebar', page_placement:'all', sort_order:0 };
+const AD_PAGES = [
+  { value:'all',       label:'Toutes les pages' },
+  { value:'home',      label:'Accueil' },
+  { value:'articles',  label:'Articles' },
+  { value:'cdm',       label:'CDM 2026' },
+  { value:'standings', label:'Classement' },
+  { value:'shows',     label:'Émissions' },
+  { value:'partner',   label:'Partenaires' },
+];
 
 function AdminAds({ ads, reload, toast, adminEmail }){
   const [editing,setEditing]=useState(null);
@@ -3899,7 +3992,7 @@ function AdminAds({ ads, reload, toast, adminEmail }){
     if(!editing.title){ toast('Le titre est obligatoire'); return; }
     const payload={ title:editing.title, type:editing.type, image_url:editing.image_url||null,
       video_url:editing.video_url||null, link_url:editing.link_url||null,
-      active:editing.active, position:editing.position, sort_order:editing.sort_order||0 };
+      active:editing.active, position:editing.position, page_placement:editing.page_placement||'all', sort_order:editing.sort_order||0 };
     const res = editing.id
       ? await sb.from('ads').update(payload).eq('id',editing.id)
       : await sb.from('ads').insert([payload]);
@@ -3937,6 +4030,10 @@ function AdminAds({ ads, reload, toast, adminEmail }){
           <select value={editing.position} onChange={e=>setEditing(p=>({...p,position:e.target.value}))}>
             <option value="sidebar">Barre latérale</option>
             <option value="fullwidth">Pleine largeur (sous hero)</option>
+          </select></div>
+        <div className="field"><label>Page de placement</label>
+          <select value={editing.page_placement||'all'} onChange={e=>setEditing(p=>({...p,page_placement:e.target.value}))}>
+            {AD_PAGES.map(p=><option key={p.value} value={p.value}>{p.label}</option>)}
           </select></div>
       </div>
       {editing.type==='banner' && (
@@ -3988,13 +4085,14 @@ function AdminAds({ ads, reload, toast, adminEmail }){
       </div>
       {ads.length===0 ? <div className="empty">Aucune publicité. Créez votre première bannière ou vidéo partenaire.</div> :
       <table className="admin-table"><thead><tr>
-        <th>Titre</th><th>Type</th><th>Emplacement</th><th>Statut</th><th></th>
+        <th>Titre</th><th>Type</th><th>Emplacement</th><th>Page</th><th>Statut</th><th></th>
       </tr></thead><tbody>
         {ads.map(ad=>(
           <tr key={ad.id}>
             <td style={{fontWeight:600}}>{ad.title}</td>
             <td>{ad.type==='banner'?'Bannière':'Vidéo'}</td>
             <td>{ad.position==='sidebar'?'Latérale':'Pleine largeur'}</td>
+            <td>{(AD_PAGES.find(p=>p.value===(ad.page_placement||'all'))||AD_PAGES[0]).label}</td>
             <td><span className={'pill '+(ad.active?'pub':'draft')}>{ad.active?'Actif':'Inactif'}</span></td>
             <td style={{textAlign:'right',whiteSpace:'nowrap'}}>
               <button className="icon-btn" onClick={()=>setEditing({...ad})}>Modifier</button>
@@ -4694,7 +4792,8 @@ function App(){
           {nav==='Home' && <Home articles={data.articles} standings={data.standings} fixtures={data.fixtures}
             ads={data.ads} onOpen={open} onNav={navTo} onTrial={()=>navTo('Partner')} />}
           {nav==='Standings' && <StandingsView standings={data.standings} />}
-          {(nav==='Football'||nav==='Basketball'||nav==='Shows') && <CategoryView cat={nav} articles={data.articles} onOpen={open} shows={data.shows||[]} />}
+          {nav==='Articles' && <ArticlesPage articles={data.articles} onOpen={open} />}
+          {nav==='Shows' && <CategoryView cat="Shows" articles={data.articles} onOpen={open} shows={data.shows||[]} />}
         </div>
       )}
       }
