@@ -4147,19 +4147,61 @@ function CDMPage({ articles, toast, session }){
   const activeMatches = espnScores.filter(ev=>ev.status?.type?.state==='in');
   const doneMatches = espnScores.filter(ev=>ev.status?.type?.state==='post');
 
-  const getLeaders = (keyword) => {
+  // Static fallback stats (CDM 2026 — updated June 25)
+  const STATIC_GOALS = [
+    {rank:1,athlete:{displayName:'Lionel Messi',   team:{displayName:'Argentine'},  headshot:{href:'https://a.espncdn.com/i/headshots/soccer/players/full/45843.png'}},  value:5},
+    {rank:2,athlete:{displayName:'Erling Haaland', team:{displayName:'Norvège'},    headshot:{href:'https://a.espncdn.com/i/headshots/soccer/players/full/271698.png'}}, value:4},
+    {rank:2,athlete:{displayName:'Kylian Mbappé',  team:{displayName:'France'},     headshot:{href:'https://a.espncdn.com/i/headshots/soccer/players/full/278022.png'}}, value:4},
+    {rank:2,athlete:{displayName:'Vinicius Júnior',team:{displayName:'Brésil'},     headshot:{href:'https://a.espncdn.com/i/headshots/soccer/players/full/382532.png'}}, value:4},
+    {rank:5,athlete:{displayName:'Deniz Undav',    team:{displayName:'Allemagne'},  headshot:{href:''}}, value:3},
+    {rank:5,athlete:{displayName:'Ismael Saibari', team:{displayName:'Maroc'},      headshot:{href:''}}, value:3},
+    {rank:5,athlete:{displayName:'Johan Manzambi', team:{displayName:'Suisse'},     headshot:{href:''}}, value:3},
+    {rank:5,athlete:{displayName:'Jonathan David', team:{displayName:'Canada'},     headshot:{href:'https://a.espncdn.com/i/headshots/soccer/players/full/382599.png'}}, value:3},
+    {rank:5,athlete:{displayName:'Matheus Cunha',  team:{displayName:'Brésil'},     headshot:{href:''}}, value:3},
+  ];
+  const STATIC_ASSISTS = [
+    {rank:1,athlete:{displayName:'Alexander Isak',   team:{displayName:'Suède'},          headshot:{href:'https://a.espncdn.com/i/headshots/soccer/players/full/320073.png'}}, value:3},
+    {rank:1,athlete:{displayName:'Bruno Guimarães',  team:{displayName:'Brésil'},         headshot:{href:'https://a.espncdn.com/i/headshots/soccer/players/full/394208.png'}}, value:3},
+    {rank:1,athlete:{displayName:'Michael Olise',    team:{displayName:'France'},         headshot:{href:'https://a.espncdn.com/i/headshots/soccer/players/full/468018.png'}}, value:3},
+    {rank:4,athlete:{displayName:'Brahim Díaz',      team:{displayName:'Maroc'},          headshot:{href:''}}, value:2},
+    {rank:4,athlete:{displayName:'Breel Embolo',     team:{displayName:'Suisse'},         headshot:{href:''}}, value:2},
+    {rank:4,athlete:{displayName:'Chris Wood',       team:{displayName:'Nouvelle-Zélande'},headshot:{href:''}}, value:2},
+    {rank:4,athlete:{displayName:'Deniz Undav',      team:{displayName:'Allemagne'},      headshot:{href:''}}, value:2},
+    {rank:4,athlete:{displayName:'Denzel Dumfries',  team:{displayName:'Pays-Bas'},       headshot:{href:''}}, value:2},
+    {rank:4,athlete:{displayName:'Joshua Kimmich',   team:{displayName:'Allemagne'},      headshot:{href:''}}, value:2},
+  ];
+  const STATIC_YELLOW = [
+    {rank:1,athlete:{displayName:'Ahmed Fatehi',    team:{displayName:'Qatar'},        headshot:{href:''}}, value:2},
+    {rank:1,athlete:{displayName:'Sidny Cabral',    team:{displayName:'Cap-Vert'},     headshot:{href:''}}, value:2},
+    {rank:1,athlete:{displayName:'Teboho Mokoena',  team:{displayName:'Afrique du Sud'},headshot:{href:''}}, value:2},
+    {rank:4,athlete:{displayName:'Antonee Robinson',team:{displayName:'États-Unis'},   headshot:{href:''}}, value:1},
+    {rank:4,athlete:{displayName:'Aubrey Modiba',   team:{displayName:'Afrique du Sud'},headshot:{href:''}}, value:1},
+  ];
+  const STATIC_RED = [
+    {rank:1,athlete:{displayName:'Assim Madibo',         team:{displayName:'Qatar'},              headshot:{href:''}}, value:1},
+    {rank:1,athlete:{displayName:'César Montes',         team:{displayName:'Mexique'},            headshot:{href:''}}, value:1},
+    {rank:1,athlete:{displayName:'Homam El-Amin',        team:{displayName:'Qatar'},              headshot:{href:''}}, value:1},
+    {rank:1,athlete:{displayName:'Miguel Almirón',       team:{displayName:'Paraguay'},           headshot:{href:''}}, value:1},
+    {rank:1,athlete:{displayName:'Nathan Ngoy',          team:{displayName:'Belgique'},           headshot:{href:''}}, value:1},
+    {rank:1,athlete:{displayName:'Sphephelo Sithole',    team:{displayName:'Afrique du Sud'},     headshot:{href:''}}, value:1},
+    {rank:1,athlete:{displayName:'Tarik Muharemović',    team:{displayName:'Bosnie-Herzégovine'}, headshot:{href:''}}, value:1},
+    {rank:1,athlete:{displayName:'Themba Zwane',         team:{displayName:'Afrique du Sud'},     headshot:{href:''}}, value:1},
+  ];
+
+  const getLeaders = (keyword, fallback) => {
     const cat = allLeaders.find(l=>(l.displayName||l.name||'').toLowerCase().includes(keyword));
-    return cat?.leaders||[];
+    const apiData = cat?.leaders||[];
+    return apiData.length > 0 ? apiData : fallback;
   };
-  const topScorers   = getLeaders('goal');
-  const topAssists   = getLeaders('assist');
-  const topYellow    = getLeaders('yellow');
-  const topRed       = getLeaders('red');
+  const topScorers = getLeaders('goal',   STATIC_GOALS);
+  const topAssists = getLeaders('assist', STATIC_ASSISTS);
+  const topYellow  = getLeaders('yellow', STATIC_YELLOW);
+  const topRed     = getLeaders('red',    STATIC_RED);
   const statCategories = [
-    { id:'goals',   label:'⚽ Buteurs',    data: topScorers, unit:'buts',    color:'#c8102e' },
-    { id:'assists', label:'🎯 Passeurs',   data: topAssists, unit:'passes',  color:'#006b3f' },
-    { id:'yellow',  label:'🟨 Cartons J', data: topYellow,  unit:'cartons', color:'#f4c430' },
-    { id:'red',     label:'🟥 Cartons R', data: topRed,     unit:'cartons', color:'#c0392b' },
+    { id:'goals',   label:'⚽ Buteurs',      data: topScorers, unit:'buts',    color:'#c8102e' },
+    { id:'assists', label:'🎯 Passeurs',     data: topAssists, unit:'passes',  color:'#006b3f' },
+    { id:'yellow',  label:'🟨 Cartons J',   data: topYellow,  unit:'cartons', color:'#c8a000' },
+    { id:'red',     label:'🟥 Cartons R',   data: topRed,     unit:'cartons', color:'#c0392b' },
   ];
 
   const imgStyle=(a)=>a.image_url?{'--img':`url(${a.image_url})`}:null;
