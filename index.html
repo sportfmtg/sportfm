@@ -50,9 +50,9 @@
 
   /* header */
   header{ background:#fff; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:40; }
-  header .wrap{ display:flex; align-items:center; gap:30px; height:68px; }
+  header .wrap{ display:flex; align-items:center; gap:30px; height:112px; }
   .logo{ display:flex; align-items:center; cursor:pointer; flex-shrink:0; }
-  .logo img{ display:block; height:52px; width:auto; object-fit:contain; }
+  .logo img{ display:block; height:104px; width:auto; object-fit:contain; }
   .logo-footer img{ height:30px; }
   .logo-text{ font-family:'Barlow Semi Condensed',sans-serif; font-style:italic; font-weight:800;
     font-size:28px; letter-spacing:-.01em; color:var(--navy); align-items:center; line-height:1; }
@@ -1952,7 +1952,8 @@ function PaystubForm({ stub, employees, onSave, onCancel, adminEmail, toast }){
 }
 
 function EmployeeForm({ emp, onSave, onCancel, adminEmail, toast }){
-  const [form,setForm]=useState(emp||{name:'',email:'',department:'',position:'',phone:''});
+  const [form,setForm]=useState(emp||{name:'',email:'',department:'',position:'',phone:'',
+    salaire_brut:'',cnss_taux:9,tcs_taux:0,cnss_employeur_taux:22.5,ts_taux:3,linked_user_email:''});
   const [busy,setBusy]=useState(false);
   const set=(k,v)=>setForm(p=>({...p,[k]:v}));
   async function save(){
@@ -1961,8 +1962,13 @@ function EmployeeForm({ emp, onSave, onCancel, adminEmail, toast }){
     let res;
     if(emp?.id){ res=await sb.from('employees').update({...form,updated_at:new Date().toISOString()}).eq('id',emp.id); }
     else { res=await sb.from('employees').insert([form]); }
+    if(res.error){ setBusy(false); toast('Erreur : '+res.error.message); return; }
+    // If linked_user_email provided, upsert into user_roles
+    if(form.linked_user_email&&form.linked_user_email.trim()){
+      await sb.from('user_roles').upsert([{email:form.linked_user_email.trim().toLowerCase(),
+        name:form.name, job_title:form.position}],{onConflict:'email',ignoreDuplicates:true});
+    }
     setBusy(false);
-    if(res.error){ toast('Erreur : '+res.error.message); return; }
     await logAction(adminEmail, emp?'Employé modifié':'Employé ajouté', form.name);
     toast(emp?'Mis à jour':'Employé ajouté'); onSave();
   }
@@ -1978,6 +1984,23 @@ function EmployeeForm({ emp, onSave, onCancel, adminEmail, toast }){
         <div className="field"><label>Poste</label><input value={form.position||''} onChange={e=>set('position',e.target.value)} placeholder="Journaliste web, Comptable…" /></div>
       </div>
       <div className="field"><label>Téléphone <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label><input value={form.phone||''} onChange={e=>set('phone',e.target.value)} placeholder="+228 90 00 00 00" /></div>
+
+      <div style={{borderTop:'1px solid var(--line)',margin:'14px 0',paddingTop:14}}>
+        <div style={{fontSize:12,fontWeight:700,letterSpacing:'.05em',color:'var(--muted)',marginBottom:10}}>DÉTAIL SALARIAL</div>
+        <div className="grid2">
+          <div className="field"><label>Salaire Brut (FCFA)</label><input type="number" value={form.salaire_brut||''} onChange={e=>set('salaire_brut',e.target.value)} placeholder="Ex : 350 000" min="0" /></div>
+          <div className="field"><label>Cotisations CNSS 9% (taux)</label><input type="number" value={form.cnss_taux??9} onChange={e=>set('cnss_taux',e.target.value)} step="0.1" min="0" /></div>
+        </div>
+        <div className="grid2">
+          <div className="field"><label>TCS (taux %)</label><input type="number" value={form.tcs_taux??0} onChange={e=>set('tcs_taux',e.target.value)} step="0.1" min="0" /></div>
+          <div className="field"><label>Charges employeur CNSS 22.5% (taux)</label><input type="number" value={form.cnss_employeur_taux??22.5} onChange={e=>set('cnss_employeur_taux',e.target.value)} step="0.1" min="0" /></div>
+        </div>
+        <div className="grid2">
+          <div className="field"><label>TS 3% (taux)</label><input type="number" value={form.ts_taux??3} onChange={e=>set('ts_taux',e.target.value)} step="0.1" min="0" /></div>
+          <div className="field"><label>E-mail compte SportFM <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(lie au portail)</span></label><input type="email" value={form.linked_user_email||''} onChange={e=>set('linked_user_email',e.target.value)} placeholder="jean@sportfm.com" /></div>
+        </div>
+      </div>
+
       <div style={{display:'flex',gap:10,marginTop:4}}>
         <button className="btn-primary" disabled={busy} onClick={save}>{busy?'…':(emp?'Enregistrer':'Ajouter')}</button>
         <button className="btn-ghost" onClick={onCancel}>Annuler</button>
@@ -2177,7 +2200,7 @@ function AdminFinance({ adminEmail, userRole, toast }){
 
       {/* Sub-tabs */}
       <div style={{display:'flex',gap:8,marginBottom:20,borderBottom:'1px solid var(--line)',paddingBottom:0}}>
-        {[{k:'stubs',l:'📄 Fiches de paie'},{k:'employees',l:'👥 Employés'}].map(t=>(
+        {[{k:'stubs',l:'📄 Fiches de paie'},{k:'employees',l:'👥 Employés'},{k:'reports',l:'📊 Rapports'}].map(t=>(
           <button key={t.k} onClick={()=>setTab(t.k)}
             style={{padding:'10px 18px',border:'none',borderBottom:tab===t.k?'2px solid var(--navy)':'2px solid transparent',
               background:'none',fontWeight:700,fontSize:14,color:tab===t.k?'var(--navy)':'var(--muted)',cursor:'pointer',marginBottom:'-1px'}}>
@@ -2186,7 +2209,139 @@ function AdminFinance({ adminEmail, userRole, toast }){
         ))}
       </div>
 
-      {loading ? <Spinner/> : tab==='employees' ? (
+      {loading ? <Spinner/> : tab==='reports' ? (
+        /* ---- PAYROLL REPORTS ---- */
+        (()=>{
+          const [rMonth,setRMonth]=useState('all');
+          const [rEmp,setREmp]=useState('all');
+          const [rYear,setRYear]=useState('all');
+          const reportStubs = stubs.filter(s=>
+            (rEmp==='all'||s.employee_id===rEmp) &&
+            (rMonth==='all'||s.period_month===rMonth) &&
+            (rYear==='all'||String(s.period_year)===rYear)
+          );
+          const reportYears=[...new Set(stubs.map(s=>String(s.period_year)))].sort((a,b)=>b-a);
+          if(!reportYears.includes(String(CURRENT_YEAR))) reportYears.unshift(String(CURRENT_YEAR));
+
+          function exportReportPDF(){
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({unit:'mm',format:'a4'});
+            const navy=[13,27,77],red=[239,0,63],gray=[100,100,110];
+            const W=210,M=18;
+            doc.setFillColor(...navy); doc.rect(0,0,W,30,'F');
+            doc.setTextColor(255,255,255); doc.setFontSize(18); doc.setFont('helvetica','bold');
+            doc.text('SportFM — Rapport de Paie',M,18);
+            doc.setFontSize(9); doc.setFont('helvetica','normal');
+            doc.text(`Généré le ${new Date().toLocaleDateString('fr-FR')}`,W-M,18,{align:'right'});
+            doc.setFillColor(...red); doc.rect(0,30,W,2,'F');
+            let y=42;
+            const headers=['Employé','Brut','CNSS(9%)','CNSS Emp(22.5%)','TS(3%)','Net','Mois'];
+            const colW=[50,25,22,30,18,25,25];
+            let x=M;
+            doc.setFillColor(240,242,248); doc.rect(M,y-5,W-M*2,9,'F');
+            doc.setTextColor(...navy); doc.setFontSize(8); doc.setFont('helvetica','bold');
+            headers.forEach((h,i)=>{ doc.text(h,x+1,y); x+=colW[i]; });
+            y+=6;
+            doc.setFont('helvetica','normal'); doc.setTextColor(30,30,30);
+            let totalBrut=0,totalNet=0;
+            reportStubs.forEach((s,ri)=>{
+              const emp=empMap[s.employee_id];
+              const brut=Number(s.gross||0);
+              const cnss=Math.round(brut*(Number(emp?.cnss_taux||9)/100));
+              const cnssEmp=Math.round(brut*(Number(emp?.cnss_employeur_taux||22.5)/100));
+              const ts=Math.round(brut*(Number(emp?.ts_taux||3)/100));
+              const net=Number(s.net||brut-cnss-ts);
+              totalBrut+=brut; totalNet+=net;
+              if(ri%2===0){ doc.setFillColor(250,251,253); doc.rect(M,y-4,W-M*2,8,'F'); }
+              x=M;
+              const row=[emp?.name||'?',brut.toLocaleString('fr-FR'),cnss.toLocaleString('fr-FR'),
+                cnssEmp.toLocaleString('fr-FR'),ts.toLocaleString('fr-FR'),net.toLocaleString('fr-FR'),
+                `${s.period_month} ${s.period_year}`];
+              row.forEach((v,i)=>{ doc.setFontSize(7.5); doc.text(String(v),x+1,y); x+=colW[i]; });
+              y+=8; if(y>270){ doc.addPage(); y=20; }
+            });
+            // Total row
+            doc.setFillColor(...navy); doc.rect(M,y-4,W-M*2,9,'F');
+            doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(8);
+            doc.text('TOTAL',M+1,y+1);
+            doc.text(totalBrut.toLocaleString('fr-FR'),M+51,y+1);
+            doc.text(totalNet.toLocaleString('fr-FR'),M+140,y+1);
+            doc.setFillColor(...[245,246,250]); doc.rect(0,278,W,20,'F');
+            doc.setTextColor(...gray); doc.setFontSize(7); doc.setFont('helvetica','normal');
+            doc.text('Rapport confidentiel — SportFM 91.9 FM',W/2,285,{align:'center'});
+            doc.save(`rapport-paie_${new Date().toISOString().slice(0,10)}.pdf`);
+          }
+
+          const totalBrutR=reportStubs.reduce((s,x)=>s+Number(x.gross||0),0);
+          const totalNetR=reportStubs.reduce((s,x)=>s+Number(x.net||0),0);
+
+          return (
+            <div>
+              <div style={{display:'flex',gap:10,marginBottom:16,flexWrap:'wrap',alignItems:'center'}}>
+                <select value={rMonth} onChange={e=>setRMonth(e.target.value)}
+                  style={{padding:'9px 12px',border:'1px solid var(--line)',borderRadius:9,fontSize:13.5,background:'#fff',outline:'none'}}>
+                  <option value="all">Tous les mois</option>
+                  {PAY_PERIODS.map(m=><option key={m}>{m}</option>)}
+                </select>
+                <select value={rYear} onChange={e=>setRYear(e.target.value)}
+                  style={{padding:'9px 12px',border:'1px solid var(--line)',borderRadius:9,fontSize:13.5,background:'#fff',outline:'none'}}>
+                  <option value="all">Toutes les années</option>
+                  {reportYears.map(y=><option key={y} value={y}>{y}</option>)}
+                </select>
+                <select value={rEmp} onChange={e=>setREmp(e.target.value)}
+                  style={{padding:'9px 12px',border:'1px solid var(--line)',borderRadius:9,fontSize:13.5,background:'#fff',outline:'none'}}>
+                  <option value="all">Tous les employés</option>
+                  {employees.map(e=><option key={e.id} value={e.id}>{e.name||e.email}</option>)}
+                </select>
+                <button className="btn-primary" onClick={exportReportPDF} style={{marginLeft:'auto'}}>📄 Exporter PDF</button>
+              </div>
+              {reportStubs.length===0 ? <div className="panel"><div className="empty">Aucune fiche pour ce filtre.</div></div> : (
+                <div className="panel" style={{padding:0,overflow:'hidden'}}>
+                  <table className="admin-table" style={{tableLayout:'fixed',width:'100%'}}>
+                    <thead><tr>
+                      <th style={{paddingLeft:16}}>Employé</th>
+                      <th>Brut</th>
+                      <th>CNSS (9%)</th>
+                      <th>CNSS Emp. (22.5%)</th>
+                      <th>TS (3%)</th>
+                      <th>Net</th>
+                      <th>Mois</th>
+                    </tr></thead>
+                    <tbody>
+                      {reportStubs.map(s=>{
+                        const emp=empMap[s.employee_id];
+                        const brut=Number(s.gross||0);
+                        const cnss=Math.round(brut*(Number(emp?.cnss_taux||9)/100));
+                        const cnssEmp=Math.round(brut*(Number(emp?.cnss_employeur_taux||22.5)/100));
+                        const ts=Math.round(brut*(Number(emp?.ts_taux||3)/100));
+                        const net=Number(s.net||brut-cnss-ts);
+                        return (
+                          <tr key={s.id}>
+                            <td style={{paddingLeft:16,fontWeight:700,color:'var(--navy)'}}>{emp?.name||'—'}</td>
+                            <td style={{fontWeight:600}}>{brut.toLocaleString('fr-FR')}</td>
+                            <td style={{color:'#c0392b'}}>{cnss.toLocaleString('fr-FR')}</td>
+                            <td style={{color:'#c0392b'}}>{cnssEmp.toLocaleString('fr-FR')}</td>
+                            <td style={{color:'#c0392b'}}>{ts.toLocaleString('fr-FR')}</td>
+                            <td style={{fontWeight:700,color:'#1f7a48'}}>{net.toLocaleString('fr-FR')}</td>
+                            <td style={{fontSize:12.5,color:'var(--muted)'}}>{s.period_month} {s.period_year}</td>
+                          </tr>
+                        );
+                      })}
+                      <tr style={{background:'var(--navy)'}}>
+                        <td style={{paddingLeft:16,fontWeight:800,color:'#fff'}}>TOTAL</td>
+                        <td style={{fontWeight:800,color:'#fff'}}>{totalBrutR.toLocaleString('fr-FR')}</td>
+                        <td></td><td></td><td></td>
+                        <td style={{fontWeight:800,color:'#7effc0'}}>{totalNetR.toLocaleString('fr-FR')}</td>
+                        <td></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          );
+        })()
+      ) : tab==='employees' ? (
         /* ---- EMPLOYEES LIST ---- */
         <div>
           <div style={{display:'flex',justifyContent:'flex-end',marginBottom:14}}>
@@ -2309,6 +2464,402 @@ function AdminFinance({ adminEmail, userRole, toast }){
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ============================================================
+//  CDM — Coupe du Monde tab
+// ============================================================
+function AdminCDM({ articles, reload, toast, adminEmail }){
+  const [subTab,setSubTab]=useState('live'); // 'live' | 'articles'
+  const [liveData,setLiveData]=useState(null);
+  const [standings,setStandings]=useState(null);
+  const [leaders,setLeaders]=useState(null);
+  const [loadingLive,setLoadingLive]=useState(false);
+  const [liveErr,setLiveErr]=useState('');
+
+  const cdmArticles = (articles||[]).filter(a=>a.category==='CDM');
+
+  function fetchLive(){
+    setLoadingLive(true); setLiveErr('');
+    Promise.all([
+      fetch('https://site.api.espn.com/apis/site/v2/sports/soccer/FIFA.WORLD/scoreboard').then(r=>r.json()).catch(()=>null),
+      fetch('https://site.api.espn.com/apis/v2/sports/soccer/FIFA.WORLD/standings').then(r=>r.json()).catch(()=>null),
+      fetch('https://site.api.espn.com/apis/v2/sports/soccer/FIFA.WORLD/leaders').then(r=>r.json()).catch(()=>null),
+    ]).then(([score,stand,lead])=>{
+      setLiveData(score); setStandings(stand); setLeaders(lead);
+      setLoadingLive(false);
+      if(!score) setLiveErr('Impossible de charger les données ESPN. Vérifiez votre connexion.');
+    });
+  }
+
+  useEffect(()=>{ if(subTab==='live') fetchLive(); },[subTab]);
+
+  // Parse scoreboard events
+  function parseEvents(data){
+    if(!data?.events) return [];
+    return data.events.map(ev=>{
+      const comp = ev.competitions?.[0]||{};
+      const teams = (comp.competitors||[]).map(c=>({
+        name: c.team?.displayName||'?',
+        score: c.score||'0',
+        homeAway: c.homeAway,
+      }));
+      const home = teams.find(t=>t.homeAway==='home')||teams[0]||{};
+      const away = teams.find(t=>t.homeAway==='away')||teams[1]||{};
+      const status = comp.status?.type?.description||'';
+      const clock = comp.status?.displayClock||'';
+      const isLive = comp.status?.type?.state==='in';
+      const isFt = comp.status?.type?.completed===true;
+      return { home:home.name, away:away.name, homeScore:home.score, awayScore:away.score, status, clock, isLive, isFt };
+    });
+  }
+
+  const [editingCdm,setEditingCdm]=useState(null);
+  const EMPTY_CDM = { title:'',tag:'CDM',category:'CDM',dek:'',body:'',author:'Rédaction SportFM',read_time:'3 min de lecture',image_url:'',is_hero:false,published:true };
+
+  async function deleteCdmArticle(a){
+    if(!confirm(`Supprimer « ${a.title} » ?`)) return;
+    await sb.from('articles').delete().eq('id',a.id);
+    await logAction(adminEmail,'Suppression article CDM',a.title);
+    toast('Article supprimé'); reload();
+  }
+
+  const subStyle=(k)=>({padding:'10px 18px',border:'none',borderBottom:subTab===k?'2px solid var(--navy)':'2px solid transparent',
+    background:'none',fontWeight:700,fontSize:13.5,color:subTab===k?'var(--navy)':'var(--muted)',cursor:'pointer',marginBottom:'-1px'});
+
+  if(editingCdm!==null) return <ArticleEditor initial={editingCdm}
+    onSave={async(msg)=>{ await logAction(adminEmail,editingCdm.id?'Modification article CDM':'Nouvel article CDM',editingCdm.title||msg); setEditingCdm(null); reload(); }}
+    onCancel={()=>setEditingCdm(null)} toast={toast} />;
+
+  const events = parseEvents(liveData);
+
+  return (
+    <div>
+      <div style={{display:'flex',gap:0,marginBottom:24,borderBottom:'2px solid var(--line)'}}>
+        <button onClick={()=>setSubTab('live')} style={subStyle('live')}>📡 Données live</button>
+        <button onClick={()=>setSubTab('articles')} style={subStyle('articles')}>📝 Articles CDM ({cdmArticles.length})</button>
+      </div>
+
+      {subTab==='live' && (
+        <div>
+          <div style={{display:'flex',gap:10,marginBottom:18,alignItems:'center'}}>
+            <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:20,color:'var(--navy)'}}>⚽ Coupe du Monde 2026 — Données ESPN</div>
+            <button className="btn-ghost" onClick={fetchLive} disabled={loadingLive} style={{marginLeft:'auto'}}>🔄 Rafraîchir</button>
+          </div>
+
+          {loadingLive ? <Spinner/> : liveErr ? (
+            <div className="panel"><div className="empty">{liveErr}</div></div>
+          ) : (
+            <>
+              {/* Matches */}
+              <div className="panel" style={{marginBottom:20}}>
+                <h3>Matchs du jour</h3>
+                {events.length===0
+                  ? <div className="empty">Aucun match disponible pour l'instant.</div>
+                  : events.map((ev,i)=>(
+                    <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 0',borderBottom:'1px solid var(--line)',gap:12,flexWrap:'wrap'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:10,flex:1,justifyContent:'flex-end'}}>
+                        <span style={{fontWeight:700,fontSize:14,color:'var(--navy)'}}>{ev.home}</span>
+                      </div>
+                      <div style={{textAlign:'center',minWidth:100}}>
+                        <div style={{fontWeight:800,fontSize:20,color:ev.isLive?'var(--red)':'var(--navy)'}}>{ev.homeScore} — {ev.awayScore}</div>
+                        <div style={{fontSize:11,fontWeight:700,marginTop:3,
+                          color:ev.isLive?'var(--red)':ev.isFt?'#1f7a48':'var(--muted)'}}>
+                          {ev.isLive?`🔴 ${ev.clock}`:ev.isFt?'FT':ev.status}
+                        </div>
+                      </div>
+                      <div style={{display:'flex',alignItems:'center',gap:10,flex:1}}>
+                        <span style={{fontWeight:700,fontSize:14,color:'var(--navy)'}}>{ev.away}</span>
+                      </div>
+                    </div>
+                  ))
+                }
+              </div>
+
+              {/* Top scorers */}
+              {leaders?.leaders?.length>0 && (
+                <div className="panel" style={{marginBottom:20}}>
+                  <h3>Meilleurs buteurs</h3>
+                  {(leaders.leaders[0]?.leaders||[]).slice(0,10).map((l,i)=>(
+                    <div key={i} style={{display:'flex',alignItems:'center',gap:12,padding:'8px 0',borderBottom:'1px solid var(--line)'}}>
+                      <span style={{fontWeight:800,fontSize:14,color:'var(--navy)',width:24,textAlign:'center'}}>{i+1}</span>
+                      <div style={{flex:1}}>
+                        <div style={{fontWeight:700,fontSize:13.5,color:'var(--navy)'}}>{l.athlete?.displayName||'—'}</div>
+                        <div style={{fontSize:11.5,color:'var(--muted)'}}>{l.athlete?.flag?.alt||l.team?.displayName||''}</div>
+                      </div>
+                      <span style={{fontWeight:800,fontSize:18,color:'var(--red)'}}>{l.value}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Standings groups */}
+              {standings?.standings?.entries?.length>0 && (
+                <div className="panel">
+                  <h3>Classement des groupes</h3>
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:16}}>
+                    {(standings.standings.entries||[]).slice(0,8).map((entry,gi)=>(
+                      <div key={gi} style={{border:'1px solid var(--line)',borderRadius:10,overflow:'hidden'}}>
+                        <div style={{background:'var(--navy)',color:'#fff',padding:'8px 14px',fontWeight:800,fontSize:13}}>
+                          {entry.team?.displayName||`Équipe ${gi+1}`}
+                        </div>
+                        <div style={{padding:'8px 14px',display:'flex',justifyContent:'space-between',fontSize:12.5}}>
+                          {(entry.stats||[]).slice(0,4).map((s,si)=>(
+                            <div key={si} style={{textAlign:'center'}}>
+                              <div style={{fontSize:10,color:'var(--muted)',fontWeight:700}}>{s.shortDisplayName||s.name}</div>
+                              <div style={{fontWeight:800,color:'var(--navy)'}}>{s.displayValue||s.value}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {subTab==='articles' && (
+        <div className="panel">
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18}}>
+            <h3 style={{margin:0}}>Articles CDM ({cdmArticles.length})</h3>
+            <button className="btn-primary" onClick={()=>setEditingCdm({...EMPTY_CDM})}>+ Nouvel article CDM</button>
+          </div>
+          {cdmArticles.length===0
+            ? <div className="empty">Aucun article CDM. Publiez votre premier article sur la Coupe du Monde.</div>
+            : <table className="admin-table"><thead><tr>
+                <th>Titre</th><th>Statut</th><th>Modifié</th><th></th>
+              </tr></thead><tbody>
+              {cdmArticles.map(a=>(
+                <tr key={a.id}>
+                  <td style={{fontWeight:600,maxWidth:380}}>{a.is_hero&&<span style={{color:'var(--red)',marginRight:6}}>★</span>}{a.title}</td>
+                  <td><span className={"pill "+(a.published?'pub':'draft')}>{a.published?'Publié':'Brouillon'}</span></td>
+                  <td style={{color:'var(--muted)'}}>{timeAgo(a.updated_at||a.created_at)}</td>
+                  <td style={{textAlign:'right',whiteSpace:'nowrap'}}>
+                    <button className="icon-btn" onClick={()=>setEditingCdm(a)}>Modifier</button>
+                    <button className="icon-btn del" onClick={()=>deleteCdmArticle(a)}>Supprimer</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody></table>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+//  MON ESPACE — Employee Profile Portal
+// ============================================================
+function MonEspace({ session, userPerms, onClose, toast }){
+  const email = session?.user?.email || '';
+  const [tab,setTab]=useState('profile');
+  const [profile,setProfile]=useState(null);
+  const [newPw,setNewPw]=useState(''); const [confirmPw,setConfirmPw]=useState('');
+  const [pwBusy,setPwBusy]=useState(false);
+  const [paystubs,setPaystubs]=useState([]);
+  const [announcements,setAnnouncements]=useState([]);
+  const [notifications,setNotifications]=useState([]);
+  const [uploading,setUploading]=useState(false);
+  const [annTitle,setAnnTitle]=useState(''); const [annBody,setAnnBody]=useState('');
+  const [annPinned,setAnnPinned]=useState(false); const [annBusy,setAnnBusy]=useState(false);
+  const imgRef=useRef(null);
+
+  const canAnnounce = !!(userPerms?.__full || userPerms?.can_announcements);
+
+  useEffect(()=>{
+    // load profile
+    sb.from('user_roles').select('*').eq('email',email).maybeSingle().then(({data})=>setProfile(data||{}));
+    // load paystubs via linked employee
+    sb.from('employees').select('*').eq('linked_user_email',email).maybeSingle().then(({data})=>{
+      if(data?.id) sb.from('paystubs').select('*').eq('employee_id',data.id).order('period_year',{ascending:false}).then(({data:s})=>setPaystubs(s||[]));
+    });
+    // load announcements
+    sb.from('announcements').select('*').order('pinned',{ascending:false}).order('created_at',{ascending:false}).limit(30)
+      .then(({data})=>setAnnouncements(data||[]));
+    // load notifications (admin_logs mentioning this email)
+    sb.from('admin_logs').select('*').order('created_at',{ascending:false}).limit(100)
+      .then(({data})=>setNotifications((data||[]).filter(l=>(l.details||'').includes(email)||(l.admin_email||''===email)).slice(0,15)));
+  },[email]);
+
+  async function uploadPhoto(e){
+    const file=e.target.files?.[0]; if(!file) return;
+    if(!file.type.startsWith('image/')){ toast('Image uniquement'); return; }
+    setUploading(true);
+    try{
+      const ext=file.name.split('.').pop().toLowerCase();
+      const path=`profiles/${email.replace('@','_')}_${Date.now()}.${ext}`;
+      const { error }=await sb.storage.from('profiles').upload(path,file,{contentType:file.type,upsert:true});
+      if(error) throw error;
+      const { data:u }=sb.storage.from('profiles').getPublicUrl(path);
+      await sb.from('user_roles').update({profile_image_url:u.publicUrl}).eq('email',email);
+      setProfile(p=>({...p,profile_image_url:u.publicUrl}));
+      toast('Photo mise à jour ✓');
+    } catch(err){ toast('Erreur upload : '+err.message); }
+    finally{ setUploading(false); }
+  }
+
+  async function changePassword(){
+    if(!newPw){ toast('Saisissez un mot de passe'); return; }
+    if(newPw!==confirmPw){ toast('Les mots de passe ne correspondent pas'); return; }
+    if(newPw.length<6){ toast('Minimum 6 caractères'); return; }
+    setPwBusy(true);
+    const { error }=await sb.auth.updateUser({password:newPw});
+    setPwBusy(false);
+    if(error){ toast('Erreur : '+error.message); return; }
+    toast('Mot de passe changé ✓'); setNewPw(''); setConfirmPw('');
+  }
+
+  async function publishAnnouncement(){
+    if(!annTitle.trim()||!annBody.trim()){ toast('Titre et contenu requis'); return; }
+    setAnnBusy(true);
+    const { error }=await sb.from('announcements').insert([{
+      author_email:email, author_name:profile?.name||email,
+      title:annTitle, body:annBody, pinned:annPinned
+    }]);
+    setAnnBusy(false);
+    if(error){ toast('Erreur : '+error.message); return; }
+    toast('Annonce publiée ✓'); setAnnTitle(''); setAnnBody(''); setAnnPinned(false);
+    sb.from('announcements').select('*').order('pinned',{ascending:false}).order('created_at',{ascending:false}).limit(30)
+      .then(({data})=>setAnnouncements(data||[]));
+  }
+
+  const tabStyle=(k)=>({padding:'10px 18px',border:'none',borderBottom:tab===k?'2px solid var(--navy)':'2px solid transparent',
+    background:'none',fontWeight:700,fontSize:13.5,color:tab===k?'var(--navy)':'var(--muted)',cursor:'pointer',marginBottom:'-1px'});
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.55)',zIndex:1000,overflowY:'auto'}}>
+      <div style={{background:'#f6f7f9',minHeight:'100vh',maxWidth:780,margin:'0 auto',padding:'0 0 60px'}}>
+        {/* Header */}
+        <div style={{background:'var(--navy)',color:'#fff',padding:'18px 24px',display:'flex',alignItems:'center',gap:14}}>
+          <div style={{flex:1}}>
+            <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:22}}>👤 Mon Espace</div>
+            <div style={{fontSize:12.5,color:'#9fb0d8',marginTop:2}}>{email}{profile?.job_title&&<span style={{marginLeft:8,fontWeight:600}}>{profile.job_title}</span>}</div>
+          </div>
+          <button onClick={onClose} style={{color:'#cfd6ea',fontWeight:700,fontSize:14,background:'none',border:'1px solid rgba(255,255,255,.2)',borderRadius:7,padding:'7px 14px',cursor:'pointer'}}>✕ Fermer</button>
+        </div>
+
+        {/* Tabs */}
+        <div style={{background:'#fff',borderBottom:'1px solid var(--line)',display:'flex',gap:0,paddingLeft:24}}>
+          {[['profile','Profil'],['password','Mot de passe'],['notifs','Notifications'],['paystubs','Mes fiches'],['board','Annonces']].map(([k,l])=>(
+            <button key={k} onClick={()=>setTab(k)} style={tabStyle(k)}>{l}</button>
+          ))}
+        </div>
+
+        <div style={{padding:'24px'}}>
+
+          {/* PROFILE TAB */}
+          {tab==='profile' && (
+            <div className="panel">
+              <h3>Photo de profil</h3>
+              <div style={{display:'flex',gap:20,alignItems:'flex-start',flexWrap:'wrap'}}>
+                <div style={{textAlign:'center'}}>
+                  {profile?.profile_image_url
+                    ? <img src={profile.profile_image_url} alt="Profil" style={{width:100,height:100,borderRadius:'50%',objectFit:'cover',border:'3px solid var(--navy)',display:'block'}} />
+                    : <div style={{width:100,height:100,borderRadius:'50%',background:'var(--navy)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:36,color:'#fff'}}>👤</div>}
+                  <input hidden ref={imgRef} type="file" accept="image/*" onChange={uploadPhoto} />
+                  <button className="btn-ghost" style={{marginTop:10,fontSize:12.5,padding:'7px 14px'}} onClick={()=>imgRef.current?.click()} disabled={uploading}>
+                    {uploading?'Envoi…':'📁 Changer la photo'}
+                  </button>
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:18,fontWeight:800,color:'var(--navy)',marginBottom:4}}>{profile?.name||email}</div>
+                  {profile?.job_title&&<div style={{fontSize:13.5,color:'#4a5168',marginBottom:4}}>{profile.job_title}</div>}
+                  <div style={{fontSize:13,color:'var(--muted)'}}>{email}</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* PASSWORD TAB */}
+          {tab==='password' && (
+            <div className="panel">
+              <h3>Changer le mot de passe</h3>
+              <div className="field"><label>Nouveau mot de passe</label>
+                <input type="password" value={newPw} onChange={e=>setNewPw(e.target.value)} placeholder="••••••••" /></div>
+              <div className="field"><label>Confirmer le mot de passe</label>
+                <input type="password" value={confirmPw} onChange={e=>setConfirmPw(e.target.value)} placeholder="••••••••" /></div>
+              <button className="btn-primary" disabled={pwBusy} onClick={changePassword}>{pwBusy?'…':'Changer le mot de passe'}</button>
+            </div>
+          )}
+
+          {/* NOTIFICATIONS TAB */}
+          {tab==='notifs' && (
+            <div className="panel">
+              <h3>Notifications récentes</h3>
+              {notifications.length===0
+                ? <div className="empty">Aucune notification.</div>
+                : notifications.map((l,i)=>(
+                  <div key={l.id||i} style={{display:'flex',gap:12,padding:'10px 0',borderBottom:'1px solid var(--line)',alignItems:'flex-start'}}>
+                    <span style={{fontSize:10.5,color:'var(--muted)',whiteSpace:'nowrap',flexShrink:0}}>{new Date(l.created_at).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:700,color:'var(--navy)'}}>{l.action}</div>
+                      {l.details&&<div style={{fontSize:12,color:'#5a6178'}}>{l.details}</div>}
+                    </div>
+                  </div>
+                ))}
+            </div>
+          )}
+
+          {/* PAYSTUBS TAB */}
+          {tab==='paystubs' && (
+            <div className="panel">
+              <h3>Mes fiches de paie</h3>
+              {paystubs.length===0
+                ? <div className="empty">Aucune fiche de paie disponible.</div>
+                : <table className="admin-table"><thead><tr><th>Période</th><th>Brut</th><th>Net</th><th>Fichier</th></tr></thead>
+                  <tbody>
+                    {paystubs.map(s=>(
+                      <tr key={s.id}>
+                        <td style={{fontWeight:600}}>{s.period_month} {s.period_year}</td>
+                        <td>{s.gross?Number(s.gross).toLocaleString('fr-FR')+' FCFA':'—'}</td>
+                        <td style={{fontWeight:700,color:'#1f7a48'}}>{s.net?Number(s.net).toLocaleString('fr-FR')+' FCFA':'—'}</td>
+                        <td>
+                          {s.file_url
+                            ? <a href={s.file_url} target="_blank" className="btn-ghost" style={{fontSize:12.5,padding:'5px 12px',display:'inline-block',textDecoration:'none'}}>📄 Télécharger</a>
+                            : <span style={{color:'var(--muted)',fontSize:12}}>—</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody></table>}
+            </div>
+          )}
+
+          {/* BOARD TAB */}
+          {tab==='board' && (
+            <div>
+              {canAnnounce && (
+                <div className="panel" style={{marginBottom:20}}>
+                  <h3>Publier une annonce</h3>
+                  <div className="field"><label>Titre</label><input value={annTitle} onChange={e=>setAnnTitle(e.target.value)} placeholder="Titre de l'annonce…" /></div>
+                  <div className="field"><label>Contenu</label><textarea value={annBody} onChange={e=>setAnnBody(e.target.value)} style={{minHeight:80}} placeholder="Texte de l'annonce…" /></div>
+                  <label style={{display:'flex',gap:8,alignItems:'center',fontSize:13.5,fontWeight:600,marginBottom:14,cursor:'pointer'}}>
+                    <input type="checkbox" checked={annPinned} onChange={e=>setAnnPinned(e.target.checked)} /> 📌 Épingler
+                  </label>
+                  <button className="btn-primary" disabled={annBusy} onClick={publishAnnouncement}>{annBusy?'…':'Publier'}</button>
+                </div>
+              )}
+              {announcements.length===0
+                ? <div className="panel"><div className="empty">Aucune annonce.</div></div>
+                : announcements.map(a=>(
+                  <div key={a.id} className="panel" style={{marginBottom:12,borderLeft:a.pinned?'4px solid var(--red)':'4px solid var(--line)'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+                      {a.pinned&&<span style={{fontSize:12,color:'var(--red)',fontWeight:800}}>📌 ÉPINGLÉ</span>}
+                      <span style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:17,color:'var(--navy)'}}>{a.title}</span>
+                    </div>
+                    <div style={{fontSize:14,color:'#2b3142',lineHeight:1.55,marginBottom:8}}>{a.body}</div>
+                    <div style={{fontSize:11.5,color:'var(--muted)'}}>{a.author_name||a.author_email} · {timeAgo(a.created_at)}</div>
+                  </div>
+                ))}
+            </div>
+          )}
+
+        </div>
+      </div>
     </div>
   );
 }
@@ -2469,7 +3020,7 @@ function AdminUsers({ adminEmail, toast }){
 //  ACCOUNTING — AP / AR / EXPENSES / REPORTS
 // ============================================================
 const ENTRY_CATEGORIES = {
-  AR: ['Publicité radio','Partenariat sponsoring','Abonnement numérique','Prestation événement','Don / Subvention','Autre recette'],
+  AR: ['Publicité radio','Partenariat sponsoring','Abonnement numérique','Prestation événement','Don / Subvention','Autre recette','Couverture médiatique','Émission','Communiqué','Passage d\'album','Commission Radio','Site web','Digital'],
   AP: ['Salaires & charges','Loyer & charges locatives','Équipement technique','Marketing & impression','Logiciels & abonnements','Déplacement & transport','Eau / Électricité / Internet','Sous-traitance','Impôts & taxes','Autre dépense'],
 };
 const ENTRY_STATUSES = ['En attente','Payé','Partiel','En retard','Annulé'];
@@ -2495,7 +3046,8 @@ function EntryForm({ entry, onSave, onCancel, adminEmail, toast }){
     if(!form.amount||isNaN(Number(form.amount))){ toast('Montant invalide'); return; }
     if(!form.date){ toast('Date requise'); return; }
     setBusy(true);
-    const payload = {...form, amount:Number(form.amount), updated_at:new Date().toISOString()};
+    const payload = {...form, amount:Number(form.amount), updated_at:new Date().toISOString(),
+      party_type:form.party_type||null, party_name:form.party_name||null};
     let res;
     if(entry?.id){ res = await sb.from('accounting_entries').update(payload).eq('id',entry.id); }
     else { res = await sb.from('accounting_entries').insert([{...payload, created_by:adminEmail}]); }
@@ -2553,9 +3105,58 @@ function EntryForm({ entry, onSave, onCancel, adminEmail, toast }){
           <input value={form.notes||''} onChange={e=>set('notes',e.target.value)} placeholder="Remarques…" /></div>
       </div>
 
+      <div className="field">
+        <label>Partie liée</label>
+        <select value={form.party_type||''} onChange={e=>setForm({...form,party_type:e.target.value,party_name:''})}>
+          <option value="">— Aucune —</option>
+          <option value="employee">Employé</option>
+          <option value="business">Entreprise</option>
+          <option value="other">Autre personne</option>
+        </select>
+      </div>
+      {form.party_type && (
+        <div className="field">
+          <label>{form.party_type==='employee'?'Nom de l\'employé':form.party_type==='business'?'Nom de l\'entreprise':'Nom'}</label>
+          <input value={form.party_name||''} onChange={e=>setForm({...form,party_name:e.target.value})} placeholder="Nom..." />
+        </div>
+      )}
+
       <div style={{display:'flex',gap:10,marginTop:4}}>
         <button className="btn-primary" disabled={busy} onClick={save}>{busy?'…':(entry?'Enregistrer':'Créer')}</button>
         <button className="btn-ghost" onClick={onCancel}>Annuler</button>
+      </div>
+    </div>
+  );
+}
+
+function PieChart({ data }){
+  // data = [{label, value, color}]
+  if(!data||data.length===0) return <div style={{color:'var(--muted)',fontSize:13,padding:20,textAlign:'center'}}>Aucune donnée ce mois.</div>;
+  const total = data.reduce((s,d)=>s+d.value,0)||1;
+  let cumAngle = -Math.PI/2;
+  const slices = data.map(d=>{
+    const angle = (d.value/total)*2*Math.PI;
+    const x1=Math.cos(cumAngle), y1=Math.sin(cumAngle);
+    cumAngle+=angle;
+    const x2=Math.cos(cumAngle), y2=Math.sin(cumAngle);
+    const large=angle>Math.PI?1:0;
+    const path=`M0,0 L${(x1*45).toFixed(2)},${(y1*45).toFixed(2)} A45,45,0,${large},1,${(x2*45).toFixed(2)},${(y2*45).toFixed(2)} Z`;
+    return {...d, path};
+  });
+  return (
+    <div style={{display:'flex',gap:20,alignItems:'center',flexWrap:'wrap'}}>
+      <svg viewBox="-50 -50 100 100" width="120" height="120" style={{flexShrink:0}}>
+        {slices.map((s,i)=><path key={i} d={s.path} fill={s.color} opacity={0.85} />)}
+        <circle cx="0" cy="0" r="20" fill="#fff" />
+      </svg>
+      <div style={{flex:1,minWidth:140}}>
+        {slices.map((s,i)=>(
+          <div key={i} style={{display:'flex',alignItems:'center',gap:7,marginBottom:5}}>
+            <span style={{width:10,height:10,borderRadius:2,background:s.color,flexShrink:0,display:'inline-block'}}/>
+            <span style={{fontSize:11.5,color:'var(--navy)',flex:1,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{s.label}</span>
+            <span style={{fontSize:11.5,fontWeight:700,color:'#c0392b',whiteSpace:'nowrap'}}>{Number(s.value).toLocaleString('fr-FR')}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -2584,6 +3185,8 @@ function AdminAccounting({ adminEmail, toast }){
   const [filterStatus,setFilterStatus]=useState('all');
   const [filterMonth,setFilterMonth]=useState('all');
   const [filterYear,setFilterYear]=useState(String(new Date().getFullYear()));
+  const [filterCategory,setFilterCategory]=useState('all');
+  const [filterParty,setFilterParty]=useState('');
 
   async function load(){
     const { data }=await sb.from('accounting_entries').select('*').order('date',{ascending:false});
@@ -2636,7 +3239,9 @@ function AdminAccounting({ adminEmail, toast }){
     return (!listType||e.type===listType)
       && (filterStatus==='all'||e.status===filterStatus)
       && (filterYear==='all'||d.getFullYear()===Number(filterYear))
-      && (filterMonth==='all'||d.getMonth()===Number(filterMonth));
+      && (filterMonth==='all'||d.getMonth()===Number(filterMonth))
+      && (filterCategory==='all'||e.category===filterCategory)
+      && (!filterParty||((e.party_name||'').toLowerCase().includes(filterParty.toLowerCase())));
   });
 
   return (
@@ -2721,6 +3326,21 @@ function AdminAccounting({ adminEmail, toast }){
             </div>
           </div>
 
+          {/* Pie chart — AP by category this month */}
+          {(()=>{
+            const pieColors=['#c0392b','#e67e22','#2980b9','#8e44ad','#1abc9c','#d35400','#27ae60','#2c3e50','#e74c3c','#3498db'];
+            const curMonthEntries = yearEntries.filter(e=>e.type==='AP'&&new Date(e.date).getMonth()===thisMonth);
+            const pieMap={};
+            curMonthEntries.forEach(e=>{ pieMap[e.category||'Autre']=(pieMap[e.category||'Autre']||0)+Number(e.amount||0); });
+            const pieData=Object.entries(pieMap).sort((a,b)=>b[1]-a[1]).map(([label,value],i)=>({label,value,color:pieColors[i%pieColors.length]}));
+            return (
+              <div className="panel" style={{padding:'18px 20px',marginBottom:20}}>
+                <div style={{fontWeight:700,fontSize:14,color:'var(--navy)',marginBottom:12}}>Dépenses par catégorie — {MONTHS_FR[thisMonth]} {thisYear}</div>
+                <PieChart data={pieData} />
+              </div>
+            );
+          })()}
+
           {/* Recent entries */}
           <div className="panel" style={{padding:0,overflow:'hidden'}}>
             <div style={{padding:'14px 18px',fontWeight:700,fontSize:14,color:'var(--navy)',borderBottom:'1px solid var(--line)'}}>Dernières écritures</div>
@@ -2763,6 +3383,14 @@ function AdminAccounting({ adminEmail, toast }){
               <option value="all">Tous les mois</option>
               {MONTHS_FR.map((m,i)=><option key={i} value={i}>{m}</option>)}
             </select>
+            <select value={filterCategory} onChange={e=>setFilterCategory(e.target.value)}
+              style={{padding:'9px 12px',border:'1px solid var(--line)',borderRadius:9,fontSize:13.5,background:'#fff',outline:'none'}}>
+              <option value="all">Toutes catégories</option>
+              {(ENTRY_CATEGORIES[listType]||[...ENTRY_CATEGORIES.AR,...ENTRY_CATEGORIES.AP]).map(c=><option key={c}>{c}</option>)}
+            </select>
+            <input value={filterParty} onChange={e=>setFilterParty(e.target.value)}
+              placeholder="Rechercher partie liée…"
+              style={{padding:'9px 12px',border:'1px solid var(--line)',borderRadius:9,fontSize:13.5,background:'#fff',outline:'none',minWidth:180}} />
             <div style={{marginLeft:'auto',fontWeight:700,fontSize:13.5,color:tab==='ar'?'#1f7a48':'#c0392b'}}>
               Total filtré : {filtered.reduce((s,e)=>s+Number(e.amount||0),0).toLocaleString('fr-FR')} FCFA
             </div>
@@ -2791,6 +3419,7 @@ function AdminAccounting({ adminEmail, toast }){
                         <td style={{fontWeight:600}}>
                           {overdue&&<span style={{color:'#c0392b',marginRight:5,fontSize:12}}>⚠</span>}
                           {e.label}
+                          {e.party_name&&<div style={{fontSize:11,color:'#2a5bd0',fontWeight:600}}>👤 {e.party_name}</div>}
                           {e.notes&&<div style={{fontSize:11,color:'var(--muted)',fontWeight:400}}>{e.notes}</div>}
                         </td>
                         <td style={{fontSize:11.5,color:'var(--muted)'}}>{e.reference||'—'}</td>
@@ -3025,7 +3654,7 @@ function PageJournal({ section }){
   );
 }
 
-function Admin({ session, onExit, data, reload, toast, userPerms }){
+function Admin({ session, onExit, data, reload, toast, userPerms, showProfile }){
   const full = userPerms?.__full;
   const can = (k) => !!(full || userPerms?.[k]);
   const jobTitle = userPerms?.job_title || '';
@@ -3040,6 +3669,7 @@ function Admin({ session, onExit, data, reload, toast, userPerms }){
         <Logo onClick={()=>{}} /><span className="tag">ADMIN</span><div className="grow"></div>
         <span style={{fontSize:13,color:'#cfd6ea'}}>{adminEmail}</span>
         {jobTitle && <span style={{fontSize:11,background:'rgba(255,255,255,.12)',color:'#cfd6ea',padding:'3px 8px',borderRadius:5,fontWeight:700,letterSpacing:'.04em'}}>{jobTitle.toUpperCase()}</span>}
+        <button className="exit" onClick={showProfile}>👤 Mon espace</button>
         <button className="exit" onClick={onExit}>Voir le site →</button>
         <button className="exit" onClick={logout}>Déconnexion</button>
       </div></div>
@@ -3054,6 +3684,7 @@ function Admin({ session, onExit, data, reload, toast, userPerms }){
         {can('can_emissions') && <button className={tab==='emissions'?'active':''} onClick={()=>setTab('emissions')}>📻 Émissions</button>}
         {can('can_finance') && <button className={tab==='finance'?'active':''} onClick={()=>setTab('finance')}>💰 Paie</button>}
         {can('can_accounting') && <button className={tab==='accounting'?'active':''} onClick={()=>setTab('accounting')}>📊 Comptabilité</button>}
+        {can('can_articles') && <button className={tab==='cdm'?'active':''} onClick={()=>setTab('cdm')}>⚽ CDM</button>}
       </div></div>
       <div className="admin-body"><div className="wrap">
         {tab==='articles' && can('can_articles') && <><AdminArticles articles={data.articles} reload={reload} toast={toast} adminEmail={adminEmail} /><PageJournal section="articles" /></>}
@@ -3066,6 +3697,7 @@ function Admin({ session, onExit, data, reload, toast, userPerms }){
         {tab==='emissions' && can('can_emissions') && <><AdminEmissions shows={data.shows||[]} reload={reload} toast={toast} adminEmail={adminEmail} /><PageJournal section="emissions" /></>}
         {tab==='finance' && can('can_finance') && <><AdminFinance adminEmail={adminEmail} userPerms={userPerms} toast={toast} /><PageJournal section="finance" /></>}
         {tab==='accounting' && can('can_accounting') && <><AdminAccounting adminEmail={adminEmail} toast={toast} /><PageJournal section="accounting" /></>}
+        {tab==='cdm' && can('can_articles') && <AdminCDM articles={data.articles} reload={reload} toast={toast} adminEmail={adminEmail} />}
       </div></div>
     </div>
   );
@@ -3294,6 +3926,7 @@ function App(){
   const [authChecked,setAuthChecked]=useState(false);
   const [userPerms,setUserPerms]=useState(null); // null = loading
   const [toast,toastNode]=useToast();
+  const [showProfile,setShowProfile]=useState(false);
 
   const [data,setData]=useState({ articles:[],standings:[],scores:[],fixtures:[],partners:[],ads:[],shows:[] });
 
@@ -3364,7 +3997,11 @@ function App(){
     if(!authChecked) return <div className="login-wrap"><div className="spinner" style={{borderTopColor:'#fff'}}/></div>;
     if(!session) return <><AdminLogin onAuthed={s=>{setSession(s);loadAdmin();}} onExit={goSite} />{toastNode}</>;
     if(userPerms===null) return <div className="login-wrap"><div className="spinner" style={{borderTopColor:'#fff'}}/></div>;
-    return <><Admin session={session} onExit={goSite} data={data} reload={loadAdmin} toast={toast} userPerms={userPerms} />{toastNode}</>;
+    return <>
+      <Admin session={session} onExit={goSite} data={data} reload={loadAdmin} toast={toast} userPerms={userPerms} showProfile={()=>setShowProfile(true)} />
+      {showProfile && <MonEspace session={session} userPerms={userPerms} onClose={()=>setShowProfile(false)} toast={toast} />}
+      {toastNode}
+    </>;
   }
 
   // ---------- PARTNER ROUTE ----------
