@@ -2333,12 +2333,13 @@ function generatePaystubPDF(emp, stub){
   if(stub.reference) doc.text(`Réf : ${stub.reference}`, W-M-6, y+22, {align:'right'});
 
   // Salary table
-  y += 36;
+  y += 38;
   doc.setFillColor(...navy);
   doc.rect(M, y, W-M*2, 9, 'F');
   doc.setTextColor(255,255,255); doc.setFontSize(9); doc.setFont('helvetica','bold');
   doc.text('DÉSIGNATION', M+5, y+6);
   doc.text('MONTANT (FCFA)', W-M-5, y+6, {align:'right'});
+  y += 9;
 
   // Use plain space as thousands separator — toLocaleString('fr-FR') produces narrow no-break space which jsPDF renders as /
   const fmt = n => Math.round(Number(n)||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,' ');
@@ -2366,12 +2367,11 @@ function generatePaystubPDF(emp, stub){
   if(empDisplayAmt) empRows.push(['CNSS Employeur', fmt(empDisplayAmt)]);
 
   function drawSectionHeader(label, color){
-    y += 5;
+    y += 3;
     doc.setFillColor(...color);
     doc.rect(M, y, W-M*2, 7, 'F');
     doc.setTextColor(255,255,255); doc.setFontSize(8); doc.setFont('helvetica','bold');
     doc.text(label, M+5, y+5);
-    doc.text('MONTANT (FCFA)', W-M-5, y+5, {align:'right'});
     y += 7;
   }
 
