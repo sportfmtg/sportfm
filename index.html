@@ -471,6 +471,41 @@
     .secitem{ grid-template-columns:80px 1fr; gap:8px; }
     .panel{ padding:12px; }
   }
+
+  /* ── CDM NAV BUTTON ── */
+  .cdm-nav-btn {
+    background: linear-gradient(135deg, #c8102e, #006b3f) !important;
+    color: #fff !important;
+    border-radius: 20px !important;
+    padding: 6px 14px !important;
+    font-weight: 800 !important;
+    letter-spacing: .03em !important;
+    border: none !important;
+    cursor: pointer !important;
+    animation: cdm-pulse 2s ease-in-out infinite !important;
+  }
+  .cdm-nav-btn:hover { opacity: .88; }
+  .cdm-nav-btn.active::after { display: none !important; }
+  @keyframes cdm-pulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(200,16,46,.4); }
+    50% { box-shadow: 0 0 0 8px rgba(200,16,46,0); }
+  }
+
+  /* ── CDM PAGE ── */
+  .cdm-match-card { transition: transform .15s ease, box-shadow .15s ease; }
+  .cdm-match-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,.1); }
+  .cdm-group-card { cursor: pointer; transition: box-shadow .15s ease; }
+  .cdm-group-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.1); }
+  .cdm-poll-bar { transition: width .6s ease; }
+  .cdm-refresh-btn {
+    position: fixed; bottom: 96px; right: 24px; z-index: 50;
+    background: linear-gradient(135deg,#c8102e,#006b3f);
+    color: #fff; border: none; border-radius: 50%; width: 50px; height: 50px;
+    font-size: 20px; cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,.25);
+    display: flex; align-items: center; justify-content: center;
+    transition: transform .2s ease;
+  }
+  .cdm-refresh-btn:hover { transform: rotate(180deg); }
 </style>
 </head>
 <body>
@@ -799,7 +834,18 @@ function CategoryView({ cat, articles, onOpen, shows }){
     );
   }
   const titleMap={ Football:'Football', Basketball:'Basket' };
-  const items=articles.filter(a=>a.category===cat);
+  const cdmCats = ['cdm','coupe du monde','world cup'];
+  const items=articles.filter(a=>{
+    const cat_lc=(a.category||'').toLowerCase();
+    // Exclude CDM articles from Football/Basket pages
+    if(cdmCats.includes(cat_lc)) return false;
+    // If article has no category set, include on both Football & Basket
+    if(!a.category) return true;
+    // Match by category
+    if(cat==='Football') return cat_lc==='football' || (a.tags||[]).some(t=>t.toLowerCase()==='football');
+    if(cat==='Basketball') return cat_lc==='basketball' || cat_lc==='basket' || (a.tags||[]).some(t=>['basketball','basket'].includes(t.toLowerCase()));
+    return a.category===cat;
+  });
   return (
     <div className="article" style={{maxWidth:880}}>
       <div className="sechead" style={{marginTop:0}}><h2 style={{fontSize:22}}>{titleMap[cat]||cat}</h2><div className="line"></div></div>
@@ -3914,6 +3960,415 @@ function timeAgo(ts){
 }
 
 // ============================================================
+//  CDM PUBLIC PAGE
+// ============================================================
+function CDMPage({ articles, toast, session }){
+  const [espnScores, setEspnScores] = useState([]);
+  const [espnLoading, setEspnLoading] = useState(true);
+  const [groups, setGroups] = useState([]);
+  const [leaders, setLeaders] = useState([]);
+  const [openGroups, setOpenGroups] = useState({});
+  const [polls, setPolls] = useState({});
+  const [votedMap, setVotedMap] = useState(()=> JSON.parse(localStorage.getItem('cdm_votes')||'{}'));
+  const [refreshing, setRefreshing] = useState(false);
+
+  function loadESPN(){
+    setEspnLoading(true);
+    fetch('https://site.api.espn.com/apis/site/v2/sports/soccer/FIFA.WORLD/scoreboard')
+      .then(r=>r.json())
+      .then(d=>{ setEspnScores(d.events||[]); setEspnLoading(false); })
+      .catch(()=>setEspnLoading(false));
+    fetch('https://site.api.espn.com/apis/v2/sports/soccer/FIFA.WORLD/standings')
+      .then(r=>r.json())
+      .then(d=>setGroups(d.standings?.groups||[]))
+      .catch(()=>{});
+    fetch('https://site.api.espn.com/apis/v2/sports/soccer/FIFA.WORLD/leaders')
+      .then(r=>r.json())
+      .then(d=>setLeaders(d.leaders||[]))
+      .catch(()=>{});
+  }
+
+  async function loadPolls(){
+    const { data } = await sb.from('polls').select('*');
+    const map = {};
+    (data||[]).forEach(p=>{ map[p.match_id]=p; });
+    setPolls(map);
+  }
+
+  useEffect(()=>{ loadESPN(); loadPolls(); },[]);
+
+  async function votePoll(matchId, homeTeam, awayTeam, choice){
+    const voted = JSON.parse(localStorage.getItem('cdm_votes')||'{}');
+    if(voted[matchId]){ toast('Vous avez déjà voté pour ce match !'); return; }
+    const { data: existing } = await sb.from('polls').select('*').eq('match_id', matchId).maybeSingle();
+    if(existing){
+      const update = { votes_home: existing.votes_home||0, votes_draw: existing.votes_draw||0, votes_away: existing.votes_away||0 };
+      update[`votes_${choice}`] = (update[`votes_${choice}`]||0) + 1;
+      await sb.from('polls').update(update).eq('id', existing.id);
+    } else {
+      await sb.from('polls').insert([{
+        match_id: matchId, home_team: homeTeam, away_team: awayTeam,
+        votes_home: choice==='home'?1:0, votes_draw: choice==='draw'?1:0, votes_away: choice==='away'?1:0,
+      }]);
+    }
+    voted[matchId] = choice;
+    localStorage.setItem('cdm_votes', JSON.stringify(voted));
+    setVotedMap({...voted});
+    toast('Vote enregistré ! 🗳️');
+    loadPolls();
+  }
+
+  async function handleRefresh(){
+    setRefreshing(true);
+    loadESPN(); loadPolls();
+    setTimeout(()=>setRefreshing(false), 1000);
+  }
+
+  const cdmArticles = (articles||[]).filter(a=>{
+    const cat = (a.category||'').toLowerCase();
+    return cat==='cdm' || cat==='coupe du monde' || cat==='world cup';
+  });
+
+  const preMatches = espnScores.filter(ev=>ev.status?.type?.state==='pre');
+  const activeMatches = espnScores.filter(ev=>ev.status?.type?.state==='in');
+  const doneMatches = espnScores.filter(ev=>ev.status?.type?.state==='post');
+
+  const goalLeader = leaders.find(l=>(l.displayName||'').toLowerCase().includes('goal') || (l.name||'').toLowerCase().includes('goal'));
+  const topScorers = goalLeader?.leaders||[];
+
+  const imgStyle=(a)=>a.image_url?{'--img':`url(${a.image_url})`}:null;
+  const imgCls=(a)=>"img shot"+(a.image_url?" has-img":"");
+
+  return (
+    <div style={{paddingBottom:80}}>
+      {/* ─── HERO BANNER ─── */}
+      <div style={{
+        background:'linear-gradient(135deg, #0a1628 0%, #1a3a2a 50%, #0a1628 100%)',
+        padding:'48px 0 32px', textAlign:'center', position:'relative', overflow:'hidden',
+        borderBottom:'4px solid #c8102e'
+      }}>
+        <div style={{position:'absolute',top:-60,left:-60,width:200,height:200,borderRadius:'50%',background:'rgba(0,107,63,.15)',pointerEvents:'none'}}/>
+        <div style={{position:'absolute',bottom:-40,right:-40,width:160,height:160,borderRadius:'50%',background:'rgba(200,16,46,.12)',pointerEvents:'none'}}/>
+        <div style={{position:'absolute',top:20,right:80,width:80,height:80,borderRadius:'50%',background:'rgba(244,196,48,.08)',pointerEvents:'none'}}/>
+        <div style={{position:'absolute',bottom:20,left:80,width:60,height:60,borderRadius:'50%',background:'rgba(0,107,63,.1)',pointerEvents:'none'}}/>
+        <div style={{position:'relative',zIndex:1}}>
+          <div style={{fontSize:48,marginBottom:8}}>🏆</div>
+          <h1 style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontSize:'clamp(28px,5vw,52px)',fontWeight:900,color:'#fff',textTransform:'uppercase',letterSpacing:'.05em',margin:'0 0 8px'}}>
+            Coupe du Monde FIFA 2026
+          </h1>
+          <p style={{color:'#a0b8a8',fontSize:16,margin:'0 0 16px',letterSpacing:'.1em'}}>🇺🇸 USA · 🇨🇦 Canada · 🇲🇽 Mexique</p>
+          <span style={{display:'inline-block',background:'#c8102e',color:'#fff',fontWeight:800,fontSize:13,padding:'6px 20px',borderRadius:20,letterSpacing:'.08em',animation:'cdm-pulse 1.5s ease-in-out infinite'}}>
+            ● EN COURS
+          </span>
+          <div style={{marginTop:24,display:'flex',justifyContent:'center',gap:40,flexWrap:'wrap'}}>
+            {[['48','Équipes'],['104','Matchs'],['16','Villes'],['32','Jours']].map(([n,l])=>(
+              <div key={l} style={{textAlign:'center'}}>
+                <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:900,fontSize:32,color:'#f4c430'}}>{n}</div>
+                <div style={{fontSize:11,fontWeight:700,letterSpacing:'.08em',color:'#a0b8a8',textTransform:'uppercase'}}>{l}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="wrap" style={{paddingTop:28}}>
+
+        {/* ─── LIVE / IN PROGRESS ─── */}
+        {activeMatches.length>0 && (
+          <div style={{marginBottom:28}}>
+            <div className="sechead" style={{marginTop:0}}>
+              <h2 style={{fontSize:16,color:'#c8102e'}}>🔴 EN DIRECT</h2><div className="line"></div>
+            </div>
+            {activeMatches.map(ev=>{
+              const comp=ev.competitions?.[0];
+              const home=comp?.competitors?.find(c=>c.homeAway==='home');
+              const away=comp?.competitors?.find(c=>c.homeAway==='away');
+              const status=ev.status?.type;
+              return (
+                <div key={ev.id} className="cdm-match-card" style={{background:'rgba(200,16,46,.06)',border:'2px solid #c8102e',borderRadius:14,padding:'18px 22px',display:'flex',alignItems:'center',gap:14,marginBottom:10,flexWrap:'wrap'}}>
+                  <span style={{width:10,height:10,borderRadius:'50%',background:'#c8102e',flexShrink:0,animation:'cdm-pulse 1s infinite'}}/>
+                  <div style={{flex:1,minWidth:100}}>
+                    {home?.team?.flag?.href ? <img src={home.team.flag.href} alt="" style={{width:24,height:16,objectFit:'cover',borderRadius:2,marginRight:6,verticalAlign:'middle'}} /> : null}
+                    <span style={{fontWeight:800,fontSize:16,color:'var(--navy)'}}>{home?.team?.displayName||home?.team?.name||'—'}</span>
+                  </div>
+                  <div style={{fontWeight:900,fontSize:24,color:'#c8102e',minWidth:80,textAlign:'center',letterSpacing:'.05em'}}>
+                    {home?.score||0} – {away?.score||0}
+                  </div>
+                  <div style={{flex:1,minWidth:100,textAlign:'right'}}>
+                    <span style={{fontWeight:800,fontSize:16,color:'var(--navy)'}}>{away?.team?.displayName||away?.team?.name||'—'}</span>
+                    {away?.team?.flag?.href ? <img src={away.team.flag.href} alt="" style={{width:24,height:16,objectFit:'cover',borderRadius:2,marginLeft:6,verticalAlign:'middle'}} /> : null}
+                  </div>
+                  <span style={{fontSize:12,fontWeight:800,padding:'4px 12px',borderRadius:20,background:'#c8102e',color:'#fff',letterSpacing:'.04em',flexShrink:0}}>
+                    {status?.shortDetail||status?.description||'LIVE'}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ─── 2-COL LAYOUT ─── */}
+        <div style={{display:'grid',gridTemplateColumns:'1fr 340px',gap:28,alignItems:'start'}}>
+          {/* LEFT: All Matches */}
+          <div>
+            <div className="sechead" style={{marginTop:0}}>
+              <h2 style={{fontSize:16}}>📅 Résultats &amp; Matchs</h2><div className="line"></div>
+            </div>
+            {espnLoading ? <Spinner/> : espnScores.length===0 ? (
+              <div style={{background:'#fff',border:'1px solid var(--line)',borderRadius:12,padding:32,textAlign:'center',color:'var(--muted)'}}>
+                <div style={{fontSize:32,marginBottom:8}}>⚽</div>
+                <div style={{fontWeight:700}}>Aucun match programmé aujourd'hui</div>
+                <div style={{fontSize:13,marginTop:4}}>Les données ESPN seront disponibles dès le prochain match.</div>
+              </div>
+            ) : (
+              [...doneMatches,...preMatches].map(ev=>{
+                const comp=ev.competitions?.[0];
+                const home=comp?.competitors?.find(c=>c.homeAway==='home');
+                const away=comp?.competitors?.find(c=>c.homeAway==='away');
+                const status=ev.status?.type;
+                const isDone=status?.state==='post';
+                return (
+                  <div key={ev.id} className="cdm-match-card" style={{background:'#fff',border:'1px solid var(--line)',borderRadius:12,padding:'14px 18px',display:'flex',alignItems:'center',gap:12,marginBottom:10,flexWrap:'wrap'}}>
+                    <div style={{flex:1,minWidth:80}}>
+                      {home?.team?.flag?.href ? <img src={home.team.flag.href} alt="" style={{width:20,height:14,objectFit:'cover',borderRadius:2,marginRight:6,verticalAlign:'middle'}} /> : null}
+                      <span style={{fontWeight:700,fontSize:14,color:'var(--navy)'}}>{home?.team?.displayName||home?.team?.name||'—'}</span>
+                    </div>
+                    <div style={{fontWeight:900,fontSize:18,color:isDone?'var(--navy)':'#2a5bd0',minWidth:70,textAlign:'center'}}>
+                      {isDone ? `${home?.score||0} – ${away?.score||0}` : (status?.shortDetail||'–')}
+                    </div>
+                    <div style={{flex:1,minWidth:80,textAlign:'right'}}>
+                      <span style={{fontWeight:700,fontSize:14,color:'var(--navy)'}}>{away?.team?.displayName||away?.team?.name||'—'}</span>
+                      {away?.team?.flag?.href ? <img src={away.team.flag.href} alt="" style={{width:20,height:14,objectFit:'cover',borderRadius:2,marginLeft:6,verticalAlign:'middle'}} /> : null}
+                    </div>
+                    <span style={{fontSize:11,fontWeight:800,padding:'3px 10px',borderRadius:20,background:isDone?'#e8eaf0':'#f0f7ff',color:isDone?'#666':'#2a5bd0',letterSpacing:'.04em',flexShrink:0}}>
+                      {status?.shortDetail||status?.description||'—'}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* RIGHT: Top Scorers */}
+          <div>
+            <div className="sechead" style={{marginTop:0}}>
+              <h2 style={{fontSize:16}}>🥇 Meilleurs Buteurs</h2><div className="line"></div>
+            </div>
+            <div style={{background:'#fff',border:'1px solid var(--line)',borderRadius:14,overflow:'hidden'}}>
+              {topScorers.length===0 ? (
+                <div style={{padding:24,textAlign:'center',color:'var(--muted)',fontSize:13}}>
+                  <div style={{fontSize:28,marginBottom:8}}>⚽</div>
+                  Classement disponible dès les premiers buts
+                </div>
+              ) : topScorers.slice(0,8).map((p,i)=>{
+                const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':null;
+                return (
+                  <div key={i} style={{display:'flex',alignItems:'center',gap:12,padding:'12px 16px',borderBottom:i<Math.min(topScorers.length,8)-1?'1px solid #f2f3f7':'none',background:i===0?'rgba(244,196,48,.06)':'#fff'}}>
+                    <span style={{width:22,textAlign:'center',fontSize:i<3?18:13,fontWeight:700,color:i<3?'':'var(--muted-2)',flexShrink:0}}>
+                      {medal||i+1}
+                    </span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontWeight:700,fontSize:14,color:'var(--navy)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                        {p.athlete?.displayName||p.displayName||'—'}
+                      </div>
+                      <div style={{fontSize:11.5,color:'var(--muted)',marginTop:1}}>
+                        {p.athlete?.team?.displayName||p.team?.displayName||''}
+                      </div>
+                    </div>
+                    <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:900,fontSize:22,color:i===0?'#f4c430':i===1?'#9ea7b2':i===2?'#cd7f32':'var(--navy)',flexShrink:0}}>
+                      {p.value||p.displayValue||0}
+                    </div>
+                    <div style={{fontSize:10,fontWeight:700,color:'var(--muted)',flexShrink:0}}>buts</div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Mini Stats */}
+            <div style={{marginTop:16,background:'linear-gradient(135deg,#0a1628,#1a3a2a)',borderRadius:14,padding:20,color:'#fff'}}>
+              <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:13,letterSpacing:'.08em',color:'#a0b8a8',marginBottom:12}}>STATISTIQUES CDM 2026</div>
+              {[
+                ['⚽','Matchs joués', doneMatches.length||'—'],
+                ['🔴','En direct', activeMatches.length||0],
+                ['📅','À venir', preMatches.length||'—'],
+                ['🏆','Équipes', 48],
+              ].map(([icon,label,val])=>(
+                <div key={label} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'7px 0',borderBottom:'1px solid rgba(255,255,255,.08)'}}>
+                  <span style={{fontSize:13,color:'#a0b8a8'}}>{icon} {label}</span>
+                  <span style={{fontWeight:800,fontSize:16,color:'#f4c430'}}>{val}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* ─── GROUP STANDINGS ─── */}
+        {groups.length>0 && (
+          <div style={{marginTop:32}}>
+            <div className="sechead">
+              <h2 style={{fontSize:16}}>📊 Classements des Groupes</h2><div className="line"></div>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:16}}>
+              {groups.map((g,gi)=>{
+                const isOpen = openGroups[gi]!==false; // open by default
+                const entries = g.standings?.entries||g.entries||[];
+                return (
+                  <div key={gi} className="cdm-group-card" style={{background:'#fff',border:'1px solid var(--line)',borderRadius:14,overflow:'hidden'}}>
+                    <div onClick={()=>setOpenGroups(p=>({...p,[gi]:!isOpen}))}
+                      style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'12px 16px',background:isOpen?'var(--navy)':'#f7f8fb',cursor:'pointer'}}>
+                      <span style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:14,letterSpacing:'.06em',color:isOpen?'#fff':'var(--navy)',textTransform:'uppercase'}}>
+                        {g.name||`Groupe ${gi+1}`}
+                      </span>
+                      <span style={{fontSize:12,color:isOpen?'#a0b8a8':'var(--muted)'}}>{isOpen?'▲':'▼'}</span>
+                    </div>
+                    {isOpen && (
+                      <div>
+                        <div style={{display:'grid',gridTemplateColumns:'1fr 28px 28px 28px 28px 32px',padding:'6px 14px',fontSize:10,fontWeight:700,letterSpacing:'.05em',color:'var(--muted-2)',borderBottom:'1px solid #f2f3f7'}}>
+                          <span>ÉQUIPE</span><span style={{textAlign:'center'}}>J</span><span style={{textAlign:'center'}}>G</span><span style={{textAlign:'center'}}>N</span><span style={{textAlign:'center'}}>P</span><span style={{textAlign:'right'}}>PTS</span>
+                        </div>
+                        {entries.slice(0,4).map((e,ei)=>{
+                          const stats=e.stats||[];
+                          const getStat=(name)=>stats.find(s=>s.name===name||s.abbreviation===name)?.displayValue||'0';
+                          return (
+                            <div key={ei} style={{display:'grid',gridTemplateColumns:'1fr 28px 28px 28px 28px 32px',alignItems:'center',padding:'9px 14px',borderBottom:ei<3?'1px solid #f7f8fb':'none',background:ei<2?'rgba(0,107,63,.03)':'#fff'}}>
+                              <span style={{fontWeight:700,fontSize:13,color:'var(--navy)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                                {e.team?.displayName||e.team?.name||e.name||'—'}
+                              </span>
+                              <span style={{textAlign:'center',fontSize:12,color:'#6b7180'}}>{getStat('gamesPlayed')||getStat('GP')||'—'}</span>
+                              <span style={{textAlign:'center',fontSize:12,color:'#1f7a48',fontWeight:600}}>{getStat('wins')||getStat('W')||'—'}</span>
+                              <span style={{textAlign:'center',fontSize:12,color:'#6b7180'}}>{getStat('ties')||getStat('D')||getStat('draws')||'—'}</span>
+                              <span style={{textAlign:'center',fontSize:12,color:'#c0392b',fontWeight:600}}>{getStat('losses')||getStat('L')||'—'}</span>
+                              <span style={{textAlign:'right',fontWeight:900,fontSize:14,color:'var(--navy)'}}>{getStat('points')||getStat('PTS')||'0'}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ─── PREDICTIONS / POLLS ─── */}
+        {preMatches.length>0 && (
+          <div style={{marginTop:32}}>
+            <div className="sechead">
+              <h2 style={{fontSize:16}}>🗳️ Vos Pronostics</h2><div className="line"></div>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:16}}>
+              {preMatches.slice(0,6).map(ev=>{
+                const comp=ev.competitions?.[0];
+                const home=comp?.competitors?.find(c=>c.homeAway==='home');
+                const away=comp?.competitors?.find(c=>c.homeAway==='away');
+                const matchId=ev.id;
+                const myVote=votedMap[matchId];
+                const pollData=polls[matchId];
+                const total=(pollData?.votes_home||0)+(pollData?.votes_draw||0)+(pollData?.votes_away||0)||1;
+                const pct=(n)=>Math.round(((n||0)/total)*100);
+                const homeName=home?.team?.displayName||home?.team?.name||'Équipe 1';
+                const awayName=away?.team?.displayName||away?.team?.name||'Équipe 2';
+                return (
+                  <div key={matchId} style={{background:'#fff',border:'1px solid var(--line)',borderRadius:14,padding:20}}>
+                    <div style={{fontSize:11,fontWeight:800,letterSpacing:'.06em',color:'var(--muted)',marginBottom:10,textTransform:'uppercase'}}>
+                      {ev.status?.type?.shortDetail||ev.status?.type?.description||'À venir'}
+                    </div>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+                      <span style={{fontWeight:800,fontSize:15,color:'var(--navy)',flex:1}}>{homeName}</span>
+                      <span style={{fontWeight:900,fontSize:13,color:'var(--muted)',padding:'0 10px'}}>VS</span>
+                      <span style={{fontWeight:800,fontSize:15,color:'var(--navy)',flex:1,textAlign:'right'}}>{awayName}</span>
+                    </div>
+                    <div style={{fontSize:12.5,fontWeight:700,color:'var(--muted)',marginBottom:10,textAlign:'center'}}>Qui va gagner ?</div>
+                    {!myVote ? (
+                      <div style={{display:'flex',gap:8}}>
+                        <button onClick={()=>votePoll(matchId,homeName,awayName,'home')}
+                          style={{flex:1,background:'linear-gradient(135deg,#0a1628,#1a3a2a)',color:'#fff',border:'none',borderRadius:9,padding:'10px 6px',fontSize:12,fontWeight:700,cursor:'pointer',lineHeight:1.3}}>
+                          🏠 {homeName.split(' ')[0]}
+                        </button>
+                        <button onClick={()=>votePoll(matchId,homeName,awayName,'draw')}
+                          style={{flex:0,background:'#f1f2f6',color:'var(--navy)',border:'none',borderRadius:9,padding:'10px 12px',fontSize:12,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
+                          🤝 Nul
+                        </button>
+                        <button onClick={()=>votePoll(matchId,homeName,awayName,'away')}
+                          style={{flex:1,background:'linear-gradient(135deg,#c8102e,#8a0b20)',color:'#fff',border:'none',borderRadius:9,padding:'10px 6px',fontSize:12,fontWeight:700,cursor:'pointer',lineHeight:1.3}}>
+                          {awayName.split(' ')[0]} ✈️
+                        </button>
+                      </div>
+                    ) : (
+                      <div>
+                        <div style={{fontSize:11,color:'#1f7a48',fontWeight:700,marginBottom:8,textAlign:'center'}}>
+                          ✅ Votre vote : {myVote==='home'?homeName:myVote==='draw'?'Nul':awayName}
+                        </div>
+                        {[
+                          {label:homeName,key:'votes_home',color:'#c8102e',pct:pct(pollData?.votes_home)},
+                          {label:'Nul',key:'votes_draw',color:'#8a90a2',pct:pct(pollData?.votes_draw)},
+                          {label:awayName,key:'votes_away',color:'#006b3f',pct:pct(pollData?.votes_away)},
+                        ].map(b=>(
+                          <div key={b.key} style={{marginBottom:8}}>
+                            <div style={{display:'flex',justifyContent:'space-between',fontSize:12,fontWeight:700,marginBottom:3,color:myVote===b.key.replace('votes_','')?b.color:'var(--navy)'}}>
+                              <span>{b.label}</span><span>{b.pct}%</span>
+                            </div>
+                            <div style={{height:8,background:'#f1f2f6',borderRadius:4,overflow:'hidden'}}>
+                              <div className="cdm-poll-bar" style={{height:'100%',width:`${b.pct}%`,background:b.color,borderRadius:4}}/>
+                            </div>
+                          </div>
+                        ))}
+                        <div style={{fontSize:11,color:'var(--muted)',textAlign:'center',marginTop:6}}>
+                          {(pollData?.votes_home||0)+(pollData?.votes_draw||0)+(pollData?.votes_away||0)} vote{((pollData?.votes_home||0)+(pollData?.votes_draw||0)+(pollData?.votes_away||0))>1?'s':''}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ─── CDM ARTICLES ─── */}
+        {cdmArticles.length>0 && (
+          <div style={{marginTop:32}}>
+            <div className="sechead">
+              <h2 style={{fontSize:16}}>📰 Actualités CDM</h2><div className="line"></div>
+            </div>
+            <div className="grid3">
+              {cdmArticles.map(a=>(
+                <article key={a.id} className="gcard" style={{cursor:'pointer'}}>
+                  <div className={imgCls(a)} style={{...imgStyle(a), position:'relative'}}>
+                    <span style={{position:'absolute',top:10,left:10,background:'#c8102e',color:'#fff',fontWeight:800,fontSize:10,letterSpacing:'.07em',padding:'4px 9px',borderRadius:5}}>CDM 2026</span>
+                  </div>
+                  <div className="eyebrow" style={{marginTop:10,color:'#c8102e'}}>{a.tag}</div>
+                  <h4 style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:700,fontSize:17,lineHeight:1.15,letterSpacing:'-.005em',margin:0,color:'var(--navy)'}}>{a.title}</h4>
+                  <div className="meta" style={{fontSize:12,color:'var(--muted-2)',marginTop:7}}>{timeAgo(a.created_at)}</div>
+                </article>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Empty state if no ESPN data and no articles */}
+        {!espnLoading && espnScores.length===0 && cdmArticles.length===0 && (
+          <div style={{textAlign:'center',padding:'60px 20px',color:'var(--muted)'}}>
+            <div style={{fontSize:56,marginBottom:12}}>🏆</div>
+            <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:24,color:'var(--navy)',marginBottom:8}}>Coupe du Monde 2026</div>
+            <p style={{fontSize:15,maxWidth:'42ch',margin:'0 auto',lineHeight:1.6}}>
+              Les données en direct seront disponibles dès le coup d'envoi. Revenez pour suivre les scores, classements et pronostics !
+            </p>
+          </div>
+        )}
+
+      </div>
+
+      {/* Refresh FAB */}
+      <button className="cdm-refresh-btn" onClick={handleRefresh} title="Actualiser les données ESPN" style={{transform:refreshing?'rotate(360deg)':'none',transition:'transform .6s ease'}}>
+        ↻
+      </button>
+    </div>
+  );
+}
+
+// ============================================================
 //  ROOT APP
 // ============================================================
 function App(){
@@ -4026,6 +4481,7 @@ function App(){
         <Logo onClick={()=>navTo('Home')} />
         <nav className="main">
           {NAVS.map(n=><button key={n.key} className={(nav===n.key&&!isPartner)?'active':''} onClick={()=>navTo(n.key)}>{n.label}</button>)}
+          <button className={`nav-link cdm-nav-btn${nav==='CDM'?' active':''}`} onClick={()=>navTo('CDM')}>⚽ <span>CDM 2026</span></button>
         </nav>
         <div className="grow"></div>
         <label className="search">
@@ -4038,7 +4494,8 @@ function App(){
 
       {!isPartner && <Ticker scores={data.scores} />}
 
-      {loading ? <Spinner/> :
+      {nav==='CDM' && !openArticle && <CDMPage articles={data.articles} toast={toast} session={session} />}
+      {nav!=='CDM' && (loading ? <Spinner/> :
         isPartner ? <PartnerView onBack={()=>navTo('Home')} toast={toast} /> :
         openArticle ? <div className="wrap"><ArticleView article={openArticle} onBack={()=>setOpenArticle(null)} backLabel={navLabel(nav)} /></div> :
         <div className="wrap">
@@ -4047,6 +4504,7 @@ function App(){
           {nav==='Standings' && <StandingsView standings={data.standings} />}
           {(nav==='Football'||nav==='Basketball'||nav==='Shows') && <CategoryView cat={nav} articles={data.articles} onOpen={open} shows={data.shows||[]} />}
         </div>
+      )}
       }
 
       <footer><div className="wrap">
@@ -4064,6 +4522,7 @@ function App(){
       <div className={"drawer"+(drawer?" open":"")} onClick={e=>{if(e.target.className.includes('drawer'))setDrawer(false);}}>
         <div className="panel-d">
           {NAVS.map(n=><button key={n.key} onClick={()=>navTo(n.key)}>{n.label}</button>)}
+          <button onClick={()=>navTo('CDM')} style={{background:'linear-gradient(135deg,#c8102e,#006b3f)',color:'#fff',borderRadius:10,marginTop:4,fontWeight:800}}>⚽ CDM 2026</button>
           <button onClick={()=>navTo('Partner')} style={{color:'var(--red)'}}>Devenir partenaire</button>
         </div>
       </div>
