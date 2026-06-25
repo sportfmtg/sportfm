@@ -1260,9 +1260,7 @@ function TaskForm({ initial, onSave, onCancel, adminEmail, toast, teamMembers })
     const prevAssignees=parseAssignees(initial?.assigned_to);
     const newAssignees=assignees.filter(e=>!prevAssignees.includes(e));
     for(const email of newAssignees){
-      const member=teamMembers.find(m=>m.email===email);
-      const name=member?.name||email;
-      await logAction(adminEmail, 'Tâche assignée', `${name} — ${t.title}`);
+      await notify(email, 'task_assigned', 'Tâche assignée', t.title);
     }
     await logAction(adminEmail, t.id?'Tâche modifiée':'Tâche créée', t.title+' → '+assignees.join(', '));
     toast(t.id?'Mis à jour':'Tâche créée'); onSave();
@@ -2120,6 +2118,9 @@ function PaystubForm({ stub, employees, onSave, onCancel, adminEmail, toast }){
     if(res.error){ toast('Erreur : '+res.error.message); return; }
     const emp = employees.find(e=>e.id===form.employee_id);
     await logAction(adminEmail, stub?'Fiche modifiée':'Fiche créée', `${emp?.name||emp?.email} — ${form.period_month} ${form.period_year}`);
+    if(!stub && emp?.linked_user_email){
+      await notify(emp.linked_user_email, 'paystub', 'Nouvelle fiche de paie', `${form.period_month} ${form.period_year} — disponible dans Mon Espace`);
+    }
     toast(stub?'Mis à jour':'Fiche créée'); onSave();
   }
 
@@ -3011,8 +3012,8 @@ function MonEspace({ session, userPerms, onClose, toast, initialTab }){
     });
     sb.from('announcements').select('*').order('pinned',{ascending:false}).order('created_at',{ascending:false}).limit(30)
       .then(({data})=>setAnnouncements(data||[]));
-    sb.from('admin_logs').select('*').order('created_at',{ascending:false}).limit(100)
-      .then(({data})=>setNotifications((data||[]).filter(l=>(l.details||'').includes(email)||(l.admin_email||''===email)).slice(0,15)));
+    sb.from('notifications').select('*').eq('recipient_email',email).order('created_at',{ascending:false}).limit(30)
+      .then(({data})=>setNotifications(data||[]));
     sb.from('user_roles').select('email,name,job_title').order('name').then(({data})=>setTeamList((data||[]).filter(u=>u.email!==email)));
     loadMessages();
   },[email]);
@@ -3084,6 +3085,12 @@ function MonEspace({ session, userPerms, onClose, toast, initialTab }){
     setAnnBusy(false);
     if(error){ toast('Erreur : '+error.message); return; }
     toast('Annonce publiée ✓'); setAnnTitle(''); setAnnBody(''); setAnnPinned(false);
+    // notify all team members
+    sb.from('user_roles').select('email').then(({data})=>{
+      (data||[]).filter(u=>u.email!==email).forEach(u=>{
+        notify(u.email, 'announcement', annTitle, (profile?.name||email)+' a publié une annonce');
+      });
+    });
     sb.from('announcements').select('*').order('pinned',{ascending:false}).order('created_at',{ascending:false}).limit(30)
       .then(({data})=>setAnnouncements(data||[]));
   }
@@ -3150,18 +3157,33 @@ function MonEspace({ session, userPerms, onClose, toast, initialTab }){
           {/* NOTIFICATIONS TAB */}
           {tab==='notifs' && (
             <div className="panel">
-              <h3>Notifications récentes</h3>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+                <h3 style={{margin:0}}>Notifications</h3>
+                {notifications.some(n=>!n.read) && (
+                  <button className="btn-ghost" style={{fontSize:12,padding:'5px 12px'}} onClick={async()=>{
+                    await sb.from('notifications').update({read:true}).eq('recipient_email',email).eq('read',false);
+                    sb.from('notifications').select('*').eq('recipient_email',email).order('created_at',{ascending:false}).limit(30)
+                      .then(({data})=>setNotifications(data||[]));
+                  }}>Tout marquer lu</button>
+                )}
+              </div>
               {notifications.length===0
                 ? <div className="empty">Aucune notification.</div>
-                : notifications.map((l,i)=>(
-                  <div key={l.id||i} style={{display:'flex',gap:12,padding:'10px 0',borderBottom:'1px solid var(--line)',alignItems:'flex-start'}}>
-                    <span style={{fontSize:10.5,color:'var(--muted)',whiteSpace:'nowrap',flexShrink:0}}>{new Date(l.created_at).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>
-                    <div>
-                      <div style={{fontSize:13,fontWeight:700,color:'var(--navy)'}}>{l.action}</div>
-                      {l.details&&<div style={{fontSize:12,color:'#5a6178'}}>{l.details}</div>}
-                    </div>
-                  </div>
-                ))}
+                : notifications.map((n,i)=>{
+                    const icon = n.type==='task_assigned'?'📋':n.type==='paystub'?'💰':n.type==='announcement'?'📢':'🔔';
+                    return (
+                      <div key={n.id||i} style={{display:'flex',gap:12,padding:'12px 0',borderBottom:'1px solid var(--line)',alignItems:'flex-start',background:n.read?'transparent':'rgba(42,91,208,.03)'}}>
+                        <span style={{fontSize:20,flexShrink:0,marginTop:1}}>{icon}</span>
+                        <div style={{flex:1}}>
+                          <div style={{fontWeight:n.read?600:800,fontSize:13.5,color:'var(--navy)',marginBottom:2}}>{n.title}</div>
+                          {n.body&&<div style={{fontSize:12.5,color:'#5a6178'}}>{n.body}</div>}
+                          <div style={{fontSize:11,color:'var(--muted)',marginTop:4}}>{new Date(n.created_at).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</div>
+                        </div>
+                        {!n.read && <div style={{width:8,height:8,borderRadius:'50%',background:'var(--red)',flexShrink:0,marginTop:6}}/>}
+                      </div>
+                    );
+                  })
+              }
             </div>
           )}
 
@@ -4151,8 +4173,11 @@ function Admin({ session, onExit, data, reload, toast, userPerms, showProfile })
 
   useEffect(()=>{
     async function fetchUnread(){
-      const { data:msgs }=await sb.from('direct_messages').select('id').eq('to_email',adminEmail).eq('read',false);
-      setUnread((msgs||[]).length);
+      const [{ data:msgs },{ data:notifs }]=await Promise.all([
+        sb.from('direct_messages').select('id').eq('to_email',adminEmail).eq('read',false),
+        sb.from('notifications').select('id').eq('recipient_email',adminEmail).eq('read',false),
+      ]);
+      setUnread((msgs||[]).length+(notifs||[]).length);
     }
     fetchUnread();
     const interval=setInterval(fetchUnread,30000);
@@ -4386,6 +4411,11 @@ function AdminAds({ ads, reload, toast, adminEmail }){
 async function logAction(adminEmail, action, details=''){
   try {
     await sb.from('admin_logs').insert([{ admin_email:adminEmail, action, details:details||null }]);
+  } catch(e){}
+}
+async function notify(recipientEmail, type, title, body){
+  try {
+    await sb.from('notifications').insert([{ recipient_email:recipientEmail, type, title, body, read:false }]);
   } catch(e){}
 }
 
