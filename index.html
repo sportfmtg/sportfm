@@ -1214,7 +1214,8 @@ const TASK_PRIORITIES = [
   { key:'high',       label:'Prioritaire', color:'#e87820' },
   { key:'urgent',     label:'URGENT',    color:'var(--red)' },
 ];
-const EMPTY_TASK = { title:'', description:'', content_type:'Article web', platform:'Site web', assigned_to:'', priority:'normal', status:'todo', due_date:'', completion_notes:'' };
+const EMPTY_TASK = { title:'', description:'', content_type:'Article web', platform:'Site web', assigned_to:[], priority:'normal', status:'todo', due_date:'', completion_notes:'' };
+function parseAssignees(v){ if(!v) return []; if(Array.isArray(v)) return v; try{ const p=JSON.parse(v); return Array.isArray(p)?p:[p]; }catch{ return v?[v]:[]; } }
 
 function dueDateInfo(date){
   if(!date) return { text:'—', color:'var(--muted-2)', weight:400 };
@@ -1230,15 +1231,24 @@ function dueDateInfo(date){
 }
 
 function TaskForm({ initial, onSave, onCancel, adminEmail, toast, teamMembers }){
-  const [t,setT]=useState(initial||{...EMPTY_TASK});
+  const [t,setT]=useState(()=>{ const base=initial||{...EMPTY_TASK}; return {...base, assigned_to:parseAssignees(base.assigned_to)}; });
   const [busy,setBusy]=useState(false);
+  const [showPicker,setShowPicker]=useState(false);
   const set=(k,v)=>setT(p=>({...p,[k]:v}));
+
+  function toggleAssignee(email){
+    setT(p=>{
+      const cur=p.assigned_to||[];
+      return {...p, assigned_to: cur.includes(email)?cur.filter(e=>e!==email):[...cur,email]};
+    });
+  }
 
   async function save(){
     if(!t.title.trim()){ toast('Le titre est obligatoire'); return; }
     setBusy(true);
+    const assignees=t.assigned_to||[];
     const payload={ title:t.title, description:t.description||null, content_type:t.content_type,
-      platform:t.platform, assigned_to:t.assigned_to||null, priority:t.priority,
+      platform:t.platform, assigned_to:JSON.stringify(assignees), priority:t.priority,
       status:t.status, due_date:t.due_date||null, completion_notes:t.completion_notes||null,
       updated_at:new Date().toISOString() };
     let res;
@@ -1246,7 +1256,15 @@ function TaskForm({ initial, onSave, onCancel, adminEmail, toast, teamMembers })
     else { res=await sb.from('content_tasks').insert([{...payload, created_by:adminEmail}]); }
     setBusy(false);
     if(res.error){ toast('Erreur : '+res.error.message); return; }
-    await logAction(adminEmail, t.id?'Tâche modifiée':'Tâche créée', t.title+' → '+t.assigned_to);
+    // send notification to each newly assigned person
+    const prevAssignees=parseAssignees(initial?.assigned_to);
+    const newAssignees=assignees.filter(e=>!prevAssignees.includes(e));
+    for(const email of newAssignees){
+      const member=teamMembers.find(m=>m.email===email);
+      const name=member?.full_name||email;
+      await logAction(adminEmail, 'Tâche assignée', `${name} — ${t.title}`);
+    }
+    await logAction(adminEmail, t.id?'Tâche modifiée':'Tâche créée', t.title+' → '+assignees.join(', '));
     toast(t.id?'Mis à jour':'Tâche créée'); onSave();
   }
 
@@ -1277,10 +1295,43 @@ function TaskForm({ initial, onSave, onCancel, adminEmail, toast, teamMembers })
 
       <div className="grid2">
         <div className="field"><label>Assigné à</label>
-          <input value={t.assigned_to||''} onChange={e=>set('assigned_to',e.target.value)}
-            placeholder="Nom ou e-mail"
-            list="team-list" />
-          <datalist id="team-list">{teamMembers.map(m=><option key={m} value={m}/>)}</datalist>
+          <div style={{position:'relative'}}>
+            <div onClick={()=>setShowPicker(p=>!p)} style={{minHeight:38,border:'1px solid var(--line)',borderRadius:8,padding:'6px 10px',cursor:'pointer',background:'#fff',display:'flex',flexWrap:'wrap',gap:5,alignItems:'center'}}>
+              {(t.assigned_to||[]).length===0
+                ? <span style={{color:'var(--muted)',fontSize:13}}>Sélectionner des membres…</span>
+                : (t.assigned_to).map(email=>{
+                    const m=teamMembers.find(x=>x.email===email);
+                    return <span key={email} style={{background:'#e7eefc',color:'#2a5bd0',borderRadius:20,padding:'2px 10px',fontSize:12.5,fontWeight:700,display:'flex',alignItems:'center',gap:5}}>
+                      {m?.full_name||email}
+                      <span onClick={e=>{e.stopPropagation();toggleAssignee(email);}} style={{cursor:'pointer',fontWeight:900,fontSize:14,lineHeight:1}}>×</span>
+                    </span>;
+                  })
+              }
+              <span style={{marginLeft:'auto',color:'var(--muted)',fontSize:11}}>▼</span>
+            </div>
+            {showPicker && (
+              <div style={{position:'absolute',top:'calc(100% + 4px)',left:0,right:0,background:'#fff',border:'1px solid var(--line)',borderRadius:10,boxShadow:'0 8px 24px rgba(0,0,0,.12)',zIndex:99,maxHeight:220,overflowY:'auto',padding:'6px 0'}}>
+                {teamMembers.length===0
+                  ? <div style={{padding:'10px 16px',color:'var(--muted)',fontSize:13}}>Aucun membre dans l'équipe</div>
+                  : teamMembers.map(m=>{
+                      const sel=(t.assigned_to||[]).includes(m.email);
+                      return <div key={m.email} onClick={()=>toggleAssignee(m.email)}
+                        style={{padding:'9px 16px',cursor:'pointer',display:'flex',alignItems:'center',gap:10,background:sel?'#f0f5ff':'transparent',transition:'background .1s'}}>
+                        <div style={{width:18,height:18,borderRadius:4,border:'2px solid',borderColor:sel?'#2a5bd0':'var(--line)',background:sel?'#2a5bd0':'#fff',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                          {sel && <span style={{color:'#fff',fontSize:11,fontWeight:900}}>✓</span>}
+                        </div>
+                        <div>
+                          <div style={{fontWeight:600,fontSize:13.5}}>{m.full_name||m.email}</div>
+                          {m.job_title && <div style={{fontSize:11,color:'var(--muted)'}}>{m.job_title}</div>}
+                        </div>
+                      </div>;
+                    })
+                }
+                <div style={{borderTop:'1px solid var(--line)',margin:'4px 0'}}/>
+                <div onClick={()=>setShowPicker(false)} style={{padding:'8px 16px',fontSize:12.5,color:'var(--muted)',cursor:'pointer',textAlign:'center'}}>Fermer</div>
+              </div>
+            )}
+          </div>
         </div>
         <div className="field"><label>Date limite</label>
           <input type="date" value={t.due_date||''} onChange={e=>set('due_date',e.target.value)} /></div>
@@ -1327,10 +1378,14 @@ function AdminContent({ adminEmail, userRole, toast }){
   const [statusFilter,setStatusFilter]=useState('all');
   const [assigneeFilter,setAssigneeFilter]=useState('all');
   const [view,setView]=useState('table'); // 'table' | 'board'
+  const [teamList,setTeamList]=useState([]);
 
   async function load(){
-    const { data }=await sb.from('content_tasks').select('*').order('due_date',{ascending:true,nullsFirst:false});
-    setTasks(data||[]); setLoading(false);
+    const [{ data:taskData },{ data:teamData }]=await Promise.all([
+      sb.from('content_tasks').select('*').order('due_date',{ascending:true,nullsFirst:false}),
+      sb.from('user_roles').select('email,full_name,job_title').order('full_name'),
+    ]);
+    setTasks(taskData||[]); setTeamList(teamData||[]); setLoading(false);
   }
   useEffect(()=>{ load(); },[]);
 
@@ -1347,12 +1402,13 @@ function AdminContent({ adminEmail, userRole, toast }){
     load();
   }
 
-  const teamMembers=[...new Set(tasks.map(t=>t.assigned_to).filter(Boolean))];
+  const teamMembers=teamList;
 
-  const visible=tasks.filter(t=>
-    (statusFilter==='all'||t.status===statusFilter) &&
-    (assigneeFilter==='all'||t.assigned_to===assigneeFilter)
-  );
+  const visible=tasks.filter(t=>{
+    const assignees=parseAssignees(t.assigned_to);
+    return (statusFilter==='all'||t.status===statusFilter) &&
+      (assigneeFilter==='all'||assignees.includes(assigneeFilter));
+  });
 
   // KPI counts
   const counts=TASK_STATUSES.reduce((a,s)=>({...a,[s.key]:tasks.filter(t=>t.status===s.key).length}),{});
@@ -1360,7 +1416,7 @@ function AdminContent({ adminEmail, userRole, toast }){
 
   if(editing!==null) return (
     <TaskForm initial={editing} onSave={()=>{setEditing(null);load();}} onCancel={()=>setEditing(null)}
-      adminEmail={adminEmail} toast={toast} teamMembers={teamMembers} />
+      adminEmail={adminEmail} toast={toast} teamMembers={teamList} />
   );
 
   return (
@@ -1390,7 +1446,7 @@ function AdminContent({ adminEmail, userRole, toast }){
         <select value={assigneeFilter} onChange={e=>setAssigneeFilter(e.target.value)}
           style={{padding:'9px 12px',border:'1px solid var(--line)',borderRadius:9,fontSize:13.5,background:'#fff',outline:'none'}}>
           <option value="all">Toute l'équipe</option>
-          {teamMembers.map(m=><option key={m} value={m}>{m}</option>)}
+          {teamMembers.map(m=><option key={m.email} value={m.email}>{m.full_name||m.email}</option>)}
         </select>
         <div style={{marginLeft:'auto',display:'flex',gap:6}}>
           {['table','board'].map(v=>(
@@ -1431,7 +1487,12 @@ function AdminContent({ adminEmail, userRole, toast }){
                         <div style={{fontSize:13,fontWeight:700,color:'var(--navy)',marginBottom:4,lineHeight:1.3}}>{t.title}</div>
                         <div style={{fontSize:11,color:'var(--muted-2)',marginBottom:6}}>{t.content_type} · {t.platform}</div>
                         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:4}}>
-                          {t.assigned_to && <span style={{fontSize:11.5,fontWeight:600,color:'#2a5bd0',background:'#e7eefc',borderRadius:20,padding:'2px 8px'}}>{t.assigned_to}</span>}
+                          <div style={{display:'flex',flexWrap:'wrap',gap:3}}>
+                            {parseAssignees(t.assigned_to).map(email=>{
+                              const m=teamList.find(x=>x.email===email);
+                              return <span key={email} style={{fontSize:11,fontWeight:600,color:'#2a5bd0',background:'#e7eefc',borderRadius:20,padding:'2px 7px'}}>{m?.full_name||email}</span>;
+                            })}
+                          </div>
                           {t.due_date && <span style={{fontSize:11,fontWeight:dd.weight,color:dd.color}}>{dd.text}</span>}
                         </div>
                       </div>
@@ -1472,9 +1533,14 @@ function AdminContent({ adminEmail, userRole, toast }){
                       <div style={{fontSize:11,color:'var(--muted-2)'}}>{t.platform}</div>
                     </td>
                     <td>
-                      {t.assigned_to
-                        ? <span style={{fontSize:12.5,fontWeight:700,color:'#2a5bd0',background:'#e7eefc',borderRadius:20,padding:'3px 10px',whiteSpace:'nowrap'}}>{t.assigned_to}</span>
-                        : <span style={{color:'var(--muted)',fontSize:12}}>—</span>}
+                      {parseAssignees(t.assigned_to).length===0
+                        ? <span style={{color:'var(--muted)',fontSize:12}}>—</span>
+                        : <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
+                            {parseAssignees(t.assigned_to).map(email=>{
+                              const m=teamList.find(x=>x.email===email);
+                              return <span key={email} style={{fontSize:12,fontWeight:700,color:'#2a5bd0',background:'#e7eefc',borderRadius:20,padding:'2px 9px',whiteSpace:'nowrap'}}>{m?.full_name||email}</span>;
+                            })}
+                          </div>}
                     </td>
                     <td>
                       <span style={{fontSize:13,fontWeight:dd.weight,color:dd.color}}>{dd.text}</span>
