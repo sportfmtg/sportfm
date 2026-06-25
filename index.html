@@ -4069,17 +4069,34 @@ function CDMPage({ articles, toast, session }){
 
   function loadESPN(){
     setEspnLoading(true);
-    fetch('https://site.api.espn.com/apis/site/v2/sports/soccer/FIFA.WORLD/scoreboard')
+    // Build today's date string YYYYMMDD
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
+    // Fetch full tournament range June 11 → today (ESPN supports date range with limit)
+    const base = 'https://site.api.espn.com/apis/site/v2/sports/soccer/FIFA.WORLD';
+    fetch(`${base}/scoreboard?dates=20260611-${todayStr}&limit=200`)
       .then(r=>r.json())
-      .then(d=>{ setEspnScores(d.events||[]); setEspnLoading(false); })
+      .then(d=>{
+        const evs = d.events||[];
+        if(evs.length>0){ setEspnScores(evs); setEspnLoading(false); return; }
+        // Fallback: try today only
+        return fetch(`${base}/scoreboard`).then(r=>r.json()).then(d2=>{setEspnScores(d2.events||[]); setEspnLoading(false);});
+      })
       .catch(()=>setEspnLoading(false));
+    // Standings
     fetch('https://site.api.espn.com/apis/v2/sports/soccer/FIFA.WORLD/standings')
       .then(r=>r.json())
       .then(d=>setGroups(d.standings?.groups||[]))
       .catch(()=>{});
-    fetch('https://site.api.espn.com/apis/v2/sports/soccer/FIFA.WORLD/leaders')
+    // Leaders — try with season year first, then without
+    fetch('https://site.api.espn.com/apis/v2/sports/soccer/FIFA.WORLD/leaders?season=2026&limit=20')
       .then(r=>r.json())
-      .then(d=>setAllLeaders(d.leaders||[]))
+      .then(d=>{
+        const ls = d.leaders||[];
+        if(ls.length>0){ setAllLeaders(ls); return; }
+        return fetch('https://site.api.espn.com/apis/v2/sports/soccer/FIFA.WORLD/leaders?limit=20')
+          .then(r=>r.json()).then(d2=>setAllLeaders(d2.leaders||[]));
+      })
       .catch(()=>{});
   }
 
