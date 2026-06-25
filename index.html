@@ -1890,20 +1890,25 @@ function PaystubForm({ stub, employees, onSave, onCancel, adminEmail, toast }){
   const [busy,setBusy]=useState(false);
   const set=(k,v)=>setForm(p=>({...p,[k]:v}));
 
-  // When employee changes, populate fixed details from employee record
+  // When employee changes, populate all fixed details from employee record
   function onEmployeeChange(empId){
     const emp = employees.find(e=>e.id===empId);
     if(!emp){ set('employee_id', empId); return; }
-    const brut = emp.salaire_brut || '';
-    const cnss = brut ? String(Math.round(Number(brut) * (emp.cnss_taux||9) / 100)) : '';
-    const tcs  = brut ? String(Math.round(Number(brut) * (emp.tcs_taux||0) / 100)) : '';
+    const brut = emp.salaire_brut ? Number(emp.salaire_brut) : 0;
+    const cnss = brut ? Math.round(brut * (Number(emp.cnss_taux)||9) / 100) : 0;
+    const tcs  = brut ? Math.round(brut * (Number(emp.tcs_taux)||0) / 100) : 0;
+    const ts   = brut ? Math.round(brut * (Number(emp.ts_taux)||3) / 100) : 0;
     setForm(p=>({...p,
       employee_id: empId,
-      gross: brut ? String(brut) : p.gross,
-      cotisations: cnss || p.cotisations,
-      impot: tcs || p.impot,
+      gross:       brut ? String(brut) : p.gross,
+      cotisations: brut ? String(cnss) : p.cotisations,
+      impot:       brut ? String(tcs)  : p.impot,
+      deduction:   brut ? String(ts)   : p.deduction,
     }));
   }
+
+  // Get selected employee
+  const selEmp = employees.find(e=>e.id===form.employee_id);
 
   // Auto-compute net when gross/deductions change
   const computedNet = ()=>{
@@ -1966,33 +1971,64 @@ function PaystubForm({ stub, employees, onSave, onCancel, adminEmail, toast }){
 
       <div style={{borderTop:'1px solid var(--line)',margin:'10px 0 14px',paddingTop:14}}>
         <div style={{fontSize:12,fontWeight:700,letterSpacing:'.05em',color:'var(--muted)',marginBottom:10}}>DÉTAIL DE LA RÉMUNÉRATION</div>
+
+        {/* Gains */}
+        <div style={{fontSize:11,fontWeight:700,color:'#1f7a48',letterSpacing:'.04em',marginBottom:6,textTransform:'uppercase'}}>+ Gains</div>
         <div className="grid2">
           <div className="field"><label>Salaire brut (FCFA)</label>
-            <input type="number" value={form.gross||''} onChange={e=>set('gross',e.target.value)} placeholder="Ex : 350 000" min="0" /></div>
-          <div className="field"><label>Prime / Bonus <span style={opt}>(+ ajout)</span></label>
-            <input type="number" value={form.prime||''} onChange={e=>set('prime',e.target.value)} placeholder="Ex : 25 000" min="0" /></div>
+            <input type="number" value={form.gross||''} onChange={e=>set('gross',e.target.value)} placeholder="Ex : 130 000" min="0" /></div>
+          <div className="field"><label>Prime / Bonus <span style={opt}>(variable)</span></label>
+            <input type="number" value={form.prime||''} onChange={e=>set('prime',e.target.value)} placeholder="Ex : 0" min="0" /></div>
+        </div>
+
+        {/* Retenues salarié */}
+        <div style={{fontSize:11,fontWeight:700,color:'#c0392b',letterSpacing:'.04em',margin:'10px 0 6px',textTransform:'uppercase'}}>− Retenues salarié</div>
+        <div className="grid2">
+          <div className="field">
+            <label>CNSS Salarié <span style={opt}>({selEmp?.cnss_taux??9}% du brut)</span></label>
+            <input type="number" value={form.cotisations||''} onChange={e=>set('cotisations',e.target.value)} placeholder="0" min="0" />
+          </div>
+          <div className="field">
+            <label>TCS <span style={opt}>({selEmp?.tcs_taux??0}% — Taxe complémentaire salariale)</span></label>
+            <input type="number" value={form.impot||''} onChange={e=>set('impot',e.target.value)} placeholder="0" min="0" />
+          </div>
         </div>
         <div className="grid2">
-          <div className="field"><label>Cotisations sociales <span style={opt}>(– retenue)</span></label>
-            <input type="number" value={form.cotisations||''} onChange={e=>set('cotisations',e.target.value)} placeholder="Ex : 30 000" min="0" /></div>
-          <div className="field"><label>Impôt sur revenu <span style={opt}>(– retenue)</span></label>
-            <input type="number" value={form.impot||''} onChange={e=>set('impot',e.target.value)} placeholder="Ex : 20 000" min="0" /></div>
-        </div>
-        <div className="grid2">
-          <div className="field"><label>Autre déduction <span style={opt}>(– retenue)</span></label>
-            <input type="number" value={form.deduction||''} onChange={e=>set('deduction',e.target.value)} placeholder="Ex : 5 000" min="0" /></div>
+          <div className="field">
+            <label>TS <span style={opt}>({selEmp?.ts_taux??3}% — Taxe sur salaire)</span></label>
+            <input type="number" value={form.deduction||''} onChange={e=>set('deduction',e.target.value)} placeholder="0" min="0" />
+          </div>
           <div className="field">
             <label>Net à payer (FCFA)
-              {(form.gross) && <button type="button" onClick={()=>set('net',computedNet())}
+              {form.gross && <button type="button" onClick={()=>set('net',computedNet())}
                 style={{marginLeft:8,fontSize:11,padding:'1px 8px',background:'var(--navy)',color:'#fff',border:'none',borderRadius:5,cursor:'pointer'}}>
                 Calculer
               </button>}
             </label>
             <input type="number" value={form.net||''} onChange={e=>set('net',e.target.value)}
-              placeholder="Ex : 280 000" min="0"
+              placeholder="Ex : 125 275" min="0"
               style={{fontWeight:700,borderColor:form.net?'var(--navy)':'var(--line)'}} />
           </div>
         </div>
+
+        {/* Charges employeur — informational */}
+        {selEmp && form.gross && (
+          <div style={{background:'#f7f8fb',border:'1px solid var(--line)',borderRadius:8,padding:'12px 16px',marginTop:8}}>
+            <div style={{fontSize:11,fontWeight:700,color:'var(--muted)',letterSpacing:'.04em',marginBottom:8,textTransform:'uppercase'}}>ℹ Charges employeur (pour information — non déduites du net)</div>
+            <div style={{display:'flex',flexWrap:'wrap',gap:16}}>
+              <div>
+                <div style={{fontSize:11,color:'var(--muted)'}}>CNSS Employeur ({selEmp.cnss_employeur_taux??22.5}%)</div>
+                <div style={{fontWeight:700,fontSize:14,color:'var(--navy)'}}>{fmtFCFA(Math.round(Number(form.gross)*(Number(selEmp.cnss_employeur_taux)||22.5)/100))}</div>
+              </div>
+              <div>
+                <div style={{fontSize:11,color:'var(--muted)'}}>Coût total employeur</div>
+                <div style={{fontWeight:700,fontSize:14,color:'var(--navy)'}}>
+                  {fmtFCFA(Math.round(Number(form.gross)*(1+(Number(selEmp.cnss_employeur_taux)||22.5)/100)))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="field"><label>Fiche de paie (PDF) <span style={opt}>{stub?'— laisser vide pour garder l\'existant':'— optionnel, un PDF sera généré automatiquement'}</span></label>
@@ -2127,22 +2163,64 @@ function generatePaystubPDF(emp, stub){
   doc.text('DÉSIGNATION', M+5, y+6);
   doc.text('MONTANT (FCFA)', W-M-5, y+6, {align:'right'});
 
-  const rows = [];
-  if(stub.gross) rows.push(['Salaire brut', Number(stub.gross).toLocaleString('fr-FR')]);
-  if(stub.cotisations) rows.push(['Cotisations sociales', '-'+Number(stub.cotisations).toLocaleString('fr-FR')]);
-  if(stub.impot) rows.push(['Impôt sur revenu', '-'+Number(stub.impot).toLocaleString('fr-FR')]);
-  if(stub.prime) rows.push(['Prime / Bonus', '+'+Number(stub.prime).toLocaleString('fr-FR')]);
-  if(stub.deduction) rows.push(['Déduction', '-'+Number(stub.deduction).toLocaleString('fr-FR')]);
-  if(rows.length===0 && stub.net) rows.push(['Rémunération', Number(stub.net).toLocaleString('fr-FR')]);
+  const fmt = n => Number(n).toLocaleString('fr-FR');
+  const cnssRate = emp.cnss_taux ?? 9;
+  const tcsRate  = emp.tcs_taux  ?? 0;
+  const tsRate   = emp.ts_taux   ?? 3;
+  const empRate  = emp.cnss_employeur_taux ?? 22.5;
 
-  rows.forEach((row, i) => {
-    y += 9;
-    doc.setFillColor(i%2===0?255:248,i%2===0?255:249,i%2===0?255:252);
-    doc.rect(M, y, W-M*2, 9, 'F');
-    doc.setTextColor(30,30,30); doc.setFontSize(9); doc.setFont('helvetica','normal');
-    doc.text(row[0], M+5, y+6);
-    doc.text(row[1], W-M-5, y+6, {align:'right'});
-  });
+  // Section: Gains
+  const gainsRows = [];
+  if(stub.gross) gainsRows.push(['Salaire de base brut', fmt(stub.gross)]);
+  if(stub.prime) gainsRows.push(['Prime / Bonus', '+'+fmt(stub.prime)]);
+
+  // Section: Retenues salarié
+  const retRows = [];
+  if(stub.cotisations) retRows.push([`Cotisations CNSS salarié (${cnssRate}%)`, fmt(stub.cotisations)]);
+  if(stub.impot)       retRows.push([`TCS — Taxe complémentaire salariale (${tcsRate}%)`, fmt(stub.impot)]);
+  if(stub.deduction)   retRows.push([`TS — Taxe sur salaire (${tsRate}%)`, fmt(stub.deduction)]);
+
+  // Section: Charges employeur (info only)
+  const empRows = [];
+  if(stub.gross) {
+    const empAmt = Math.round(Number(stub.gross) * Number(empRate) / 100);
+    empRows.push([`CNSS Employeur (${empRate}%)`, fmt(empAmt)]);
+  }
+
+  function drawSectionHeader(label, color){
+    y += 5;
+    doc.setFillColor(...color);
+    doc.rect(M, y, W-M*2, 7, 'F');
+    doc.setTextColor(255,255,255); doc.setFontSize(8); doc.setFont('helvetica','bold');
+    doc.text(label, M+5, y+5);
+    doc.text('MONTANT (FCFA)', W-M-5, y+5, {align:'right'});
+    y += 7;
+  }
+
+  function drawRows(rows, textColor){
+    rows.forEach((row, i) => {
+      doc.setFillColor(i%2===0?255:248, i%2===0?255:249, i%2===0?255:252);
+      doc.rect(M, y, W-M*2, 8, 'F');
+      doc.setTextColor(...textColor); doc.setFontSize(9); doc.setFont('helvetica','normal');
+      doc.text(row[0], M+5, y+5.5);
+      doc.setFont('helvetica','bold');
+      doc.text(row[1], W-M-5, y+5.5, {align:'right'});
+      y += 8;
+    });
+  }
+
+  drawSectionHeader('GAINS', [31, 122, 72]);
+  drawRows(gainsRows, [30,30,30]);
+
+  if(retRows.length){
+    drawSectionHeader('RETENUES SALARIÉ', [192, 57, 43]);
+    drawRows(retRows, [192,57,43]);
+  }
+
+  if(empRows.length){
+    drawSectionHeader('CHARGES EMPLOYEUR (information)', [80, 80, 100]);
+    drawRows(empRows, [80,80,100]);
+  }
 
   // Net pay box
   y += 14;
