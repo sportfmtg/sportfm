@@ -431,9 +431,16 @@
     .admin-table, .admin-table tbody, .admin-table tr, .admin-table td{ display:block; width:100%; }
     .admin-table tr{ border:1px solid var(--line); border-radius:10px; margin-bottom:10px; padding:12px 14px; background:#fff; }
     .admin-table tr:hover td{ background:none; }
-    .admin-table td{ border:none; padding:3px 0; font-size:13px; }
-    .admin-table td:last-child{ margin-top:8px; padding-top:8px; border-top:1px solid var(--line); text-align:left !important; }
+    .admin-table td{ border:none; padding:4px 0; font-size:13px; display:flex; align-items:center; gap:8px; }
+    .admin-table td:last-child{ margin-top:8px; padding-top:8px; border-top:1px solid var(--line); flex-wrap:wrap; gap:6px; }
     .admin-table td[style*="text-align:right"]{ text-align:left !important; padding-right:0 !important; }
+    /* data-label prefix */
+    .admin-table td[data-label]::before{
+      content: attr(data-label);
+      font-size:10.5px; font-weight:700; letter-spacing:.04em;
+      color:var(--muted); text-transform:uppercase;
+      min-width:62px; flex-shrink:0;
+    }
 
     /* form grid */
     .grid2{ grid-template-columns:1fr !important; }
@@ -1587,21 +1594,21 @@ function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail })
         <tbody>
           {scores.map(s=>(
             <tr key={s.id}>
-              <td><input className="inline-edit wide" defaultValue={s.home} onBlur={e=>updScore(s.id,{home:e.target.value})} /></td>
-              <td><input className="inline-edit" defaultValue={s.score} onBlur={e=>updScore(s.id,{score:e.target.value})} /></td>
-              <td><input className="inline-edit wide" defaultValue={s.away} onBlur={e=>updScore(s.id,{away:e.target.value})} /></td>
-              <td><input className="inline-edit" defaultValue={s.status} onBlur={e=>updScore(s.id,{status:e.target.value})} /></td>
-              <td><input type="checkbox" defaultChecked={s.is_live} onChange={e=>updScore(s.id,{is_live:e.target.checked})} /></td>
-              <td style={{textAlign:'right'}}><button className="icon-btn del" onClick={()=>delScore(s.id,`${s.home} vs ${s.away}`)}>Retirer</button></td>
+              <td data-label="Domicile"><input className="inline-edit wide" defaultValue={s.home} onBlur={e=>updScore(s.id,{home:e.target.value})} /></td>
+              <td data-label="Score"><input className="inline-edit" defaultValue={s.score} onBlur={e=>updScore(s.id,{score:e.target.value})} /></td>
+              <td data-label="Extérieur"><input className="inline-edit wide" defaultValue={s.away} onBlur={e=>updScore(s.id,{away:e.target.value})} /></td>
+              <td data-label="Statut"><input className="inline-edit" defaultValue={s.status} onBlur={e=>updScore(s.id,{status:e.target.value})} /></td>
+              <td data-label="Direct"><input type="checkbox" defaultChecked={s.is_live} onChange={e=>updScore(s.id,{is_live:e.target.checked})} /></td>
+              <td><button className="icon-btn del" onClick={()=>delScore(s.id,`${s.home} vs ${s.away}`)}>Retirer</button></td>
             </tr>
           ))}
           <tr style={{background:'#fafbfc'}}>
-            <td><input className="inline-edit wide" placeholder="RIV" value={ns.home} onChange={e=>setNs({...ns,home:e.target.value})} /></td>
-            <td><input className="inline-edit" placeholder="0 - 0" value={ns.score} onChange={e=>setNs({...ns,score:e.target.value})} /></td>
-            <td><input className="inline-edit wide" placeholder="OAK" value={ns.away} onChange={e=>setNs({...ns,away:e.target.value})} /></td>
-            <td><input className="inline-edit" placeholder="78'" value={ns.status} onChange={e=>setNs({...ns,status:e.target.value})} /></td>
-            <td><input type="checkbox" checked={ns.is_live} onChange={e=>setNs({...ns,is_live:e.target.checked})} /></td>
-            <td style={{textAlign:'right'}}><button className="icon-btn" onClick={addScore}>+ Ajouter</button></td>
+            <td data-label="Domicile"><input className="inline-edit wide" placeholder="RIV" value={ns.home} onChange={e=>setNs({...ns,home:e.target.value})} /></td>
+            <td data-label="Score"><input className="inline-edit" placeholder="0 - 0" value={ns.score} onChange={e=>setNs({...ns,score:e.target.value})} /></td>
+            <td data-label="Extérieur"><input className="inline-edit wide" placeholder="OAK" value={ns.away} onChange={e=>setNs({...ns,away:e.target.value})} /></td>
+            <td data-label="Statut"><input className="inline-edit" placeholder="78'" value={ns.status} onChange={e=>setNs({...ns,status:e.target.value})} /></td>
+            <td data-label="Direct"><input type="checkbox" checked={ns.is_live} onChange={e=>setNs({...ns,is_live:e.target.checked})} /></td>
+            <td><button className="icon-btn" onClick={addScore}>+ Ajouter</button></td>
           </tr>
         </tbody></table>
         <div className="hint" style={{marginTop:10,fontSize:12,color:'var(--muted)'}}>Les modifications sont enregistrées dès que vous quittez une cellule.</div>
@@ -1613,21 +1620,21 @@ function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail })
         <tbody>
           {fixRows.map(f=>(
             <tr key={f.id}>
-              <td><input className="inline-edit wide" defaultValue={f.home} onBlur={e=>updFixture(f.id,{home:e.target.value})} /></td>
-              <td><input className="inline-edit wide" defaultValue={f.away} onBlur={e=>updFixture(f.id,{away:e.target.value})} /></td>
-              <td><input className="inline-edit" defaultValue={f.kickoff_time} onBlur={e=>updFixture(f.id,{kickoff_time:e.target.value})} placeholder="20h30" /></td>
-              <td><input className="inline-edit wide" defaultValue={f.kickoff_day} onBlur={e=>updFixture(f.id,{kickoff_day:e.target.value})} placeholder="Sam 28 juin" /></td>
-              <td><input className="inline-edit" style={{width:46}} type="number" defaultValue={f.sort_order||0} onBlur={e=>updFixture(f.id,{sort_order:+e.target.value})} /></td>
-              <td style={{textAlign:'right'}}><button className="icon-btn del" onClick={()=>delFixture(f.id,`${f.home} vs ${f.away}`)}>Retirer</button></td>
+              <td data-label="Domicile"><input className="inline-edit wide" defaultValue={f.home} onBlur={e=>updFixture(f.id,{home:e.target.value})} /></td>
+              <td data-label="Extérieur"><input className="inline-edit wide" defaultValue={f.away} onBlur={e=>updFixture(f.id,{away:e.target.value})} /></td>
+              <td data-label="Heure"><input className="inline-edit" defaultValue={f.kickoff_time} onBlur={e=>updFixture(f.id,{kickoff_time:e.target.value})} placeholder="20h30" /></td>
+              <td data-label="Jour"><input className="inline-edit wide" defaultValue={f.kickoff_day} onBlur={e=>updFixture(f.id,{kickoff_day:e.target.value})} placeholder="Sam 28 juin" /></td>
+              <td data-label="Ordre"><input className="inline-edit" style={{width:46}} type="number" defaultValue={f.sort_order||0} onBlur={e=>updFixture(f.id,{sort_order:+e.target.value})} /></td>
+              <td><button className="icon-btn del" onClick={()=>delFixture(f.id,`${f.home} vs ${f.away}`)}>Retirer</button></td>
             </tr>
           ))}
           <tr style={{background:'#fafbfc'}}>
-            <td><input className="inline-edit wide" placeholder="Hawks FC" value={nf.home} onChange={e=>setNf({...nf,home:e.target.value})} /></td>
-            <td><input className="inline-edit wide" placeholder="United SC" value={nf.away} onChange={e=>setNf({...nf,away:e.target.value})} /></td>
-            <td><input className="inline-edit" placeholder="20h30" value={nf.kickoff_time} onChange={e=>setNf({...nf,kickoff_time:e.target.value})} /></td>
-            <td><input className="inline-edit wide" placeholder="Sam 28 juin" value={nf.kickoff_day} onChange={e=>setNf({...nf,kickoff_day:e.target.value})} /></td>
-            <td><input className="inline-edit" style={{width:46}} type="number" value={nf.sort_order} onChange={e=>setNf({...nf,sort_order:+e.target.value})} /></td>
-            <td style={{textAlign:'right'}}><button className="icon-btn" onClick={addFixture}>+ Ajouter</button></td>
+            <td data-label="Domicile"><input className="inline-edit wide" placeholder="Hawks FC" value={nf.home} onChange={e=>setNf({...nf,home:e.target.value})} /></td>
+            <td data-label="Extérieur"><input className="inline-edit wide" placeholder="United SC" value={nf.away} onChange={e=>setNf({...nf,away:e.target.value})} /></td>
+            <td data-label="Heure"><input className="inline-edit" placeholder="20h30" value={nf.kickoff_time} onChange={e=>setNf({...nf,kickoff_time:e.target.value})} /></td>
+            <td data-label="Jour"><input className="inline-edit wide" placeholder="Sam 28 juin" value={nf.kickoff_day} onChange={e=>setNf({...nf,kickoff_day:e.target.value})} /></td>
+            <td data-label="Ordre"><input className="inline-edit" style={{width:46}} type="number" value={nf.sort_order} onChange={e=>setNf({...nf,sort_order:+e.target.value})} /></td>
+            <td><button className="icon-btn" onClick={addFixture}>+ Ajouter</button></td>
           </tr>
         </tbody></table>
         <div className="hint" style={{marginTop:10,fontSize:12,color:'var(--muted)'}}>Les modifications sont enregistrées dès que vous quittez une cellule. L'ordre d'affichage suit la colonne Ordre.</div>
@@ -1639,14 +1646,14 @@ function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail })
         <tbody>
           {rows.map((t,i)=>(
             <tr key={t.id}>
-              <td style={{color:'var(--muted)'}}>{i+1}</td>
-              <td><input className="inline-edit wide" defaultValue={t.team} onBlur={e=>updStanding(t.id,{team:e.target.value},t.team)} /></td>
-              <td><input className="inline-edit" style={{width:50}} defaultValue={t.abbr} onBlur={e=>updStanding(t.id,{abbr:e.target.value},t.team)} /></td>
-              <td><input className="inline-edit" style={{width:46}} type="number" defaultValue={t.played} onBlur={e=>updStanding(t.id,{played:+e.target.value},t.team)} /></td>
-              <td><input className="inline-edit" style={{width:46}} type="number" defaultValue={t.won} onBlur={e=>updStanding(t.id,{won:+e.target.value},t.team)} /></td>
-              <td><input className="inline-edit" style={{width:46}} type="number" defaultValue={t.drawn} onBlur={e=>updStanding(t.id,{drawn:+e.target.value},t.team)} /></td>
-              <td><input className="inline-edit" style={{width:46}} type="number" defaultValue={t.lost} onBlur={e=>updStanding(t.id,{lost:+e.target.value},t.team)} /></td>
-              <td><input className="inline-edit" style={{width:50}} type="number" defaultValue={t.points} onBlur={e=>updStanding(t.id,{points:+e.target.value},t.team)} /></td>
+              <td data-label="#" style={{color:'var(--muted)'}}>{i+1}</td>
+              <td data-label="Équipe"><input className="inline-edit wide" defaultValue={t.team} onBlur={e=>updStanding(t.id,{team:e.target.value},t.team)} /></td>
+              <td data-label="Abrév."><input className="inline-edit" style={{width:50}} defaultValue={t.abbr} onBlur={e=>updStanding(t.id,{abbr:e.target.value},t.team)} /></td>
+              <td data-label="Joués"><input className="inline-edit" style={{width:46}} type="number" defaultValue={t.played} onBlur={e=>updStanding(t.id,{played:+e.target.value},t.team)} /></td>
+              <td data-label="Gagnés"><input className="inline-edit" style={{width:46}} type="number" defaultValue={t.won} onBlur={e=>updStanding(t.id,{won:+e.target.value},t.team)} /></td>
+              <td data-label="Nuls"><input className="inline-edit" style={{width:46}} type="number" defaultValue={t.drawn} onBlur={e=>updStanding(t.id,{drawn:+e.target.value},t.team)} /></td>
+              <td data-label="Perdus"><input className="inline-edit" style={{width:46}} type="number" defaultValue={t.lost} onBlur={e=>updStanding(t.id,{lost:+e.target.value},t.team)} /></td>
+              <td data-label="Points"><input className="inline-edit" style={{width:50}} type="number" defaultValue={t.points} onBlur={e=>updStanding(t.id,{points:+e.target.value},t.team)} /></td>
             </tr>
           ))}
         </tbody></table>
