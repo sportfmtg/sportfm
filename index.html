@@ -1979,16 +1979,18 @@ function PaystubForm({ stub, employees, onSave, onCancel, adminEmail, toast }){
     const emp = employees.find(e=>e.id===empId);
     if(!emp){ set('employee_id', empId); return; }
     const brut = emp.salaire_brut ? Number(emp.salaire_brut) : 0;
-    // cnss_taux / tcs_taux / ts_taux now store fixed FCFA amounts (not percentages)
-    const cnss = Number(emp.cnss_taux) || 0;
-    const tcs  = Number(emp.tcs_taux)  || 0;
-    const ts   = Number(emp.ts_taux)   || 0;
+    // Calculate FCFA amounts from stored rate percentages
+    const cnss = brut ? Math.round(brut * (Number(emp.cnss_taux) || 9) / 100) : 0;
+    const tcs  = brut ? Math.round(brut * (Number(emp.tcs_taux)  || 0) / 100) : 0;
+    const ts   = brut ? Math.round(brut * (Number(emp.ts_taux)   || 0) / 100) : 0;
+    const net  = brut ? String(brut - cnss - tcs - ts) : '';
     setForm(p=>({...p,
       employee_id: empId,
       gross:       brut ? String(brut) : p.gross,
-      cotisations: cnss ? String(cnss) : p.cotisations,
-      impot:       tcs  ? String(tcs)  : p.impot,
-      deduction:   ts   ? String(ts)   : p.deduction,
+      cotisations: String(cnss),
+      impot:       String(tcs),
+      deduction:   String(ts),
+      net,
     }));
   }
 
