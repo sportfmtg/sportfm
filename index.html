@@ -1510,28 +1510,51 @@ function AdminContent({ adminEmail, userRole, toast }){
 //  ADMIN — LOGIN
 // ============================================================
 function AdminLogin({ onAuthed, onExit }){
-  const [email,setEmail]=useState(''); const [pw,setPw]=useState('');
+  const [username,setUsername]=useState(''); const [pw,setPw]=useState('');
   const [err,setErr]=useState(''); const [busy,setBusy]=useState(false);
+
   async function login(){
+    if(!username.trim()||!pw){ setErr("Nom d'utilisateur et mot de passe requis"); return; }
     setBusy(true); setErr('');
-    const { data, error } = await sb.auth.signInWithPassword({ email, password:pw });
+
+    // Determine the email to use for Supabase Auth
+    // If input looks like an email, use it directly (fallback for admin account)
+    // Otherwise look up username in user_roles table
+    let emailToUse = username.trim().toLowerCase();
+    if(!emailToUse.includes('@')){
+      const { data: row } = await sb.from('user_roles')
+        .select('email')
+        .eq('username', emailToUse)
+        .maybeSingle();
+      if(!row){ setBusy(false); setErr("Nom d'utilisateur introuvable"); return; }
+      emailToUse = row.email;
+    }
+
+    const { data, error } = await sb.auth.signInWithPassword({ email: emailToUse, password: pw });
     setBusy(false);
-    if(error){ setErr(error.message); return; }
+    if(error){ setErr('Identifiants incorrects'); return; }
     onAuthed(data.session);
   }
+
   return (
     <div className="login-wrap">
       <div className="login-card">
         <Logo onClick={()=>{}} />
         <div className="sub">Administration rédaction &amp; partenariats</div>
         {err && <div className="err">{err}</div>}
-        <div className="field"><label>E-mail</label><input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&login()} placeholder="redaction@sportfm.com" /></div>
-        <div className="field"><label>Mot de passe</label><input type="password" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==='Enter'&&login()} placeholder="••••••••" /></div>
+        <div className="field">
+          <label>Nom d'utilisateur</label>
+          <input type="text" value={username} onChange={e=>setUsername(e.target.value)}
+            onKeyDown={e=>e.key==='Enter'&&login()} placeholder="Ex : desire.akoda"
+            autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+        </div>
+        <div className="field">
+          <label>Mot de passe</label>
+          <input type="password" value={pw} onChange={e=>setPw(e.target.value)}
+            onKeyDown={e=>e.key==='Enter'&&login()} placeholder="••••••••" />
+        </div>
         <button className="btn-primary" style={{width:'100%'}} disabled={busy} onClick={login}>{busy?'Connexion…':'Se connecter'}</button>
         <button className="btn-ghost" style={{width:'100%',marginTop:10}} onClick={onExit}>← Retour au site</button>
-        <p style={{fontSize:12,color:'var(--muted)',textAlign:'center',marginTop:16,lineHeight:1.5}}>
-          Créez un administrateur dans Supabase → Authentication → Users, puis connectez-vous ici.
-        </p>
       </div>
     </div>
   );
@@ -3131,6 +3154,7 @@ function AdminUsers({ adminEmail, toast }){
   const [newEmail,setNewEmail]=useState('');
   const [newName,setNewName]=useState('');
   const [newTitle,setNewTitle]=useState('');
+  const [newUsername,setNewUsername]=useState('');
   const [newPerms,setNewPerms]=useState({});
   const [saving,setSaving]=useState(false);
   const [expandedId,setExpandedId]=useState(null);
@@ -3147,13 +3171,13 @@ function AdminUsers({ adminEmail, toast }){
     if(!newEmail.trim()){ toast('E-mail requis'); return; }
     setSaving(true);
     const payload={ email:newEmail.trim().toLowerCase(), name:newName.trim()||null,
-      job_title:newTitle.trim()||null, ...newPerms };
+      job_title:newTitle.trim()||null, username:newUsername.trim().toLowerCase()||null, ...newPerms };
     const { error }=await sb.from('user_roles').upsert([payload],{onConflict:'email'});
     setSaving(false);
     if(error){ toast('Erreur : '+error.message); return; }
     await logAction(adminEmail,'Utilisateur ajouté', newEmail);
     toast('Utilisateur enregistré');
-    setNewEmail(''); setNewName(''); setNewTitle(''); setNewPerms({});
+    setNewEmail(''); setNewName(''); setNewTitle(''); setNewUsername(''); setNewPerms({});
     load();
   }
 
@@ -3199,10 +3223,16 @@ function AdminUsers({ adminEmail, toast }){
 
           {expandedId===u.id&&(
             <div style={{marginTop:16,paddingTop:16,borderTop:'1px solid var(--line)'}}>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:14}}>
                 <div className="field" style={{margin:0}}>
                   <label>Nom complet</label>
                   <input defaultValue={u.name||''} onBlur={e=>updateUser(u,{name:e.target.value||null})} />
+                </div>
+                <div className="field" style={{margin:0}}>
+                  <label>Nom d'utilisateur</label>
+                  <input defaultValue={u.username||''} placeholder="Ex : desire.akoda"
+                    autoCapitalize="off" autoCorrect="off"
+                    onBlur={e=>updateUser(u,{username:e.target.value.trim().toLowerCase()||null})} />
                 </div>
                 <div className="field" style={{margin:0}}>
                   <label>Titre / Poste</label>
@@ -3220,14 +3250,20 @@ function AdminUsers({ adminEmail, toast }){
       {/* Add new user */}
       <div className="panel">
         <h3 style={{marginBottom:18}}>Ajouter un membre</h3>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:14}}>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
           <div className="field" style={{margin:0}}>
             <label>Nom complet</label>
             <input value={newName} onChange={e=>setNewName(e.target.value)} placeholder="Jean Dupont" />
           </div>
           <div className="field" style={{margin:0}}>
-            <label>E-mail</label>
+            <label>E-mail (compte Supabase)</label>
             <input value={newEmail} onChange={e=>setNewEmail(e.target.value)} placeholder="jean@sportfm.com" onKeyDown={e=>e.key==='Enter'&&addUser()} />
+          </div>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
+          <div className="field" style={{margin:0}}>
+            <label>Nom d'utilisateur <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(pour se connecter)</span></label>
+            <input value={newUsername} onChange={e=>setNewUsername(e.target.value)} placeholder="Ex : desire.akoda" autoCapitalize="off" autoCorrect="off" />
           </div>
           <div className="field" style={{margin:0}}>
             <label>Titre / Poste</label>
