@@ -2971,9 +2971,9 @@ function AdminCDM({ articles, reload, toast, adminEmail }){
 // ============================================================
 //  MON ESPACE — Employee Profile Portal
 // ============================================================
-function MonEspace({ session, userPerms, onClose, toast }){
+function MonEspace({ session, userPerms, onClose, toast, initialTab }){
   const email = session?.user?.email || '';
-  const [tab,setTab]=useState('profile');
+  const [tab,setTab]=useState(initialTab||'profile');
   const [profile,setProfile]=useState(null);
   const [newPw,setNewPw]=useState(''); const [confirmPw,setConfirmPw]=useState('');
   const [pwBusy,setPwBusy]=useState(false);
@@ -2984,23 +2984,67 @@ function MonEspace({ session, userPerms, onClose, toast }){
   const [annTitle,setAnnTitle]=useState(''); const [annBody,setAnnBody]=useState('');
   const [annPinned,setAnnPinned]=useState(false); const [annBusy,setAnnBusy]=useState(false);
   const imgRef=useRef(null);
+  // messages state
+  const [teamList,setTeamList]=useState([]);
+  const [inbox,setInbox]=useState([]);
+  const [sent,setSent]=useState([]);
+  const [msgView,setMsgView]=useState('inbox'); // 'inbox'|'sent'|'compose'|'thread'
+  const [openThread,setOpenThread]=useState(null); // message object
+  const [replyBody,setReplyBody]=useState('');
+  const [compTo,setCompTo]=useState(''); const [compSubj,setCompSubj]=useState(''); const [compBody,setCompBody]=useState('');
+  const [msgBusy,setMsgBusy]=useState(false);
 
   const canAnnounce = !!(userPerms?.__full || userPerms?.can_announcements);
 
+  async function loadMessages(){
+    const [{ data:inc },{ data:snt }]=await Promise.all([
+      sb.from('direct_messages').select('*').eq('to_email',email).order('created_at',{ascending:false}),
+      sb.from('direct_messages').select('*').eq('from_email',email).order('created_at',{ascending:false}),
+    ]);
+    setInbox(inc||[]); setSent(snt||[]);
+  }
+
   useEffect(()=>{
-    // load profile
     sb.from('user_roles').select('*').eq('email',email).maybeSingle().then(({data})=>setProfile(data||{}));
-    // load paystubs via linked employee
     sb.from('employees').select('*').eq('linked_user_email',email).maybeSingle().then(({data})=>{
       if(data?.id) sb.from('paystubs').select('*').eq('employee_id',data.id).order('period_year',{ascending:false}).then(({data:s})=>setPaystubs(s||[]));
     });
-    // load announcements
     sb.from('announcements').select('*').order('pinned',{ascending:false}).order('created_at',{ascending:false}).limit(30)
       .then(({data})=>setAnnouncements(data||[]));
-    // load notifications (admin_logs mentioning this email)
     sb.from('admin_logs').select('*').order('created_at',{ascending:false}).limit(100)
       .then(({data})=>setNotifications((data||[]).filter(l=>(l.details||'').includes(email)||(l.admin_email||''===email)).slice(0,15)));
+    sb.from('user_roles').select('email,name,job_title').order('name').then(({data})=>setTeamList((data||[]).filter(u=>u.email!==email)));
+    loadMessages();
   },[email]);
+
+  async function sendMessage(){
+    if(!compTo||!compBody.trim()){ toast('Destinataire et message requis'); return; }
+    setMsgBusy(true);
+    const { error }=await sb.from('direct_messages').insert([{
+      from_email:email, from_name:profile?.name||email,
+      to_email:compTo, subject:compSubj.trim()||'(sans objet)', body:compBody.trim(), read:false
+    }]);
+    setMsgBusy(false);
+    if(error){ toast('Erreur : '+error.message); return; }
+    toast('Message envoyé ✓'); setCompTo(''); setCompSubj(''); setCompBody('');
+    setMsgView('sent'); loadMessages();
+  }
+
+  async function markRead(msg){
+    if(!msg.read) await sb.from('direct_messages').update({read:true}).eq('id',msg.id);
+    setOpenThread(msg); setMsgView('thread'); loadMessages();
+  }
+
+  async function sendReply(){
+    if(!replyBody.trim()) return;
+    setMsgBusy(true);
+    await sb.from('direct_messages').insert([{
+      from_email:email, from_name:profile?.name||email,
+      to_email:openThread.from_email, subject:'Re: '+(openThread.subject||''), body:replyBody.trim(), read:false
+    }]);
+    setMsgBusy(false);
+    toast('Réponse envoyée ✓'); setReplyBody(''); loadMessages();
+  }
 
   async function uploadPhoto(e){
     const file=e.target.files?.[0]; if(!file) return;
@@ -3060,8 +3104,8 @@ function MonEspace({ session, userPerms, onClose, toast }){
         </div>
 
         {/* Tabs */}
-        <div style={{background:'#fff',borderBottom:'1px solid var(--line)',display:'flex',gap:0,paddingLeft:24}}>
-          {[['profile','Profil'],['password','Mot de passe'],['notifs','Notifications'],['paystubs','Mes fiches'],['board','Annonces']].map(([k,l])=>(
+        <div style={{background:'#fff',borderBottom:'1px solid var(--line)',display:'flex',gap:0,paddingLeft:24,overflowX:'auto'}}>
+          {[['profile','Profil'],['password','Mot de passe'],['notifs','Notifications'],['messages','Messages'+(inbox.filter(m=>!m.read).length>0?` (${inbox.filter(m=>!m.read).length})`:'')],['paystubs','Mes fiches'],['board','Annonces']].map(([k,l])=>(
             <button key={k} onClick={()=>setTab(k)} style={tabStyle(k)}>{l}</button>
           ))}
         </div>
@@ -3142,6 +3186,117 @@ function MonEspace({ session, userPerms, onClose, toast }){
                       </tr>
                     ))}
                   </tbody></table>}
+            </div>
+          )}
+
+          {/* MESSAGES TAB */}
+          {tab==='messages' && (
+            <div>
+              {/* Sub-nav */}
+              <div style={{display:'flex',gap:8,marginBottom:18,flexWrap:'wrap',alignItems:'center'}}>
+                {[['inbox','📥 Reçus'+(inbox.filter(m=>!m.read).length>0?` · ${inbox.filter(m=>!m.read).length} non lus`:'')],['sent','📤 Envoyés'],['compose','✏️ Nouveau message']].map(([k,l])=>(
+                  <button key={k} onClick={()=>setMsgView(k)}
+                    style={{padding:'8px 16px',borderRadius:20,fontSize:13,fontWeight:700,cursor:'pointer',border:'2px solid',
+                      borderColor:msgView===k?'var(--navy)':'var(--line)',
+                      background:msgView===k?'var(--navy)':'#fff',
+                      color:msgView===k?'#fff':'#5a6178'}}>{l}</button>
+                ))}
+              </div>
+
+              {/* INBOX */}
+              {msgView==='inbox' && (
+                <div className="panel" style={{padding:0,overflow:'hidden'}}>
+                  {inbox.length===0
+                    ? <div className="empty" style={{padding:24}}>Aucun message reçu.</div>
+                    : inbox.map(m=>(
+                      <div key={m.id} onClick={()=>markRead(m)}
+                        style={{display:'flex',gap:12,padding:'14px 18px',borderBottom:'1px solid var(--line)',cursor:'pointer',
+                          background:m.read?'#fff':'#f0f5ff',transition:'background .15s'}}
+                        onMouseOver={e=>e.currentTarget.style.background='#f5f7fc'}
+                        onMouseOut={e=>e.currentTarget.style.background=m.read?'#fff':'#f0f5ff'}>
+                        <div style={{width:36,height:36,borderRadius:'50%',background:'var(--navy)',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:14,fontWeight:800,flexShrink:0}}>
+                          {(m.from_name||m.from_email).charAt(0).toUpperCase()}
+                        </div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
+                            <span style={{fontWeight:m.read?600:800,fontSize:13.5,color:'var(--navy)'}}>{m.from_name||m.from_email}</span>
+                            <span style={{fontSize:11,color:'var(--muted)',flexShrink:0}}>{new Date(m.created_at).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>
+                          </div>
+                          <div style={{fontSize:13,fontWeight:m.read?500:700,color:'#2b3142',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.subject}</div>
+                          <div style={{fontSize:12,color:'var(--muted)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.body}</div>
+                        </div>
+                        {!m.read && <div style={{width:8,height:8,borderRadius:'50%',background:'var(--red)',flexShrink:0,marginTop:6}}/>}
+                      </div>
+                    ))
+                  }
+                </div>
+              )}
+
+              {/* SENT */}
+              {msgView==='sent' && (
+                <div className="panel" style={{padding:0,overflow:'hidden'}}>
+                  {sent.length===0
+                    ? <div className="empty" style={{padding:24}}>Aucun message envoyé.</div>
+                    : sent.map(m=>(
+                      <div key={m.id} style={{display:'flex',gap:12,padding:'14px 18px',borderBottom:'1px solid var(--line)'}}>
+                        <div style={{width:36,height:36,borderRadius:'50%',background:'#5a6178',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:14,fontWeight:800,flexShrink:0}}>
+                          {(m.to_email).charAt(0).toUpperCase()}
+                        </div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
+                            <span style={{fontWeight:600,fontSize:13.5,color:'#4a5168'}}>À : {teamList.find(t=>t.email===m.to_email)?.name||m.to_email}</span>
+                            <span style={{fontSize:11,color:'var(--muted)',flexShrink:0}}>{new Date(m.created_at).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>
+                          </div>
+                          <div style={{fontSize:13,color:'#2b3142',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.subject}</div>
+                          <div style={{fontSize:12,color:'var(--muted)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.body}</div>
+                        </div>
+                      </div>
+                    ))
+                  }
+                </div>
+              )}
+
+              {/* COMPOSE */}
+              {msgView==='compose' && (
+                <div className="panel">
+                  <h3>Nouveau message</h3>
+                  <div className="field"><label>Destinataire</label>
+                    <select value={compTo} onChange={e=>setCompTo(e.target.value)}
+                      style={{padding:'10px 12px',border:'1px solid var(--line)',borderRadius:8,fontSize:13.5,background:'#fff',outline:'none',width:'100%'}}>
+                      <option value="">Sélectionner un membre…</option>
+                      {teamList.map(m=><option key={m.email} value={m.email}>{m.name||m.email}{m.job_title?` — ${m.job_title}`:''}</option>)}
+                    </select>
+                  </div>
+                  <div className="field"><label>Objet</label>
+                    <input value={compSubj} onChange={e=>setCompSubj(e.target.value)} placeholder="Objet du message…" /></div>
+                  <div className="field"><label>Message</label>
+                    <textarea value={compBody} onChange={e=>setCompBody(e.target.value)} style={{minHeight:120}} placeholder="Écrivez votre message…" /></div>
+                  <button className="btn-primary" disabled={msgBusy||!compTo||!compBody.trim()} onClick={sendMessage}>{msgBusy?'Envoi…':'Envoyer'}</button>
+                </div>
+              )}
+
+              {/* THREAD / REPLY */}
+              {msgView==='thread' && openThread && (
+                <div>
+                  <button className="btn-ghost" style={{marginBottom:14,fontSize:13}} onClick={()=>setMsgView('inbox')}>← Retour</button>
+                  <div className="panel" style={{marginBottom:14}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:12}}>
+                      <div>
+                        <div style={{fontWeight:800,fontSize:16,color:'var(--navy)',marginBottom:4}}>{openThread.subject}</div>
+                        <div style={{fontSize:12.5,color:'var(--muted)'}}>De : {openThread.from_name||openThread.from_email} · {new Date(openThread.created_at).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
+                      </div>
+                    </div>
+                    <div style={{fontSize:14,color:'#2b3142',lineHeight:1.65,whiteSpace:'pre-wrap',borderTop:'1px solid var(--line)',paddingTop:14}}>{openThread.body}</div>
+                  </div>
+                  <div className="panel">
+                    <h3 style={{marginBottom:12}}>Répondre</h3>
+                    <div className="field">
+                      <textarea value={replyBody} onChange={e=>setReplyBody(e.target.value)} style={{minHeight:90}} placeholder="Votre réponse…" />
+                    </div>
+                    <button className="btn-primary" disabled={msgBusy||!replyBody.trim()} onClick={sendReply}>{msgBusy?'Envoi…':'Envoyer la réponse'}</button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -3991,7 +4146,18 @@ function Admin({ session, onExit, data, reload, toast, userPerms, showProfile })
   const firstTab = ['can_articles','can_scores','can_partners','can_ads','can_content','can_emissions','can_finance','can_accounting'].find(k=>can(k));
   const [tab,setTab]=useState(firstTab ? firstTab.replace('can_','') : 'articles');
   const adminEmail = session.user.email;
+  const [unread,setUnread]=useState(0);
   async function logout(){ await sb.auth.signOut(); onExit(); }
+
+  useEffect(()=>{
+    async function fetchUnread(){
+      const { data:msgs }=await sb.from('direct_messages').select('id').eq('to_email',adminEmail).eq('read',false);
+      setUnread((msgs||[]).length);
+    }
+    fetchUnread();
+    const interval=setInterval(fetchUnread,30000);
+    return ()=>clearInterval(interval);
+  },[adminEmail]);
 
   return (
     <div className="admin">
@@ -3999,7 +4165,11 @@ function Admin({ session, onExit, data, reload, toast, userPerms, showProfile })
         <Logo onClick={()=>{}} /><span className="tag">ADMIN</span><div className="grow"></div>
         <span style={{fontSize:13,color:'#cfd6ea'}}>{adminEmail}</span>
         {jobTitle && <span style={{fontSize:11,background:'rgba(255,255,255,.12)',color:'#cfd6ea',padding:'3px 8px',borderRadius:5,fontWeight:700,letterSpacing:'.04em'}}>{jobTitle.toUpperCase()}</span>}
-        <button className="exit" onClick={showProfile}>👤 Mon espace</button>
+        <button className="exit" onClick={()=>showProfile('messages')} style={{position:'relative',padding:'7px 14px'}}>
+          🔔
+          {unread>0 && <span style={{position:'absolute',top:2,right:2,background:'var(--red)',color:'#fff',borderRadius:'50%',width:17,height:17,fontSize:10,fontWeight:900,display:'flex',alignItems:'center',justifyContent:'center',lineHeight:1}}>{unread>9?'9+':unread}</span>}
+        </button>
+        <button className="exit" onClick={()=>showProfile('profile')}>👤 Mon espace</button>
         <button className="exit" onClick={onExit}>Voir le site →</button>
         <button className="exit" onClick={logout}>Déconnexion</button>
       </div></div>
@@ -4821,6 +4991,7 @@ function App(){
   const [userPerms,setUserPerms]=useState(null); // null = loading
   const [toast,toastNode]=useToast();
   const [showProfile,setShowProfile]=useState(false);
+  const [profileTab,setProfileTab]=useState('profile');
 
   const [data,setData]=useState({ articles:[],standings:[],scores:[],fixtures:[],partners:[],ads:[],shows:[] });
 
@@ -4892,8 +5063,8 @@ function App(){
     if(!session) return <><AdminLogin onAuthed={s=>{setSession(s);loadAdmin();}} onExit={goSite} />{toastNode}</>;
     if(userPerms===null) return <div className="login-wrap"><div className="spinner" style={{borderTopColor:'#fff'}}/></div>;
     return <>
-      <Admin session={session} onExit={goSite} data={data} reload={loadAdmin} toast={toast} userPerms={userPerms} showProfile={()=>setShowProfile(true)} />
-      {showProfile && <MonEspace session={session} userPerms={userPerms} onClose={()=>setShowProfile(false)} toast={toast} />}
+      <Admin session={session} onExit={goSite} data={data} reload={loadAdmin} toast={toast} userPerms={userPerms} showProfile={(t)=>{ setProfileTab(t||'profile'); setShowProfile(true); }} />
+      {showProfile && <MonEspace session={session} userPerms={userPerms} onClose={()=>setShowProfile(false)} toast={toast} initialTab={profileTab} />}
       {toastNode}
     </>;
   }
