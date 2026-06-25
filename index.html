@@ -2070,17 +2070,17 @@ function PaystubForm({ stub, employees, onSave, onCancel, adminEmail, toast }){
         <div style={{fontSize:11,fontWeight:700,color:'#c0392b',letterSpacing:'.04em',margin:'10px 0 6px',textTransform:'uppercase'}}>− Retenues salarié</div>
         <div className="grid2">
           <div className="field">
-            <label>CNSS Salarié <span style={opt}>({selEmp?.cnss_taux??9}% du brut)</span></label>
+            <label>CNSS Salarié</label>
             <input type="number" value={form.cotisations||''} onChange={e=>set('cotisations',e.target.value)} placeholder="0" min="0" />
           </div>
           <div className="field">
-            <label>TCS <span style={opt}>({selEmp?.tcs_taux??0}% — Taxe complémentaire salariale)</span></label>
+            <label>TCS</label>
             <input type="number" value={form.impot||''} onChange={e=>set('impot',e.target.value)} placeholder="0" min="0" />
           </div>
         </div>
         <div className="grid2">
           <div className="field">
-            <label>TS <span style={opt}>({selEmp?.ts_taux??3}% — Taxe sur salaire)</span></label>
+            <label>TS</label>
             <input type="number" value={form.deduction||''} onChange={e=>set('deduction',e.target.value)} placeholder="0" min="0" />
           </div>
           <div className="field">
