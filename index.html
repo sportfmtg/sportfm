@@ -2316,13 +2316,45 @@ function AdminFinance({ adminEmail, userRole, toast }){
 // ============================================================
 //  ADMIN SHELL
 // ============================================================
+const MODULES = [
+  { key:'can_articles',   label:'Articles' },
+  { key:'can_scores',     label:'Scores & Classement' },
+  { key:'can_partners',   label:'Partenaires' },
+  { key:'can_ads',        label:'Publicités' },
+  { key:'can_content',    label:'Planning Contenu' },
+  { key:'can_emissions',  label:'Émissions' },
+  { key:'can_finance',    label:'Fiches de paie' },
+  { key:'can_accounting', label:'Comptabilité' },
+  { key:'can_team',       label:'Équipe & Accès' },
+  { key:'can_logs',       label:'Journal global' },
+];
+
+function PermCheckboxes({ perms, onChange }){
+  return (
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:8,marginTop:8}}>
+      {MODULES.map(m=>(
+        <label key={m.key} style={{display:'flex',alignItems:'center',gap:8,fontSize:13,cursor:'pointer',
+          padding:'8px 10px',border:'1px solid var(--line)',borderRadius:8,
+          background:perms[m.key]?'rgba(11,36,94,.05)':'#fff',
+          borderColor:perms[m.key]?'var(--navy)':'var(--line)'}}>
+          <input type="checkbox" checked={!!perms[m.key]} onChange={e=>onChange(m.key,e.target.checked)}
+            style={{accentColor:'var(--navy)',width:15,height:15}} />
+          <span style={{fontWeight:perms[m.key]?700:400,color:perms[m.key]?'var(--navy)':'#4a5168'}}>{m.label}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 function AdminUsers({ adminEmail, toast }){
   const [users,setUsers]=useState([]);
   const [loading,setLoading]=useState(true);
   const [newEmail,setNewEmail]=useState('');
   const [newName,setNewName]=useState('');
-  const [newRole,setNewRole]=useState('journalist');
+  const [newTitle,setNewTitle]=useState('');
+  const [newPerms,setNewPerms]=useState({});
   const [saving,setSaving]=useState(false);
+  const [expandedId,setExpandedId]=useState(null);
 
   async function load(){
     const { data }=await sb.from('user_roles').select('*').order('created_at',{ascending:true});
@@ -2330,21 +2362,26 @@ function AdminUsers({ adminEmail, toast }){
   }
   useEffect(()=>{ load(); },[]);
 
+  const toggleNewPerm=(k,v)=>setNewPerms(p=>({...p,[k]:v}));
+
   async function addUser(){
     if(!newEmail.trim()){ toast('E-mail requis'); return; }
     setSaving(true);
-    const { error }=await sb.from('user_roles').upsert([{ email:newEmail.trim().toLowerCase(), role:newRole, name:newName.trim()||null }],{onConflict:'email'});
+    const payload={ email:newEmail.trim().toLowerCase(), name:newName.trim()||null,
+      job_title:newTitle.trim()||null, ...newPerms };
+    const { error }=await sb.from('user_roles').upsert([payload],{onConflict:'email'});
     setSaving(false);
     if(error){ toast('Erreur : '+error.message); return; }
-    await logAction(adminEmail,'Rôle attribué — '+newRole, newEmail);
-    setNewName('');
-    toast('Utilisateur enregistré'); setNewEmail(''); load();
+    await logAction(adminEmail,'Utilisateur ajouté', newEmail);
+    toast('Utilisateur enregistré');
+    setNewEmail(''); setNewName(''); setNewTitle(''); setNewPerms({});
+    load();
   }
 
-  async function changeRole(id, email, role){
-    await sb.from('user_roles').update({role}).eq('id',id);
-    await logAction(adminEmail,'Rôle modifié → '+role, email);
-    toast('Rôle mis à jour'); load();
+  async function updateUser(u, patch){
+    await sb.from('user_roles').update(patch).eq('id',u.id);
+    await logAction(adminEmail,'Accès modifié', u.email);
+    toast('Mis à jour'); load();
   }
 
   async function removeUser(id, email){
@@ -2354,83 +2391,74 @@ function AdminUsers({ adminEmail, toast }){
     toast('Retiré'); load();
   }
 
-  const roleLabel={ admin:'Administrateur', journalist:'Journaliste web', animateur:'Animateur/Présentateur', media:'Média & Réseaux sociaux', securite:'Sécurité', finance:'Finance' };
-  const rolePill={ admin:'pub', journalist:'contacted', animateur:'in_discussion', media:'follow_up', securite:'new', finance:'won' };
-
   return (
-    <div className="panel">
-      <h3>Équipe &amp; rôles</h3>
-      <div style={{background:'rgba(239,0,63,.05)',border:'1px solid rgba(239,0,63,.2)',borderRadius:10,padding:'12px 16px',marginBottom:20,fontSize:13.5,color:'#5a6178',lineHeight:1.5}}>
-        <strong style={{color:'var(--navy)'}}>Administrateur</strong> — accès complet (articles, scores, partenaires, publicités, journal, équipe, finance).<br/>
-        <strong style={{color:'var(--navy)'}}>Journaliste</strong> — articles, scores, planning contenu. Partenaires et publicités masqués.<br/>
-        <strong style={{color:'var(--navy)'}}>Animateur / Présentateur</strong> — articles, scores, planning contenu.<br/>
-        <strong style={{color:'var(--navy)'}}>Média &amp; Réseaux sociaux</strong> — articles, scores, planning contenu.<br/>
-        <strong style={{color:'var(--navy)'}}>Sécurité</strong> — accès lecture seule au planning contenu.<br/>
-        <strong style={{color:'var(--navy)'}}>Secrétaire</strong> — articles, contenu et gestion des émissions.<br/>
-        <strong style={{color:'var(--navy)'}}>Finance</strong> — fiches de paie, comptabilité, partenaires et publicités.
-      </div>
-
-      {loading ? <Spinner/> :
-      <table className="admin-table" style={{marginBottom:20}}><thead><tr>
-        <th>Nom</th><th>E-mail</th><th>Rôle</th><th>Depuis</th><th></th>
-      </tr></thead><tbody>
-        {users.map(u=>(
-          <tr key={u.id}>
-            <td style={{fontWeight:700,color:'var(--navy)'}}>{u.name||<span style={{color:'var(--muted)',fontWeight:400,fontStyle:'italic'}}>—</span>}{u.email===adminEmail&&<span style={{marginLeft:8,fontSize:11,color:'var(--muted)',fontWeight:400,fontStyle:'normal'}}>( vous )</span>}</td>
-            <td style={{color:'#4a5168',fontSize:13}}>{u.email}</td>
-            <td>
-              <select value={u.role} onChange={e=>changeRole(u.id,u.email,e.target.value)}
-                disabled={u.email===adminEmail}
-                style={{padding:'5px 10px',border:'1px solid var(--line)',borderRadius:7,fontSize:13,background:'#fff',cursor:'pointer'}}>
-                <option value="admin">Administrateur</option>
-                <option value="journalist">Journaliste</option>
-                <option value="animateur">Animateur / Présentateur</option>
-                <option value="media">Média &amp; Réseaux sociaux</option>
-                <option value="securite">Sécurité</option>
-                <option value="secretaire">Secrétaire</option>
-                <option value="finance">Finance</option>
-              </select>
-            </td>
-            <td style={{color:'var(--muted)',fontSize:12.5}}>{timeAgo(u.created_at)}</td>
-            <td style={{textAlign:'right'}}>
-              {u.email!==adminEmail &&
-                <button className="icon-btn del" onClick={()=>removeUser(u.id,u.email)}>Retirer</button>}
-            </td>
-          </tr>
-        ))}
-      </tbody></table>}
-
-      <div style={{borderTop:'1px solid var(--line)',paddingTop:20}}>
-        <h3 style={{fontSize:15,marginBottom:14}}>Ajouter un membre</h3>
-        <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end'}}>
-          <div className="field" style={{margin:0,flex:1,minWidth:160}}>
-            <label>Prénom &amp; Nom</label>
-            <input value={newName} onChange={e=>setNewName(e.target.value)}
-              placeholder="Jean Dupont"
-              onKeyDown={e=>e.key==='Enter'&&addUser()} />
+    <div>
+      {/* Existing users */}
+      {loading ? <Spinner/> : users.map(u=>(
+        <div key={u.id} className="panel" style={{marginBottom:14}}>
+          <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontWeight:700,fontSize:15,color:'var(--navy)'}}>{u.name||u.email}
+                {u.email===adminEmail&&<span style={{marginLeft:8,fontSize:11,color:'var(--muted)',fontWeight:400}}>(vous)</span>}
+              </div>
+              <div style={{fontSize:12.5,color:'var(--muted)',marginTop:2}}>{u.email}{u.job_title&&<span style={{marginLeft:8,fontWeight:600,color:'#4a5168'}}>{u.job_title}</span>}</div>
+              <div style={{display:'flex',flexWrap:'wrap',gap:5,marginTop:6}}>
+                {MODULES.filter(m=>u[m.key]).map(m=>(
+                  <span key={m.key} style={{fontSize:10.5,fontWeight:700,background:'#e7eefc',color:'#2a5bd0',padding:'2px 8px',borderRadius:20}}>{m.label}</span>
+                ))}
+                {!MODULES.some(m=>u[m.key])&&<span style={{fontSize:12,color:'var(--muted)',fontStyle:'italic'}}>Aucun accès configuré</span>}
+              </div>
+            </div>
+            <div style={{display:'flex',gap:8,flexShrink:0}}>
+              <button className="btn-ghost" style={{fontSize:13,padding:'7px 12px'}}
+                onClick={()=>setExpandedId(expandedId===u.id?null:u.id)}>
+                {expandedId===u.id?'Fermer':'Modifier les accès'}
+              </button>
+              {u.email!==adminEmail&&<button className="icon-btn del" onClick={()=>removeUser(u.id,u.email)}>Retirer</button>}
+            </div>
           </div>
-          <div className="field" style={{margin:0,flex:2,minWidth:200}}>
+
+          {expandedId===u.id&&(
+            <div style={{marginTop:16,paddingTop:16,borderTop:'1px solid var(--line)'}}>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
+                <div className="field" style={{margin:0}}>
+                  <label>Nom complet</label>
+                  <input defaultValue={u.name||''} onBlur={e=>updateUser(u,{name:e.target.value||null})} />
+                </div>
+                <div className="field" style={{margin:0}}>
+                  <label>Titre / Poste</label>
+                  <input defaultValue={u.job_title||''} placeholder="Ex : Journaliste sportif"
+                    onBlur={e=>updateUser(u,{job_title:e.target.value||null})} />
+                </div>
+              </div>
+              <div style={{fontSize:12,fontWeight:700,letterSpacing:'.04em',color:'var(--muted)',marginBottom:8}}>ACCÈS AUX MODULES</div>
+              <PermCheckboxes perms={u} onChange={(k,v)=>updateUser(u,{[k]:v})} />
+            </div>
+          )}
+        </div>
+      ))}
+
+      {/* Add new user */}
+      <div className="panel">
+        <h3 style={{marginBottom:18}}>Ajouter un membre</h3>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:14}}>
+          <div className="field" style={{margin:0}}>
+            <label>Nom complet</label>
+            <input value={newName} onChange={e=>setNewName(e.target.value)} placeholder="Jean Dupont" />
+          </div>
+          <div className="field" style={{margin:0}}>
             <label>E-mail</label>
-            <input value={newEmail} onChange={e=>setNewEmail(e.target.value)}
-              placeholder="journaliste@sportfm.com"
-              onKeyDown={e=>e.key==='Enter'&&addUser()} />
+            <input value={newEmail} onChange={e=>setNewEmail(e.target.value)} placeholder="jean@sportfm.com" onKeyDown={e=>e.key==='Enter'&&addUser()} />
           </div>
-          <div className="field" style={{margin:0,flex:1,minWidth:160}}>
-            <label>Rôle</label>
-            <select value={newRole} onChange={e=>setNewRole(e.target.value)}
-              style={{width:'100%',padding:'11px 13px',border:'1px solid var(--line)',borderRadius:9,fontSize:14,outline:'none'}}>
-              <option value="journalist">Journaliste</option>
-              <option value="animateur">Animateur / Présentateur</option>
-              <option value="media">Média &amp; Réseaux sociaux</option>
-              <option value="securite">Sécurité</option>
-              <option value="secretaire">Secrétaire</option>
-              <option value="finance">Finance</option>
-              <option value="admin">Administrateur</option>
-            </select>
+          <div className="field" style={{margin:0}}>
+            <label>Titre / Poste</label>
+            <input value={newTitle} onChange={e=>setNewTitle(e.target.value)} placeholder="Ex : Comptable" />
           </div>
-          <button className="btn-primary" disabled={saving} onClick={addUser} style={{marginBottom:1}}>
-            {saving?'…':'+ Ajouter'}
-          </button>
+        </div>
+        <div style={{fontSize:12,fontWeight:700,letterSpacing:'.04em',color:'var(--muted)',marginBottom:8}}>ACCÈS AUX MODULES</div>
+        <PermCheckboxes perms={newPerms} onChange={toggleNewPerm} />
+        <div style={{marginTop:16}}>
+          <button className="btn-primary" disabled={saving} onClick={addUser}>{saving?'…':'+ Ajouter'}</button>
         </div>
       </div>
     </div>
@@ -2935,63 +2963,109 @@ function AdminEmissions({ adminEmail, toast, shows, reload }){
   );
 }
 
-function Admin({ session, onExit, data, reload, toast, userRole }){
-  const isAdmin   = userRole==='admin';
-  const isFinance = userRole==='finance';
-  const [tab,setTab]=useState(isFinance?'finance':'articles');
+// Per-page activity journal
+const PAGE_LOG_KEYWORDS = {
+  articles:   ['article','publié','brouillon','hero'],
+  scores:     ['score','classement','match','direct','fixture'],
+  partners:   ['partenaire','dossier','contact','relance','statut'],
+  ads:        ['publicité','pub','annonce','banner','video'],
+  content:    ['tâche','contenu','planning'],
+  emissions:  ['émission'],
+  finance:    ['fiche','employé','paie'],
+  accounting: ['écriture','comptab','recette','dépense','ap','ar'],
+  users:      ['utilisateur','accès','rôle','retiré','ajouté'],
+  logs:       [],
+};
+
+function PageJournal({ section }){
+  const [logs,setLogs]=useState([]);
+  const [open,setOpen]=useState(false);
+  const [loading,setLoading]=useState(false);
+
+  useEffect(()=>{
+    if(!open) return;
+    setLoading(true);
+    const keywords = PAGE_LOG_KEYWORDS[section]||[];
+    sb.from('admin_logs').select('*').order('created_at',{ascending:false}).limit(200)
+      .then(({data})=>{
+        const all = data||[];
+        const filtered = keywords.length===0 ? all :
+          all.filter(l=> keywords.some(kw=>
+            (l.action||'').toLowerCase().includes(kw) ||
+            (l.details||'').toLowerCase().includes(kw)
+          ));
+        setLogs(filtered.slice(0,15));
+        setLoading(false);
+      });
+  },[open,section]);
+
+  return (
+    <div style={{marginTop:8,marginBottom:24}}>
+      <button onClick={()=>setOpen(o=>!o)}
+        style={{display:'flex',alignItems:'center',gap:8,fontSize:12.5,fontWeight:700,color:'var(--muted)',
+          padding:'8px 14px',border:'1px solid var(--line)',borderRadius:8,background:'#fff',width:'100%',
+          justifyContent:'space-between'}}>
+        <span>📋 Journal d'activité — {section}</span>
+        <span>{open?'▲':'▼'}</span>
+      </button>
+      {open&&(
+        <div style={{background:'#fff',border:'1px solid var(--line)',borderTop:'none',borderRadius:'0 0 8px 8px',padding:'4px 0'}}>
+          {loading ? <div style={{padding:'16px',textAlign:'center',color:'var(--muted)',fontSize:13}}>Chargement…</div>
+          : logs.length===0 ? <div style={{padding:'16px',textAlign:'center',color:'var(--muted)',fontSize:13}}>Aucune activité enregistrée pour cette section.</div>
+          : logs.map((l,i)=>(
+            <div key={l.id||i} style={{display:'flex',gap:12,padding:'9px 16px',borderBottom:i<logs.length-1?'1px solid #f1f2f6':'none',alignItems:'flex-start'}}>
+              <span style={{fontSize:10.5,color:'var(--muted)',whiteSpace:'nowrap',flexShrink:0,marginTop:1}}>{new Date(l.created_at).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>
+              <span style={{fontSize:12,fontWeight:700,color:'var(--navy)',flexShrink:0}}>{l.admin_email?.split('@')[0]}</span>
+              <span style={{fontSize:12.5,color:'#4a5168',flex:1}}>{l.action}{l.details&&<span style={{color:'var(--muted)'}}> — {l.details}</span>}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Admin({ session, onExit, data, reload, toast, userPerms }){
+  const full = userPerms?.__full;
+  const can = (k) => !!(full || userPerms?.[k]);
+  const jobTitle = userPerms?.job_title || '';
+  const firstTab = ['can_articles','can_scores','can_partners','can_ads','can_content','can_emissions','can_finance','can_accounting'].find(k=>can(k));
+  const [tab,setTab]=useState(firstTab ? firstTab.replace('can_','') : 'articles');
   const adminEmail = session.user.email;
   async function logout(){ await sb.auth.signOut(); onExit(); }
-
-  const ROLE_LABELS = { admin:'ADMINISTRATEUR', journalist:'JOURNALISTE', animateur:'ANIMATEUR', media:'MÉDIA', securite:'SÉCURITÉ', finance:'FINANCE', secretaire:'SECRÉTAIRE' };
-
-  const isSecretaire = userRole==='secretaire';
-  const isEditorialRole = ['journalist','animateur','media'].includes(userRole);
-  const isSecurite = userRole==='securite';
-  const canEditEmissions = isAdmin || isSecretaire;
-
-  const FINANCE_TABS = ['finance','accounting','partners','ads'];
-  const SECRETAIRE_TABS = ['emissions','articles','content'];
-  useEffect(()=>{
-    if(isFinance && !FINANCE_TABS.includes(tab)) setTab('accounting');
-    if(isSecurite && tab!=='content') setTab('content');
-    if(isSecretaire && !SECRETAIRE_TABS.includes(tab)) setTab('emissions');
-    if(isEditorialRole && (tab==='partners'||tab==='ads'||tab==='users'||tab==='logs'||tab==='finance'||tab==='accounting'||tab==='emissions')) setTab('articles');
-  },[isAdmin,isFinance,isSecurite,isSecretaire,isEditorialRole,tab]);
 
   return (
     <div className="admin">
       <div className="admin-top"><div className="wrap">
         <Logo onClick={()=>{}} /><span className="tag">ADMIN</span><div className="grow"></div>
         <span style={{fontSize:13,color:'#cfd6ea'}}>{adminEmail}</span>
-        <span style={{fontSize:11,background:'rgba(255,255,255,.12)',color:'#cfd6ea',padding:'3px 8px',borderRadius:5,fontWeight:700,letterSpacing:'.04em'}}>
-          {ROLE_LABELS[userRole]||'JOURNALISTE'}
-        </span>
+        {jobTitle && <span style={{fontSize:11,background:'rgba(255,255,255,.12)',color:'#cfd6ea',padding:'3px 8px',borderRadius:5,fontWeight:700,letterSpacing:'.04em'}}>{jobTitle.toUpperCase()}</span>}
         <button className="exit" onClick={onExit}>Voir le site →</button>
         <button className="exit" onClick={logout}>Déconnexion</button>
       </div></div>
       <div className="admin-tabs"><div className="wrap">
-        {(isAdmin||isEditorialRole||isSecurite||isSecretaire) && !isFinance && <button className={tab==='articles'?'active':''} onClick={()=>setTab('articles')}>Articles</button>}
-        {(isAdmin||isEditorialRole) && <button className={tab==='scores'?'active':''} onClick={()=>setTab('scores')}>Scores &amp; Classement</button>}
-        {(isAdmin||isFinance) && <button className={tab==='partners'?'active':''} onClick={()=>setTab('partners')}>Partenaires</button>}
-        {(isAdmin||isFinance) && <button className={tab==='ads'?'active':''} onClick={()=>setTab('ads')}>Publicités</button>}
-        {isAdmin && <button className={tab==='users'?'active':''} onClick={()=>setTab('users')}>Équipe</button>}
-        {isAdmin && <button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}>Journal</button>}
-        {!isFinance && <button className={tab==='content'?'active':''} onClick={()=>setTab('content')}>📋 Contenu</button>}
-        {canEditEmissions && <button className={tab==='emissions'?'active':''} onClick={()=>setTab('emissions')}>📻 Émissions</button>}
-        {(isAdmin||isFinance) && <button className={tab==='finance'?'active':''} onClick={()=>setTab('finance')}>💰 Paie</button>}
-        {(isAdmin||isFinance) && <button className={tab==='accounting'?'active':''} onClick={()=>setTab('accounting')}>📊 Comptabilité</button>}
+        {can('can_articles') && <button className={tab==='articles'?'active':''} onClick={()=>setTab('articles')}>Articles</button>}
+        {can('can_scores') && <button className={tab==='scores'?'active':''} onClick={()=>setTab('scores')}>Scores &amp; Classement</button>}
+        {can('can_partners') && <button className={tab==='partners'?'active':''} onClick={()=>setTab('partners')}>Partenaires</button>}
+        {can('can_ads') && <button className={tab==='ads'?'active':''} onClick={()=>setTab('ads')}>Publicités</button>}
+        {can('can_team') && <button className={tab==='users'?'active':''} onClick={()=>setTab('users')}>Équipe</button>}
+        {can('can_logs') && <button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}>Journal</button>}
+        {can('can_content') && <button className={tab==='content'?'active':''} onClick={()=>setTab('content')}>📋 Contenu</button>}
+        {can('can_emissions') && <button className={tab==='emissions'?'active':''} onClick={()=>setTab('emissions')}>📻 Émissions</button>}
+        {can('can_finance') && <button className={tab==='finance'?'active':''} onClick={()=>setTab('finance')}>💰 Paie</button>}
+        {can('can_accounting') && <button className={tab==='accounting'?'active':''} onClick={()=>setTab('accounting')}>📊 Comptabilité</button>}
       </div></div>
       <div className="admin-body"><div className="wrap">
-        {tab==='articles' && <AdminArticles articles={data.articles} reload={reload} toast={toast} adminEmail={adminEmail} />}
-        {tab==='scores' && <AdminScores scores={data.scores} standings={data.standings} fixtures={data.fixtures} reload={reload} toast={toast} adminEmail={adminEmail} />}
-        {tab==='partners' && (isAdmin||isFinance) && <AdminPartners partners={data.partners} reload={reload} toast={toast} adminEmail={adminEmail} />}
-        {tab==='ads' && (isAdmin||isFinance) && <AdminAds ads={data.ads||[]} reload={reload} toast={toast} adminEmail={adminEmail} />}
-        {tab==='users' && isAdmin && <AdminUsers adminEmail={adminEmail} toast={toast} />}
-        {tab==='logs' && isAdmin && <AdminLogs />}
-        {tab==='content' && <AdminContent adminEmail={adminEmail} userRole={userRole} toast={toast} />}
-        {tab==='emissions' && canEditEmissions && <AdminEmissions shows={data.shows||[]} reload={reload} toast={toast} adminEmail={adminEmail} />}
-        {tab==='finance' && (isAdmin||isFinance) && <AdminFinance adminEmail={adminEmail} userRole={userRole} toast={toast} />}
-        {tab==='accounting' && (isAdmin||isFinance) && <AdminAccounting adminEmail={adminEmail} toast={toast} />}
+        {tab==='articles' && can('can_articles') && <><AdminArticles articles={data.articles} reload={reload} toast={toast} adminEmail={adminEmail} /><PageJournal section="articles" /></>}
+        {tab==='scores' && can('can_scores') && <><AdminScores scores={data.scores} standings={data.standings} fixtures={data.fixtures} reload={reload} toast={toast} adminEmail={adminEmail} /><PageJournal section="scores" /></>}
+        {tab==='partners' && can('can_partners') && <><AdminPartners partners={data.partners} reload={reload} toast={toast} adminEmail={adminEmail} /><PageJournal section="partners" /></>}
+        {tab==='ads' && can('can_ads') && <><AdminAds ads={data.ads||[]} reload={reload} toast={toast} adminEmail={adminEmail} /><PageJournal section="ads" /></>}
+        {tab==='users' && can('can_team') && <><AdminUsers adminEmail={adminEmail} toast={toast} /><PageJournal section="users" /></>}
+        {tab==='logs' && can('can_logs') && <AdminLogs />}
+        {tab==='content' && can('can_content') && <><AdminContent adminEmail={adminEmail} userPerms={userPerms} toast={toast} /><PageJournal section="content" /></>}
+        {tab==='emissions' && can('can_emissions') && <><AdminEmissions shows={data.shows||[]} reload={reload} toast={toast} adminEmail={adminEmail} /><PageJournal section="emissions" /></>}
+        {tab==='finance' && can('can_finance') && <><AdminFinance adminEmail={adminEmail} userPerms={userPerms} toast={toast} /><PageJournal section="finance" /></>}
+        {tab==='accounting' && can('can_accounting') && <><AdminAccounting adminEmail={adminEmail} toast={toast} /><PageJournal section="accounting" /></>}
       </div></div>
     </div>
   );
@@ -3218,7 +3292,7 @@ function App(){
   const [loading,setLoading]=useState(true);
   const [session,setSession]=useState(null);
   const [authChecked,setAuthChecked]=useState(false);
-  const [userRole,setUserRole]=useState(null); // null = loading, 'admin' | 'journalist'
+  const [userPerms,setUserPerms]=useState(null); // null = loading
   const [toast,toastNode]=useToast();
 
   const [data,setData]=useState({ articles:[],standings:[],scores:[],fixtures:[],partners:[],ads:[],shows:[] });
@@ -3257,19 +3331,18 @@ function App(){
     sb.auth.getSession().then(({data})=>{
       const s = data.session;
       setSession(s); setAuthChecked(true);
-      if(s) fetchRole(s.user.email);
+      if(s) fetchPerms(s.user.email);
     });
     const { data:sub }=sb.auth.onAuthStateChange((_e,s)=>{
       setSession(s);
-      if(s) fetchRole(s.user.email); else setUserRole(null);
+      if(s) fetchPerms(s.user.email); else setUserPerms(null);
     });
     return ()=>sub.subscription.unsubscribe();
   },[]);
 
-  async function fetchRole(email){
-    const { data }=await sb.from('user_roles').select('role').eq('email',email).maybeSingle();
-    // No record → treat as admin (backward compat for existing users)
-    setUserRole(data?.role || 'admin');
+  async function fetchPerms(email){
+    const { data }=await sb.from('user_roles').select('*').eq('email',email).maybeSingle();
+    setUserPerms(data || { __full:true }); // no record = full access
   }
 
   useEffect(()=>{ loadPublic(); },[loadPublic]);
@@ -3290,8 +3363,8 @@ function App(){
   if(route==='admin'){
     if(!authChecked) return <div className="login-wrap"><div className="spinner" style={{borderTopColor:'#fff'}}/></div>;
     if(!session) return <><AdminLogin onAuthed={s=>{setSession(s);loadAdmin();}} onExit={goSite} />{toastNode}</>;
-    if(userRole===null) return <div className="login-wrap"><div className="spinner" style={{borderTopColor:'#fff'}}/></div>;
-    return <><Admin session={session} onExit={goSite} data={data} reload={loadAdmin} toast={toast} userRole={userRole} />{toastNode}</>;
+    if(userPerms===null) return <div className="login-wrap"><div className="spinner" style={{borderTopColor:'#fff'}}/></div>;
+    return <><Admin session={session} onExit={goSite} data={data} reload={loadAdmin} toast={toast} userPerms={userPerms} />{toastNode}</>;
   }
 
   // ---------- PARTNER ROUTE ----------
