@@ -4493,53 +4493,94 @@ function CDMPage({ articles, toast, session }){
         </div>
 
         {/* ─── GROUP STANDINGS ─── */}
-        {groups.length>0 && (
-          <div style={{marginTop:32}}>
-            <div className="sechead">
-              <h2 style={{fontSize:16}}>📊 Classements des Groupes</h2><div className="line"></div>
+        <div style={{marginTop:32}}>
+          <div className="sechead">
+            <h2 style={{fontSize:16}}>📊 Classements des Groupes</h2><div className="line"></div>
+          </div>
+          {groups.length===0 ? (
+            <div style={{background:'#fff',border:'1px solid var(--line)',borderRadius:12,padding:'20px 24px',color:'var(--muted)',fontSize:13,textAlign:'center'}}>
+              Chargement des classements…
             </div>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:16}}>
+          ) : (
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(340px,1fr))',gap:20}}>
               {groups.map((g,gi)=>{
-                const isOpen = openGroups[gi]!==false; // open by default
                 const entries = g.standings?.entries||g.entries||[];
+                // Sort by points desc, then GD desc
+                const sorted = [...entries].sort((a,b)=>{
+                  const gs=(e,n)=>Number(e.stats?.find(s=>s.name===n||s.abbreviation===n)?.value||0);
+                  const ptsDiff = gs(b,'points')||gs(b,'PTS') - (gs(a,'points')||gs(a,'PTS'));
+                  if(ptsDiff!==0) return ptsDiff;
+                  return (gs(b,'pointDifferential')||gs(b,'GD')) - (gs(a,'pointDifferential')||gs(a,'GD'));
+                });
                 return (
-                  <div key={gi} className="cdm-group-card" style={{background:'#fff',border:'1px solid var(--line)',borderRadius:14,overflow:'hidden'}}>
-                    <div onClick={()=>setOpenGroups(p=>({...p,[gi]:!isOpen}))}
-                      style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'12px 16px',background:isOpen?'var(--navy)':'#f7f8fb',cursor:'pointer'}}>
-                      <span style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:14,letterSpacing:'.06em',color:isOpen?'#fff':'var(--navy)',textTransform:'uppercase'}}>
-                        {g.name||`Groupe ${gi+1}`}
+                  <div key={gi} style={{background:'#fff',border:'1px solid var(--line)',borderRadius:14,overflow:'hidden',boxShadow:'0 2px 8px rgba(0,0,0,.05)'}}>
+                    {/* Group header */}
+                    <div style={{background:'var(--navy)',padding:'11px 16px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                      <span style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:900,fontSize:15,letterSpacing:'.08em',color:'#fff',textTransform:'uppercase'}}>
+                        {g.name||`Groupe ${String.fromCharCode(65+gi)}`}
                       </span>
-                      <span style={{fontSize:12,color:isOpen?'#a0b8a8':'var(--muted)'}}>{isOpen?'▲':'▼'}</span>
+                      <span style={{fontSize:10,fontWeight:700,color:'rgba(255,255,255,.5)',letterSpacing:'.06em'}}>{sorted.length} équipes</span>
                     </div>
-                    {isOpen && (
-                      <div>
-                        <div style={{display:'grid',gridTemplateColumns:'1fr 28px 28px 28px 28px 32px',padding:'6px 14px',fontSize:10,fontWeight:700,letterSpacing:'.05em',color:'var(--muted-2)',borderBottom:'1px solid #f2f3f7'}}>
-                          <span>ÉQUIPE</span><span style={{textAlign:'center'}}>J</span><span style={{textAlign:'center'}}>G</span><span style={{textAlign:'center'}}>N</span><span style={{textAlign:'center'}}>P</span><span style={{textAlign:'right'}}>PTS</span>
+                    {/* Column headers */}
+                    <div style={{display:'grid',gridTemplateColumns:'20px 1fr 24px 24px 24px 24px 28px 28px 34px',gap:0,padding:'6px 12px',borderBottom:'2px solid #f0f1f5',background:'#f8f9fc'}}>
+                      {['#','ÉQUIPE','J','G','N','P','BP','BC','PTS'].map((h,hi)=>(
+                        <span key={h} style={{fontSize:9.5,fontWeight:800,letterSpacing:'.04em',color:'var(--muted)',textAlign:hi>1?'center':'left',textTransform:'uppercase'}}>{h}</span>
+                      ))}
+                    </div>
+                    {/* Rows */}
+                    {sorted.map((e,ei)=>{
+                      const stats = e.stats||[];
+                      const gs = (n) => {
+                        const s = stats.find(s=>s.name===n||s.abbreviation===n||s.displayName===n);
+                        return s?.displayValue??s?.value??'0';
+                      };
+                      const qualifies = ei < 2;
+                      const flagUrl = e.team?.logos?.[0]?.href || e.team?.flag?.href;
+                      return (
+                        <div key={ei} style={{
+                          display:'grid',
+                          gridTemplateColumns:'20px 1fr 24px 24px 24px 24px 28px 28px 34px',
+                          gap:0,
+                          alignItems:'center',
+                          padding:'10px 12px',
+                          borderBottom:ei<sorted.length-1?'1px solid #f4f5f8':'none',
+                          background: ei===0 ? 'rgba(0,107,63,.05)' : ei===1 ? 'rgba(0,107,63,.02)' : '#fff',
+                          borderLeft: qualifies ? '3px solid #006b3f' : '3px solid transparent',
+                        }}>
+                          {/* Rank */}
+                          <span style={{fontWeight:800,fontSize:12,color:qualifies?'#006b3f':'var(--muted)',textAlign:'center'}}>{ei+1}</span>
+                          {/* Team name + flag */}
+                          <div style={{display:'flex',alignItems:'center',gap:6,minWidth:0}}>
+                            {flagUrl
+                              ? <img src={flagUrl} alt="" style={{width:20,height:14,objectFit:'cover',borderRadius:2,flexShrink:0}} />
+                              : <div style={{width:20,height:14,background:'#e0e3ec',borderRadius:2,flexShrink:0}}/>
+                            }
+                            <span style={{fontWeight:qualifies?700:500,fontSize:12.5,color:'var(--navy)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                              {e.team?.displayName||e.team?.shortDisplayName||e.team?.name||e.name||'—'}
+                            </span>
+                          </div>
+                          {/* Stats */}
+                          <span style={{textAlign:'center',fontSize:12,color:'#6b7180'}}>{gs('gamesPlayed')||gs('GP')||'—'}</span>
+                          <span style={{textAlign:'center',fontSize:12,fontWeight:600,color:'#1f7a48'}}>{gs('wins')||gs('W')||'0'}</span>
+                          <span style={{textAlign:'center',fontSize:12,color:'#6b7180'}}>{gs('ties')||gs('D')||gs('draws')||'0'}</span>
+                          <span style={{textAlign:'center',fontSize:12,fontWeight:600,color:'#c0392b'}}>{gs('losses')||gs('L')||'0'}</span>
+                          <span style={{textAlign:'center',fontSize:12,color:'#4a5168'}}>{gs('pointsFor')||gs('GF')||gs('goalsFor')||'0'}</span>
+                          <span style={{textAlign:'center',fontSize:12,color:'#4a5168'}}>{gs('pointsAgainst')||gs('GA')||gs('goalsAgainst')||'0'}</span>
+                          <span style={{textAlign:'center',fontWeight:900,fontSize:15,color:ei===0?'#006b3f':ei===1?'#0a7a4a':'var(--navy)'}}>{gs('points')||gs('PTS')||'0'}</span>
                         </div>
-                        {entries.slice(0,4).map((e,ei)=>{
-                          const stats=e.stats||[];
-                          const getStat=(name)=>stats.find(s=>s.name===name||s.abbreviation===name)?.displayValue||'0';
-                          return (
-                            <div key={ei} style={{display:'grid',gridTemplateColumns:'1fr 28px 28px 28px 28px 32px',alignItems:'center',padding:'9px 14px',borderBottom:ei<3?'1px solid #f7f8fb':'none',background:ei<2?'rgba(0,107,63,.03)':'#fff'}}>
-                              <span style={{fontWeight:700,fontSize:13,color:'var(--navy)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
-                                {e.team?.displayName||e.team?.name||e.name||'—'}
-                              </span>
-                              <span style={{textAlign:'center',fontSize:12,color:'#6b7180'}}>{getStat('gamesPlayed')||getStat('GP')||'—'}</span>
-                              <span style={{textAlign:'center',fontSize:12,color:'#1f7a48',fontWeight:600}}>{getStat('wins')||getStat('W')||'—'}</span>
-                              <span style={{textAlign:'center',fontSize:12,color:'#6b7180'}}>{getStat('ties')||getStat('D')||getStat('draws')||'—'}</span>
-                              <span style={{textAlign:'center',fontSize:12,color:'#c0392b',fontWeight:600}}>{getStat('losses')||getStat('L')||'—'}</span>
-                              <span style={{textAlign:'right',fontWeight:900,fontSize:14,color:'var(--navy)'}}>{getStat('points')||getStat('PTS')||'0'}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
+                      );
+                    })}
+                    {/* Qualifier legend */}
+                    <div style={{padding:'6px 12px',background:'#f8f9fc',borderTop:'1px solid #f0f1f5',display:'flex',alignItems:'center',gap:6}}>
+                      <div style={{width:10,height:10,borderRadius:2,background:'#006b3f',flexShrink:0}}/>
+                      <span style={{fontSize:10,color:'var(--muted)',fontWeight:600}}>Qualifié pour les huitièmes de finale</span>
+                    </div>
                   </div>
                 );
               })}
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* ─── PREDICTIONS / POLLS ─── */}
         {preMatches.length>0 && (
