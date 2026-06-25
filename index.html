@@ -3546,7 +3546,9 @@ function EntryForm({ entry, onSave, onCancel, adminEmail, toast }){
     reference: entry?.reference||'', notes: entry?.notes||'', ...(entry||{})
   });
   const [busy,setBusy]=useState(false);
+  const [employees,setEmployees]=useState([]);
   const set=(k,v)=>setForm(p=>({...p,[k]:v, ...(k==='type'?{category:''}:{})}));
+  useEffect(()=>{ sb.from('employees').select('id,name,email').order('name').then(({data})=>setEmployees(data||[])); },[]);
 
   async function save(){
     if(!form.label.trim()){ toast('Libellé requis'); return; }
@@ -3623,8 +3625,14 @@ function EntryForm({ entry, onSave, onCancel, adminEmail, toast }){
       </div>
       {form.party_type && (
         <div className="field">
-          <label>{form.party_type==='employee'?'Nom de l\'employé':form.party_type==='business'?'Nom de l\'entreprise':'Nom'}</label>
-          <input value={form.party_name||''} onChange={e=>setForm({...form,party_name:e.target.value})} placeholder="Nom..." />
+          <label>{form.party_type==='employee'?'Employé':form.party_type==='business'?'Nom de l\'entreprise':'Nom'}</label>
+          {form.party_type==='employee'
+            ? <select value={form.party_name||''} onChange={e=>setForm({...form,party_name:e.target.value})}>
+                <option value="">— Sélectionner un employé —</option>
+                {employees.map(e=><option key={e.id} value={e.name||e.email}>{e.name||e.email}</option>)}
+              </select>
+            : <input value={form.party_name||''} onChange={e=>setForm({...form,party_name:e.target.value})} placeholder="Nom..." />
+          }
         </div>
       )}
 
