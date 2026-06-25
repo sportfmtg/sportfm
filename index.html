@@ -1895,15 +1895,16 @@ function PaystubForm({ stub, employees, onSave, onCancel, adminEmail, toast }){
     const emp = employees.find(e=>e.id===empId);
     if(!emp){ set('employee_id', empId); return; }
     const brut = emp.salaire_brut ? Number(emp.salaire_brut) : 0;
-    const cnss = brut ? Math.round(brut * (Number(emp.cnss_taux)||9) / 100) : 0;
-    const tcs  = brut ? Math.round(brut * (Number(emp.tcs_taux)||0) / 100) : 0;
-    const ts   = brut ? Math.round(brut * (Number(emp.ts_taux)||3) / 100) : 0;
+    // cnss_taux / tcs_taux / ts_taux now store fixed FCFA amounts (not percentages)
+    const cnss = Number(emp.cnss_taux) || 0;
+    const tcs  = Number(emp.tcs_taux)  || 0;
+    const ts   = Number(emp.ts_taux)   || 0;
     setForm(p=>({...p,
       employee_id: empId,
       gross:       brut ? String(brut) : p.gross,
-      cotisations: brut ? String(cnss) : p.cotisations,
-      impot:       brut ? String(tcs)  : p.impot,
-      deduction:   brut ? String(ts)   : p.deduction,
+      cotisations: cnss ? String(cnss) : p.cotisations,
+      impot:       tcs  ? String(tcs)  : p.impot,
+      deduction:   ts   ? String(ts)   : p.deduction,
     }));
   }
 
@@ -2085,15 +2086,15 @@ function EmployeeForm({ emp, onSave, onCancel, adminEmail, toast }){
       <div style={{borderTop:'1px solid var(--line)',margin:'14px 0',paddingTop:14}}>
         <div style={{fontSize:12,fontWeight:700,letterSpacing:'.05em',color:'var(--muted)',marginBottom:10}}>DÉTAIL SALARIAL</div>
         <div className="grid2">
-          <div className="field"><label>Salaire Brut (FCFA)</label><input type="number" value={form.salaire_brut||''} onChange={e=>set('salaire_brut',e.target.value)} placeholder="Ex : 350 000" min="0" /></div>
-          <div className="field"><label>Cotisations CNSS 9% (taux)</label><input type="number" value={form.cnss_taux??9} onChange={e=>set('cnss_taux',e.target.value)} step="0.1" min="0" /></div>
+          <div className="field"><label>Salaire Brut (FCFA)</label><input type="number" value={form.salaire_brut||''} onChange={e=>set('salaire_brut',e.target.value)} placeholder="Ex : 130 000" min="0" /></div>
+          <div className="field"><label>CNSS Salarié — montant fixe (FCFA)</label><input type="number" value={form.cnss_taux||''} onChange={e=>set('cnss_taux',e.target.value)} placeholder="Ex : 4 725" min="0" /></div>
         </div>
         <div className="grid2">
-          <div className="field"><label>TCS (taux %)</label><input type="number" value={form.tcs_taux??0} onChange={e=>set('tcs_taux',e.target.value)} step="0.1" min="0" /></div>
-          <div className="field"><label>Charges employeur CNSS 22.5% (taux)</label><input type="number" value={form.cnss_employeur_taux??22.5} onChange={e=>set('cnss_employeur_taux',e.target.value)} step="0.1" min="0" /></div>
+          <div className="field"><label>TCS — montant fixe (FCFA)</label><input type="number" value={form.tcs_taux||''} onChange={e=>set('tcs_taux',e.target.value)} placeholder="Ex : 0" min="0" /></div>
+          <div className="field"><label>Charges employeur CNSS — montant fixe (FCFA)</label><input type="number" value={form.cnss_employeur_taux||''} onChange={e=>set('cnss_employeur_taux',e.target.value)} placeholder="Ex : 29 250" min="0" /></div>
         </div>
         <div className="grid2">
-          <div className="field"><label>TS 3% (taux)</label><input type="number" value={form.ts_taux??3} onChange={e=>set('ts_taux',e.target.value)} step="0.1" min="0" /></div>
+          <div className="field"><label>TS — montant fixe (FCFA)</label><input type="number" value={form.ts_taux||''} onChange={e=>set('ts_taux',e.target.value)} placeholder="Ex : 0" min="0" /></div>
           <div className="field"><label>E-mail compte SportFM <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(lie au portail)</span></label><input type="email" value={form.linked_user_email||''} onChange={e=>set('linked_user_email',e.target.value)} placeholder="jean@sportfm.com" /></div>
         </div>
       </div>
@@ -2163,29 +2164,30 @@ function generatePaystubPDF(emp, stub){
   doc.text('DÉSIGNATION', M+5, y+6);
   doc.text('MONTANT (FCFA)', W-M-5, y+6, {align:'right'});
 
-  const fmt = n => Number(n).toLocaleString('fr-FR');
-  const cnssRate = emp.cnss_taux ?? 9;
-  const tcsRate  = emp.tcs_taux  ?? 0;
-  const tsRate   = emp.ts_taux   ?? 3;
-  const empRate  = emp.cnss_employeur_taux ?? 22.5;
+  // Use plain space as thousands separator — toLocaleString('fr-FR') produces narrow no-break space which jsPDF renders as /
+  const fmt = n => Math.round(Number(n)||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,' ');
+
+  // Stored fixed FCFA amounts (not rates)
+  const cnssAmt    = Number(emp.cnss_taux)          || 0;
+  const tcsAmt     = Number(emp.tcs_taux)           || 0;
+  const tsAmt      = Number(emp.ts_taux)            || 0;
+  const empFixeAmt = Number(emp.cnss_employeur_taux)|| 0;
 
   // Section: Gains
   const gainsRows = [];
   if(stub.gross) gainsRows.push(['Salaire de base brut', fmt(stub.gross)]);
-  if(stub.prime) gainsRows.push(['Prime / Bonus', '+'+fmt(stub.prime)]);
+  if(stub.prime) gainsRows.push(['Prime / Bonus', fmt(stub.prime)]);
 
   // Section: Retenues salarié
   const retRows = [];
-  if(stub.cotisations) retRows.push([`Cotisations CNSS salarié (${cnssRate}%)`, fmt(stub.cotisations)]);
-  if(stub.impot)       retRows.push([`TCS — Taxe complémentaire salariale (${tcsRate}%)`, fmt(stub.impot)]);
-  if(stub.deduction)   retRows.push([`TS — Taxe sur salaire (${tsRate}%)`, fmt(stub.deduction)]);
+  if(stub.cotisations) retRows.push(['Cotisations CNSS salarié', fmt(stub.cotisations)]);
+  if(stub.impot)       retRows.push(['TCS — Taxe complementaire salariale', fmt(stub.impot)]);
+  if(stub.deduction)   retRows.push(['TS — Taxe sur salaire', fmt(stub.deduction)]);
 
   // Section: Charges employeur (info only)
   const empRows = [];
-  if(stub.gross) {
-    const empAmt = Math.round(Number(stub.gross) * Number(empRate) / 100);
-    empRows.push([`CNSS Employeur (${empRate}%)`, fmt(empAmt)]);
-  }
+  const empDisplayAmt = empFixeAmt || (stub.gross ? Math.round(Number(stub.gross)*0.225) : 0);
+  if(empDisplayAmt) empRows.push(['CNSS Employeur', fmt(empDisplayAmt)]);
 
   function drawSectionHeader(label, color){
     y += 5;
@@ -2223,14 +2225,14 @@ function generatePaystubPDF(emp, stub){
   }
 
   // Net pay box
-  y += 14;
+  y += 10;
   doc.setFillColor(...red);
-  doc.roundedRect(M, y, W-M*2, 16, 3, 3, 'F');
-  doc.setTextColor(255,255,255); doc.setFontSize(11); doc.setFont('helvetica','bold');
-  doc.text('NET À PAYER', M+6, y+10);
-  const netAmt = stub.net ? Number(stub.net).toLocaleString('fr-FR')+' FCFA' : '—';
-  doc.setFontSize(14);
-  doc.text(netAmt, W-M-6, y+10, {align:'right'});
+  doc.roundedRect(M, y, W-M*2, 14, 3, 3, 'F');
+  doc.setTextColor(255,255,255); doc.setFontSize(10); doc.setFont('helvetica','bold');
+  doc.text('NET A PAYER', M+6, y+9);
+  const netAmt = stub.net ? fmt(stub.net)+' FCFA' : '—';
+  doc.setFontSize(12);
+  doc.text(netAmt, W-M-6, y+9, {align:'right'});
 
   // Note
   if(stub.note){
