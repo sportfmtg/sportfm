@@ -1261,7 +1261,7 @@ function TaskForm({ initial, onSave, onCancel, adminEmail, toast, teamMembers })
     const newAssignees=assignees.filter(e=>!prevAssignees.includes(e));
     for(const email of newAssignees){
       const member=teamMembers.find(m=>m.email===email);
-      const name=member?.full_name||email;
+      const name=member?.name||email;
       await logAction(adminEmail, 'Tâche assignée', `${name} — ${t.title}`);
     }
     await logAction(adminEmail, t.id?'Tâche modifiée':'Tâche créée', t.title+' → '+assignees.join(', '));
@@ -1302,7 +1302,7 @@ function TaskForm({ initial, onSave, onCancel, adminEmail, toast, teamMembers })
                 : (t.assigned_to).map(email=>{
                     const m=teamMembers.find(x=>x.email===email);
                     return <span key={email} style={{background:'#e7eefc',color:'#2a5bd0',borderRadius:20,padding:'2px 10px',fontSize:12.5,fontWeight:700,display:'flex',alignItems:'center',gap:5}}>
-                      {m?.full_name||email}
+                      {m?.name||email}
                       <span onClick={e=>{e.stopPropagation();toggleAssignee(email);}} style={{cursor:'pointer',fontWeight:900,fontSize:14,lineHeight:1}}>×</span>
                     </span>;
                   })
@@ -1321,7 +1321,7 @@ function TaskForm({ initial, onSave, onCancel, adminEmail, toast, teamMembers })
                           {sel && <span style={{color:'#fff',fontSize:11,fontWeight:900}}>✓</span>}
                         </div>
                         <div>
-                          <div style={{fontWeight:600,fontSize:13.5}}>{m.full_name||m.email}</div>
+                          <div style={{fontWeight:600,fontSize:13.5}}>{m.name||m.email}</div>
                           {m.job_title && <div style={{fontSize:11,color:'var(--muted)'}}>{m.job_title}</div>}
                         </div>
                       </div>;
@@ -1383,7 +1383,7 @@ function AdminContent({ adminEmail, userRole, toast }){
   async function load(){
     const [{ data:taskData },{ data:teamData }]=await Promise.all([
       sb.from('content_tasks').select('*').order('due_date',{ascending:true,nullsFirst:false}),
-      sb.from('user_roles').select('email,full_name,job_title').order('full_name'),
+      sb.from('user_roles').select('email,name,job_title').order('name'),
     ]);
     setTasks(taskData||[]); setTeamList(teamData||[]); setLoading(false);
   }
@@ -1446,7 +1446,7 @@ function AdminContent({ adminEmail, userRole, toast }){
         <select value={assigneeFilter} onChange={e=>setAssigneeFilter(e.target.value)}
           style={{padding:'9px 12px',border:'1px solid var(--line)',borderRadius:9,fontSize:13.5,background:'#fff',outline:'none'}}>
           <option value="all">Toute l'équipe</option>
-          {teamMembers.map(m=><option key={m.email} value={m.email}>{m.full_name||m.email}</option>)}
+          {teamMembers.map(m=><option key={m.email} value={m.email}>{m.name||m.email}</option>)}
         </select>
         <div style={{marginLeft:'auto',display:'flex',gap:6}}>
           {['table','board'].map(v=>(
@@ -1490,7 +1490,7 @@ function AdminContent({ adminEmail, userRole, toast }){
                           <div style={{display:'flex',flexWrap:'wrap',gap:3}}>
                             {parseAssignees(t.assigned_to).map(email=>{
                               const m=teamList.find(x=>x.email===email);
-                              return <span key={email} style={{fontSize:11,fontWeight:600,color:'#2a5bd0',background:'#e7eefc',borderRadius:20,padding:'2px 7px'}}>{m?.full_name||email}</span>;
+                              return <span key={email} style={{fontSize:11,fontWeight:600,color:'#2a5bd0',background:'#e7eefc',borderRadius:20,padding:'2px 7px'}}>{m?.name||email}</span>;
                             })}
                           </div>
                           {t.due_date && <span style={{fontSize:11,fontWeight:dd.weight,color:dd.color}}>{dd.text}</span>}
@@ -1538,7 +1538,7 @@ function AdminContent({ adminEmail, userRole, toast }){
                         : <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
                             {parseAssignees(t.assigned_to).map(email=>{
                               const m=teamList.find(x=>x.email===email);
-                              return <span key={email} style={{fontSize:12,fontWeight:700,color:'#2a5bd0',background:'#e7eefc',borderRadius:20,padding:'2px 9px',whiteSpace:'nowrap'}}>{m?.full_name||email}</span>;
+                              return <span key={email} style={{fontSize:12,fontWeight:700,color:'#2a5bd0',background:'#e7eefc',borderRadius:20,padding:'2px 9px',whiteSpace:'nowrap'}}>{m?.name||email}</span>;
                             })}
                           </div>}
                     </td>
