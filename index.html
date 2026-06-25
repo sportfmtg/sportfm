@@ -1890,6 +1890,21 @@ function PaystubForm({ stub, employees, onSave, onCancel, adminEmail, toast }){
   const [busy,setBusy]=useState(false);
   const set=(k,v)=>setForm(p=>({...p,[k]:v}));
 
+  // When employee changes, populate fixed details from employee record
+  function onEmployeeChange(empId){
+    const emp = employees.find(e=>e.id===empId);
+    if(!emp){ set('employee_id', empId); return; }
+    const brut = emp.salaire_brut || '';
+    const cnss = brut ? String(Math.round(Number(brut) * (emp.cnss_taux||9) / 100)) : '';
+    const tcs  = brut ? String(Math.round(Number(brut) * (emp.tcs_taux||0) / 100)) : '';
+    setForm(p=>({...p,
+      employee_id: empId,
+      gross: brut ? String(brut) : p.gross,
+      cotisations: cnss || p.cotisations,
+      impot: tcs || p.impot,
+    }));
+  }
+
   // Auto-compute net when gross/deductions change
   const computedNet = ()=>{
     const g=Number(form.gross)||0, c=Number(form.cotisations)||0,
@@ -1934,7 +1949,7 @@ function PaystubForm({ stub, employees, onSave, onCancel, adminEmail, toast }){
       <h3 style={{marginBottom:20}}>{stub?'Modifier la fiche de paie':'Nouvelle fiche de paie'}</h3>
 
       <div className="field"><label>Employé *</label>
-        <select value={form.employee_id} onChange={e=>set('employee_id',e.target.value)}>
+        <select value={form.employee_id} onChange={e=>onEmployeeChange(e.target.value)}>
           <option value="">— Sélectionner —</option>
           {employees.map(e=><option key={e.id} value={e.id}>{e.name||e.email} {e.name?`(${e.email})`:''}</option>)}
         </select></div>
@@ -2924,6 +2939,7 @@ const MODULES = [
   { key:'can_accounting', label:'Comptabilité' },
   { key:'can_team',       label:'Équipe & Accès' },
   { key:'can_logs',       label:'Journal global' },
+  { key:'can_announcements', label:'Annonces' },
 ];
 
 function PermCheckboxes({ perms, onChange }){
