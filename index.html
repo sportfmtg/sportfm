@@ -258,7 +258,7 @@
   .toast{ position:fixed; left:50%; bottom:96px; transform:translateX(-50%) translateY(20px);
     background:var(--ink); color:#fff; font-size:13px; font-weight:600; padding:10px 18px;
     border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.25); opacity:0; pointer-events:none;
-    transition:opacity .25s, transform .25s; z-index:80; }
+    transition:opacity .25s, transform .25s; z-index:200; }
   .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
 
   /* ---------- generic form controls ---------- */
@@ -2961,7 +2961,7 @@ function MonEspace({ session, userPerms, onClose, toast }){
   const [tab,setTab]=useState('profile');
   const [profile,setProfile]=useState(null);
   const [curPw,setCurPw]=useState(''); const [newPw,setNewPw]=useState(''); const [confirmPw,setConfirmPw]=useState('');
-  const [pwBusy,setPwBusy]=useState(false);
+  const [pwBusy,setPwBusy]=useState(false); const [showPw,setShowPw]=useState(false);
   const [paystubs,setPaystubs]=useState([]);
   const [linkedEmp,setLinkedEmp]=useState(null);
   const [announcements,setAnnouncements]=useState([]);
@@ -3084,13 +3084,25 @@ function MonEspace({ session, userPerms, onClose, toast }){
           {tab==='password' && (
             <div className="panel">
               <h3>Changer le mot de passe</h3>
-              <div className="field"><label>Mot de passe actuel</label>
-                <input type="password" value={curPw} onChange={e=>setCurPw(e.target.value)} placeholder="••••••••" /></div>
-              <div className="field"><label>Nouveau mot de passe</label>
-                <input type="password" value={newPw} onChange={e=>setNewPw(e.target.value)} placeholder="••••••••" /></div>
-              <div className="field"><label>Confirmer le nouveau mot de passe</label>
-                <input type="password" value={confirmPw} onChange={e=>setConfirmPw(e.target.value)} placeholder="••••••••" /></div>
-              <button className="btn-primary" disabled={pwBusy} onClick={changePassword}>{pwBusy?'Vérification…':'Changer le mot de passe'}</button>
+              {[['Mot de passe actuel',curPw,setCurPw],['Nouveau mot de passe',newPw,setNewPw],['Confirmer le nouveau mot de passe',confirmPw,setConfirmPw]].map(([lbl,val,setter],i)=>(
+                <div className="field" key={i}>
+                  <label>{lbl}</label>
+                  <div style={{position:'relative'}}>
+                    <input type={showPw?'text':'password'} value={val}
+                      onChange={e=>setter(e.target.value)} placeholder="••••••••"
+                      style={{paddingRight:44}} />
+                    <button type="button" onClick={()=>setShowPw(s=>!s)}
+                      style={{position:'absolute',right:10,top:'50%',transform:'translateY(-50%)',
+                        background:'none',border:'none',cursor:'pointer',fontSize:17,lineHeight:1,color:'var(--muted)'}}>
+                      {showPw?'🙈':'👁️'}
+                    </button>
+                  </div>
+                  {i===1&&val.length>0&&val.length<6 && <div className="hint" style={{color:'var(--red)'}}>Minimum 6 caractères requis</div>}
+                </div>
+              ))}
+              <button className="btn-primary" disabled={pwBusy} onClick={changePassword} style={{marginTop:4}}>
+                {pwBusy?'Vérification…':'Changer le mot de passe'}
+              </button>
             </div>
           )}
 
