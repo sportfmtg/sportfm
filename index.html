@@ -4439,9 +4439,8 @@ async function logAction(adminEmail, action, details=''){
   } catch(e){}
 }
 async function notify(recipientEmail, type, title, body){
-  try {
-    await sb.from('notifications').insert([{ recipient_email:recipientEmail, type, title, body, read:false }]);
-  } catch(e){}
+  const { error } = await sb.from('notifications').insert([{ recipient_email:recipientEmail, type, title, body, read:false }]);
+  if(error) console.error('notify error:', error.message, error.code);
 }
 
 function AdminLogs(){
