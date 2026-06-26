@@ -1256,12 +1256,6 @@ function TaskForm({ initial, onSave, onCancel, adminEmail, toast, teamMembers })
     else { res=await sb.from('content_tasks').insert([{...payload, created_by:adminEmail}]); }
     setBusy(false);
     if(res.error){ toast('Erreur : '+res.error.message); return; }
-    // send notification to each newly assigned person
-    const prevAssignees=parseAssignees(initial?.assigned_to);
-    const newAssignees=assignees.filter(e=>!prevAssignees.includes(e));
-    for(const email of newAssignees){
-      await notify(email, 'task_assigned', 'Tâche assignée', t.title);
-    }
     await logAction(adminEmail, t.id?'Tâche modifiée':'Tâche créée', t.title+' → '+assignees.join(', '));
     toast(t.id?'Mis à jour':'Tâche créée'); onSave();
   }
@@ -2118,9 +2112,6 @@ function PaystubForm({ stub, employees, onSave, onCancel, adminEmail, toast }){
     if(res.error){ toast('Erreur : '+res.error.message); return; }
     const emp = employees.find(e=>e.id===form.employee_id);
     await logAction(adminEmail, stub?'Fiche modifiée':'Fiche créée', `${emp?.name||emp?.email} — ${form.period_month} ${form.period_year}`);
-    if(!stub && emp?.linked_user_email){
-      await notify(emp.linked_user_email, 'paystub', 'Nouvelle fiche de paie', `${form.period_month} ${form.period_year} — disponible dans Mon Espace`);
-    }
     toast(stub?'Mis à jour':'Fiche créée'); onSave();
   }
 
@@ -2965,38 +2956,24 @@ function AdminCDM({ articles, reload, toast, adminEmail }){
 // ============================================================
 //  MON ESPACE — Employee Profile Portal
 // ============================================================
-function MonEspace({ session, userPerms, onClose, toast, initialTab }){
+function MonEspace({ session, userPerms, onClose, toast }){
   const email = session?.user?.email || '';
-  const [tab,setTab]=useState(initialTab||'profile');
+  const [tab,setTab]=useState('profile');
   const [profile,setProfile]=useState(null);
   const [newPw,setNewPw]=useState(''); const [confirmPw,setConfirmPw]=useState('');
   const [pwBusy,setPwBusy]=useState(false);
   const [paystubs,setPaystubs]=useState([]);
   const [linkedEmp,setLinkedEmp]=useState(null);
   const [announcements,setAnnouncements]=useState([]);
-  const [notifications,setNotifications]=useState([]);
-  const [uploading,setUploading]=useState(false);
   const [annTitle,setAnnTitle]=useState(''); const [annBody,setAnnBody]=useState('');
   const [annPinned,setAnnPinned]=useState(false); const [annBusy,setAnnBusy]=useState(false);
-  const imgRef=useRef(null);
-  // messages state
-  const [teamList,setTeamList]=useState([]);
-  const [inbox,setInbox]=useState([]);
-  const [sent,setSent]=useState([]);
-  const [msgView,setMsgView]=useState('inbox'); // 'inbox'|'sent'|'compose'|'thread'
-  const [openThread,setOpenThread]=useState(null); // message object
-  const [replyBody,setReplyBody]=useState('');
-  const [compTo,setCompTo]=useState(''); const [compSubj,setCompSubj]=useState(''); const [compBody,setCompBody]=useState('');
-  const [msgBusy,setMsgBusy]=useState(false);
+  const [editingAnn,setEditingAnn]=useState(null); // announcement being edited
 
   const canAnnounce = !!(userPerms?.__full || userPerms?.can_announcements);
 
-  async function loadMessages(){
-    const [{ data:inc },{ data:snt }]=await Promise.all([
-      sb.from('direct_messages').select('*').eq('to_email',email).order('created_at',{ascending:false}),
-      sb.from('direct_messages').select('*').eq('from_email',email).order('created_at',{ascending:false}),
-    ]);
-    setInbox(inc||[]); setSent(snt||[]);
+  function loadAnnouncements(){
+    sb.from('announcements').select('*').order('pinned',{ascending:false}).order('created_at',{ascending:false}).limit(50)
+      .then(({data})=>setAnnouncements(data||[]));
   }
 
   useEffect(()=>{
@@ -3007,59 +2984,8 @@ function MonEspace({ session, userPerms, onClose, toast, initialTab }){
         sb.from('paystubs').select('*').eq('employee_id',data.id).order('period_year',{ascending:false}).order('period_month',{ascending:false}).then(({data:s})=>setPaystubs(s||[]));
       }
     });
-    sb.from('announcements').select('*').order('pinned',{ascending:false}).order('created_at',{ascending:false}).limit(30)
-      .then(({data})=>setAnnouncements(data||[]));
-    sb.from('notifications').select('*').eq('recipient_email',email).order('created_at',{ascending:false}).limit(30)
-      .then(({data})=>setNotifications(data||[]));
-    sb.from('user_roles').select('email,name,job_title').order('name').then(({data})=>setTeamList((data||[]).filter(u=>u.email!==email)));
-    loadMessages();
+    loadAnnouncements();
   },[email]);
-
-  async function sendMessage(){
-    if(!compTo||!compBody.trim()){ toast('Destinataire et message requis'); return; }
-    setMsgBusy(true);
-    const { error }=await sb.from('direct_messages').insert([{
-      from_email:email, from_name:profile?.name||email,
-      to_email:compTo, subject:compSubj.trim()||'(sans objet)', body:compBody.trim(), read:false
-    }]);
-    setMsgBusy(false);
-    if(error){ toast('Erreur : '+error.message); return; }
-    toast('Message envoyé ✓'); setCompTo(''); setCompSubj(''); setCompBody('');
-    setMsgView('sent'); loadMessages();
-  }
-
-  async function markRead(msg){
-    if(!msg.read) await sb.from('direct_messages').update({read:true}).eq('id',msg.id);
-    setOpenThread(msg); setMsgView('thread'); loadMessages();
-  }
-
-  async function sendReply(){
-    if(!replyBody.trim()) return;
-    setMsgBusy(true);
-    await sb.from('direct_messages').insert([{
-      from_email:email, from_name:profile?.name||email,
-      to_email:openThread.from_email, subject:'Re: '+(openThread.subject||''), body:replyBody.trim(), read:false
-    }]);
-    setMsgBusy(false);
-    toast('Réponse envoyée ✓'); setReplyBody(''); loadMessages();
-  }
-
-  async function uploadPhoto(e){
-    const file=e.target.files?.[0]; if(!file) return;
-    if(!file.type.startsWith('image/')){ toast('Image uniquement'); return; }
-    setUploading(true);
-    try{
-      const ext=file.name.split('.').pop().toLowerCase();
-      const path=`profiles/${email.replace('@','_')}_${Date.now()}.${ext}`;
-      const { error }=await sb.storage.from('profiles').upload(path,file,{contentType:file.type,upsert:true});
-      if(error) throw error;
-      const { data:u }=sb.storage.from('profiles').getPublicUrl(path);
-      await sb.from('user_roles').update({profile_image_url:u.publicUrl}).eq('email',email);
-      setProfile(p=>({...p,profile_image_url:u.publicUrl}));
-      toast('Photo mise à jour ✓');
-    } catch(err){ toast('Erreur upload : '+err.message); }
-    finally{ setUploading(false); }
-  }
 
   async function changePassword(){
     if(!newPw){ toast('Saisissez un mot de passe'); return; }
@@ -3082,14 +3008,22 @@ function MonEspace({ session, userPerms, onClose, toast, initialTab }){
     setAnnBusy(false);
     if(error){ toast('Erreur : '+error.message); return; }
     toast('Annonce publiée ✓'); setAnnTitle(''); setAnnBody(''); setAnnPinned(false);
-    // notify all team members
-    sb.from('user_roles').select('email').then(({data})=>{
-      (data||[]).filter(u=>u.email!==email).forEach(u=>{
-        notify(u.email, 'announcement', annTitle, (profile?.name||email)+' a publié une annonce');
-      });
-    });
-    sb.from('announcements').select('*').order('pinned',{ascending:false}).order('created_at',{ascending:false}).limit(30)
-      .then(({data})=>setAnnouncements(data||[]));
+    loadAnnouncements();
+  }
+
+  async function saveEditAnn(){
+    if(!editingAnn.title.trim()||!editingAnn.body.trim()){ toast('Titre et contenu requis'); return; }
+    const { error }=await sb.from('announcements').update({
+      title:editingAnn.title, body:editingAnn.body, pinned:editingAnn.pinned
+    }).eq('id',editingAnn.id);
+    if(error){ toast('Erreur : '+error.message); return; }
+    toast('Annonce modifiée ✓'); setEditingAnn(null); loadAnnouncements();
+  }
+
+  async function deleteAnn(id){
+    if(!confirm('Supprimer cette annonce ?')) return;
+    await sb.from('announcements').delete().eq('id',id);
+    toast('Annonce supprimée'); loadAnnouncements();
   }
 
   const tabStyle=(k)=>({padding:'10px 18px',border:'none',borderBottom:tab===k?'2px solid var(--navy)':'2px solid transparent',
@@ -3109,7 +3043,7 @@ function MonEspace({ session, userPerms, onClose, toast, initialTab }){
 
         {/* Tabs */}
         <div style={{background:'#fff',borderBottom:'1px solid var(--line)',display:'flex',gap:0,paddingLeft:24,overflowX:'auto'}}>
-          {[['profile','Profil'],['password','Mot de passe'],['notifs','Notifications'],['messages','Messages'+(inbox.filter(m=>!m.read).length>0?` (${inbox.filter(m=>!m.read).length})`:'')],['paystubs','Mes fiches'],['board','Annonces']].map(([k,l])=>(
+          {[['profile','Profil'],['password','Mot de passe'],['paystubs','Mes fiches'],['board','Annonces']].map(([k,l])=>(
             <button key={k} onClick={()=>setTab(k)} style={tabStyle(k)}>{l}</button>
           ))}
         </div>
@@ -3119,19 +3053,12 @@ function MonEspace({ session, userPerms, onClose, toast, initialTab }){
           {/* PROFILE TAB */}
           {tab==='profile' && (
             <div className="panel">
-              <h3>Photo de profil</h3>
-              <div style={{display:'flex',gap:20,alignItems:'flex-start',flexWrap:'wrap'}}>
-                <div style={{textAlign:'center'}}>
-                  {profile?.profile_image_url
-                    ? <img src={profile.profile_image_url} alt="Profil" style={{width:100,height:100,borderRadius:'50%',objectFit:'cover',border:'3px solid var(--navy)',display:'block'}} />
-                    : <div style={{width:100,height:100,borderRadius:'50%',background:'var(--navy)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:36,color:'#fff'}}>👤</div>}
-                  <input hidden ref={imgRef} type="file" accept="image/*" onChange={uploadPhoto} />
-                  <button className="btn-ghost" style={{marginTop:10,fontSize:12.5,padding:'7px 14px'}} onClick={()=>imgRef.current?.click()} disabled={uploading}>
-                    {uploading?'Envoi…':'📁 Changer la photo'}
-                  </button>
+              <div style={{display:'flex',gap:20,alignItems:'center',flexWrap:'wrap'}}>
+                <div style={{width:80,height:80,borderRadius:'50%',background:'var(--navy)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:32,color:'#fff',flexShrink:0}}>
+                  {(profile?.name||email).charAt(0).toUpperCase()}
                 </div>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:18,fontWeight:800,color:'var(--navy)',marginBottom:4}}>{profile?.name||email}</div>
+                <div>
+                  <div style={{fontSize:20,fontWeight:800,color:'var(--navy)',marginBottom:4}}>{profile?.name||email}</div>
                   {profile?.job_title&&<div style={{fontSize:13.5,color:'#4a5168',marginBottom:4}}>{profile.job_title}</div>}
                   <div style={{fontSize:13,color:'var(--muted)'}}>{email}</div>
                 </div>
@@ -3148,39 +3075,6 @@ function MonEspace({ session, userPerms, onClose, toast, initialTab }){
               <div className="field"><label>Confirmer le mot de passe</label>
                 <input type="password" value={confirmPw} onChange={e=>setConfirmPw(e.target.value)} placeholder="••••••••" /></div>
               <button className="btn-primary" disabled={pwBusy} onClick={changePassword}>{pwBusy?'…':'Changer le mot de passe'}</button>
-            </div>
-          )}
-
-          {/* NOTIFICATIONS TAB */}
-          {tab==='notifs' && (
-            <div className="panel">
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
-                <h3 style={{margin:0}}>Notifications</h3>
-                {notifications.some(n=>!n.read) && (
-                  <button className="btn-ghost" style={{fontSize:12,padding:'5px 12px'}} onClick={async()=>{
-                    await sb.from('notifications').update({read:true}).eq('recipient_email',email).eq('read',false);
-                    sb.from('notifications').select('*').eq('recipient_email',email).order('created_at',{ascending:false}).limit(30)
-                      .then(({data})=>setNotifications(data||[]));
-                  }}>Tout marquer lu</button>
-                )}
-              </div>
-              {notifications.length===0
-                ? <div className="empty">Aucune notification.</div>
-                : notifications.map((n,i)=>{
-                    const icon = n.type==='task_assigned'?'📋':n.type==='paystub'?'💰':n.type==='announcement'?'📢':'🔔';
-                    return (
-                      <div key={n.id||i} style={{display:'flex',gap:12,padding:'12px 0',borderBottom:'1px solid var(--line)',alignItems:'flex-start',background:n.read?'transparent':'rgba(42,91,208,.03)'}}>
-                        <span style={{fontSize:20,flexShrink:0,marginTop:1}}>{icon}</span>
-                        <div style={{flex:1}}>
-                          <div style={{fontWeight:n.read?600:800,fontSize:13.5,color:'var(--navy)',marginBottom:2}}>{n.title}</div>
-                          {n.body&&<div style={{fontSize:12.5,color:'#5a6178'}}>{n.body}</div>}
-                          <div style={{fontSize:11,color:'var(--muted)',marginTop:4}}>{new Date(n.created_at).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</div>
-                        </div>
-                        {!n.read && <div style={{width:8,height:8,borderRadius:'50%',background:'var(--red)',flexShrink:0,marginTop:6}}/>}
-                      </div>
-                    );
-                  })
-              }
             </div>
           )}
 
@@ -3228,121 +3122,10 @@ function MonEspace({ session, userPerms, onClose, toast, initialTab }){
             </div>
           )}
 
-          {/* MESSAGES TAB */}
-          {tab==='messages' && (
-            <div>
-              {/* Sub-nav */}
-              <div style={{display:'flex',gap:8,marginBottom:18,flexWrap:'wrap',alignItems:'center'}}>
-                {[['inbox','📥 Reçus'+(inbox.filter(m=>!m.read).length>0?` · ${inbox.filter(m=>!m.read).length} non lus`:'')],['sent','📤 Envoyés'],['compose','✏️ Nouveau message']].map(([k,l])=>(
-                  <button key={k} onClick={()=>setMsgView(k)}
-                    style={{padding:'8px 16px',borderRadius:20,fontSize:13,fontWeight:700,cursor:'pointer',border:'2px solid',
-                      borderColor:msgView===k?'var(--navy)':'var(--line)',
-                      background:msgView===k?'var(--navy)':'#fff',
-                      color:msgView===k?'#fff':'#5a6178'}}>{l}</button>
-                ))}
-              </div>
-
-              {/* INBOX */}
-              {msgView==='inbox' && (
-                <div className="panel" style={{padding:0,overflow:'hidden'}}>
-                  {inbox.length===0
-                    ? <div className="empty" style={{padding:24}}>Aucun message reçu.</div>
-                    : inbox.map(m=>(
-                      <div key={m.id} onClick={()=>markRead(m)}
-                        style={{display:'flex',gap:12,padding:'14px 18px',borderBottom:'1px solid var(--line)',cursor:'pointer',
-                          background:m.read?'#fff':'#f0f5ff',transition:'background .15s'}}
-                        onMouseOver={e=>e.currentTarget.style.background='#f5f7fc'}
-                        onMouseOut={e=>e.currentTarget.style.background=m.read?'#fff':'#f0f5ff'}>
-                        <div style={{width:36,height:36,borderRadius:'50%',background:'var(--navy)',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:14,fontWeight:800,flexShrink:0}}>
-                          {(m.from_name||m.from_email).charAt(0).toUpperCase()}
-                        </div>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
-                            <span style={{fontWeight:m.read?600:800,fontSize:13.5,color:'var(--navy)'}}>{m.from_name||m.from_email}</span>
-                            <span style={{fontSize:11,color:'var(--muted)',flexShrink:0}}>{new Date(m.created_at).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>
-                          </div>
-                          <div style={{fontSize:13,fontWeight:m.read?500:700,color:'#2b3142',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.subject}</div>
-                          <div style={{fontSize:12,color:'var(--muted)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.body}</div>
-                        </div>
-                        {!m.read && <div style={{width:8,height:8,borderRadius:'50%',background:'var(--red)',flexShrink:0,marginTop:6}}/>}
-                      </div>
-                    ))
-                  }
-                </div>
-              )}
-
-              {/* SENT */}
-              {msgView==='sent' && (
-                <div className="panel" style={{padding:0,overflow:'hidden'}}>
-                  {sent.length===0
-                    ? <div className="empty" style={{padding:24}}>Aucun message envoyé.</div>
-                    : sent.map(m=>(
-                      <div key={m.id} style={{display:'flex',gap:12,padding:'14px 18px',borderBottom:'1px solid var(--line)'}}>
-                        <div style={{width:36,height:36,borderRadius:'50%',background:'#5a6178',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:14,fontWeight:800,flexShrink:0}}>
-                          {(m.to_email).charAt(0).toUpperCase()}
-                        </div>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
-                            <span style={{fontWeight:600,fontSize:13.5,color:'#4a5168'}}>À : {teamList.find(t=>t.email===m.to_email)?.name||m.to_email}</span>
-                            <span style={{fontSize:11,color:'var(--muted)',flexShrink:0}}>{new Date(m.created_at).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>
-                          </div>
-                          <div style={{fontSize:13,color:'#2b3142',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.subject}</div>
-                          <div style={{fontSize:12,color:'var(--muted)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.body}</div>
-                        </div>
-                      </div>
-                    ))
-                  }
-                </div>
-              )}
-
-              {/* COMPOSE */}
-              {msgView==='compose' && (
-                <div className="panel">
-                  <h3>Nouveau message</h3>
-                  <div className="field"><label>Destinataire</label>
-                    <select value={compTo} onChange={e=>setCompTo(e.target.value)}
-                      style={{padding:'10px 12px',border:'1px solid var(--line)',borderRadius:8,fontSize:13.5,background:'#fff',outline:'none',width:'100%'}}>
-                      <option value="">Sélectionner un membre…</option>
-                      {teamList.map(m=><option key={m.email} value={m.email}>{m.name||m.email}{m.job_title?` — ${m.job_title}`:''}</option>)}
-                    </select>
-                  </div>
-                  <div className="field"><label>Objet</label>
-                    <input value={compSubj} onChange={e=>setCompSubj(e.target.value)} placeholder="Objet du message…" /></div>
-                  <div className="field"><label>Message</label>
-                    <textarea value={compBody} onChange={e=>setCompBody(e.target.value)} style={{minHeight:120}} placeholder="Écrivez votre message…" /></div>
-                  <button className="btn-primary" disabled={msgBusy||!compTo||!compBody.trim()} onClick={sendMessage}>{msgBusy?'Envoi…':'Envoyer'}</button>
-                </div>
-              )}
-
-              {/* THREAD / REPLY */}
-              {msgView==='thread' && openThread && (
-                <div>
-                  <button className="btn-ghost" style={{marginBottom:14,fontSize:13}} onClick={()=>setMsgView('inbox')}>← Retour</button>
-                  <div className="panel" style={{marginBottom:14}}>
-                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:12}}>
-                      <div>
-                        <div style={{fontWeight:800,fontSize:16,color:'var(--navy)',marginBottom:4}}>{openThread.subject}</div>
-                        <div style={{fontSize:12.5,color:'var(--muted)'}}>De : {openThread.from_name||openThread.from_email} · {new Date(openThread.created_at).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
-                      </div>
-                    </div>
-                    <div style={{fontSize:14,color:'#2b3142',lineHeight:1.65,whiteSpace:'pre-wrap',borderTop:'1px solid var(--line)',paddingTop:14}}>{openThread.body}</div>
-                  </div>
-                  <div className="panel">
-                    <h3 style={{marginBottom:12}}>Répondre</h3>
-                    <div className="field">
-                      <textarea value={replyBody} onChange={e=>setReplyBody(e.target.value)} style={{minHeight:90}} placeholder="Votre réponse…" />
-                    </div>
-                    <button className="btn-primary" disabled={msgBusy||!replyBody.trim()} onClick={sendReply}>{msgBusy?'Envoi…':'Envoyer la réponse'}</button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
           {/* BOARD TAB */}
           {tab==='board' && (
             <div>
-              {canAnnounce && (
+              {canAnnounce && !editingAnn && (
                 <div className="panel" style={{marginBottom:20}}>
                   <h3>Publier une annonce</h3>
                   <div className="field"><label>Titre</label><input value={annTitle} onChange={e=>setAnnTitle(e.target.value)} placeholder="Titre de l'annonce…" /></div>
@@ -3353,13 +3136,35 @@ function MonEspace({ session, userPerms, onClose, toast, initialTab }){
                   <button className="btn-primary" disabled={annBusy} onClick={publishAnnouncement}>{annBusy?'…':'Publier'}</button>
                 </div>
               )}
+              {editingAnn && (
+                <div className="panel" style={{marginBottom:20,borderLeft:'4px solid var(--navy)'}}>
+                  <h3>Modifier l'annonce</h3>
+                  <div className="field"><label>Titre</label><input value={editingAnn.title} onChange={e=>setEditingAnn(p=>({...p,title:e.target.value}))} /></div>
+                  <div className="field"><label>Contenu</label><textarea value={editingAnn.body} onChange={e=>setEditingAnn(p=>({...p,body:e.target.value}))} style={{minHeight:80}} /></div>
+                  <label style={{display:'flex',gap:8,alignItems:'center',fontSize:13.5,fontWeight:600,marginBottom:14,cursor:'pointer'}}>
+                    <input type="checkbox" checked={!!editingAnn.pinned} onChange={e=>setEditingAnn(p=>({...p,pinned:e.target.checked}))} /> 📌 Épingler
+                  </label>
+                  <div style={{display:'flex',gap:8}}>
+                    <button className="btn-primary" onClick={saveEditAnn}>Enregistrer</button>
+                    <button className="btn-ghost" onClick={()=>setEditingAnn(null)}>Annuler</button>
+                  </div>
+                </div>
+              )}
               {announcements.length===0
                 ? <div className="panel"><div className="empty">Aucune annonce.</div></div>
                 : announcements.map(a=>(
                   <div key={a.id} className="panel" style={{marginBottom:12,borderLeft:a.pinned?'4px solid var(--red)':'4px solid var(--line)'}}>
-                    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
-                      {a.pinned&&<span style={{fontSize:12,color:'var(--red)',fontWeight:800}}>📌 ÉPINGLÉ</span>}
-                      <span style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:17,color:'var(--navy)'}}>{a.title}</span>
+                    <div style={{display:'flex',alignItems:'flex-start',gap:8,marginBottom:4}}>
+                      <div style={{flex:1}}>
+                        {a.pinned&&<span style={{fontSize:12,color:'var(--red)',fontWeight:800,display:'block',marginBottom:2}}>📌 ÉPINGLÉ</span>}
+                        <span style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:17,color:'var(--navy)'}}>{a.title}</span>
+                      </div>
+                      {(canAnnounce || a.author_email===email) && (
+                        <div style={{display:'flex',gap:6,flexShrink:0}}>
+                          <button className="icon-btn" onClick={()=>setEditingAnn({...a})}>✏️</button>
+                          <button className="icon-btn del" onClick={()=>deleteAnn(a.id)}>✕</button>
+                        </div>
+                      )}
                     </div>
                     <div style={{fontSize:14,color:'#2b3142',lineHeight:1.55,marginBottom:8}}>{a.body}</div>
                     <div style={{fontSize:11.5,color:'var(--muted)'}}>{a.author_name||a.author_email} · {timeAgo(a.created_at)}</div>
@@ -4193,21 +3998,7 @@ function Admin({ session, onExit, data, reload, toast, userPerms, showProfile })
   const firstTab = ['can_articles','can_scores','can_partners','can_ads','can_content','can_emissions','can_finance','can_accounting'].find(k=>can(k));
   const [tab,setTab]=useState(firstTab ? firstTab.replace('can_','') : 'articles');
   const adminEmail = session.user.email;
-  const [unread,setUnread]=useState(0);
   async function logout(){ await sb.auth.signOut(); onExit(); }
-
-  useEffect(()=>{
-    async function fetchUnread(){
-      const [{ data:msgs },{ data:notifs }]=await Promise.all([
-        sb.from('direct_messages').select('id').eq('to_email',adminEmail).eq('read',false),
-        sb.from('notifications').select('id').eq('recipient_email',adminEmail).eq('read',false),
-      ]);
-      setUnread((msgs||[]).length+(notifs||[]).length);
-    }
-    fetchUnread();
-    const interval=setInterval(fetchUnread,30000);
-    return ()=>clearInterval(interval);
-  },[adminEmail]);
 
   return (
     <div className="admin">
@@ -4215,11 +4006,7 @@ function Admin({ session, onExit, data, reload, toast, userPerms, showProfile })
         <Logo onClick={()=>{}} /><span className="tag">ADMIN</span><div className="grow"></div>
         <span style={{fontSize:13,color:'#cfd6ea'}}>{adminEmail}</span>
         {jobTitle && <span style={{fontSize:11,background:'rgba(255,255,255,.12)',color:'#cfd6ea',padding:'3px 8px',borderRadius:5,fontWeight:700,letterSpacing:'.04em'}}>{jobTitle.toUpperCase()}</span>}
-        <button className="exit" onClick={()=>showProfile('messages')} style={{position:'relative',padding:'7px 14px'}}>
-          🔔
-          {unread>0 && <span style={{position:'absolute',top:2,right:2,background:'var(--red)',color:'#fff',borderRadius:'50%',width:17,height:17,fontSize:10,fontWeight:900,display:'flex',alignItems:'center',justifyContent:'center',lineHeight:1}}>{unread>9?'9+':unread}</span>}
-        </button>
-        <button className="exit" onClick={()=>showProfile('profile')}>👤 Mon espace</button>
+        <button className="exit" onClick={showProfile}>👤 Mon espace</button>
         <button className="exit" onClick={onExit}>Voir le site →</button>
         <button className="exit" onClick={logout}>Déconnexion</button>
       </div></div>
@@ -4437,10 +4224,6 @@ async function logAction(adminEmail, action, details=''){
   try {
     await sb.from('admin_logs').insert([{ admin_email:adminEmail, action, details:details||null }]);
   } catch(e){}
-}
-async function notify(recipientEmail, type, title, body){
-  const { error } = await sb.from('notifications').insert([{ recipient_email:recipientEmail, type, title, body, read:false }]);
-  if(error) console.error('notify error:', error.message, error.code);
 }
 
 function AdminLogs(){
@@ -5045,7 +4828,6 @@ function App(){
   const [userPerms,setUserPerms]=useState(null); // null = loading
   const [toast,toastNode]=useToast();
   const [showProfile,setShowProfile]=useState(false);
-  const [profileTab,setProfileTab]=useState('profile');
 
   const [data,setData]=useState({ articles:[],standings:[],scores:[],fixtures:[],partners:[],ads:[],shows:[] });
 
@@ -5117,8 +4899,8 @@ function App(){
     if(!session) return <><AdminLogin onAuthed={s=>{setSession(s);loadAdmin();}} onExit={goSite} />{toastNode}</>;
     if(userPerms===null) return <div className="login-wrap"><div className="spinner" style={{borderTopColor:'#fff'}}/></div>;
     return <>
-      <Admin session={session} onExit={goSite} data={data} reload={loadAdmin} toast={toast} userPerms={userPerms} showProfile={(t)=>{ setProfileTab(t||'profile'); setShowProfile(true); }} />
-      {showProfile && <MonEspace session={session} userPerms={userPerms} onClose={()=>setShowProfile(false)} toast={toast} initialTab={profileTab} />}
+      <Admin session={session} onExit={goSite} data={data} reload={loadAdmin} toast={toast} userPerms={userPerms} showProfile={()=>setShowProfile(true)} />
+      {showProfile && <MonEspace session={session} userPerms={userPerms} onClose={()=>setShowProfile(false)} toast={toast} />}
       {toastNode}
     </>;
   }
