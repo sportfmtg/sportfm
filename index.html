@@ -1038,6 +1038,118 @@ function recommendPackage({ budget, goals }){
   return { pkg:'Pack Test', why:'1 passage/jour pendant 1 semaine — idéal pour découvrir notre audience et mesurer l\'impact avant un engagement plus long.' };
 }
 
+function SpotRequestForm({ onBack, toast }){
+  const [done,setDone]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const DURATIONS=['30 secondes','60 secondes','90 secondes','2 minutes'];
+  const [f,setF]=useState({company:'',contact_name:'',email:'',phone:'',days:[],time_slot:'',duration:'30 secondes',message:'',budget:''});
+  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+  const toggleDay=(d)=>setF(p=>({...p,days:p.days.includes(d)?p.days.filter(x=>x!==d):[...p.days,d]}));
+  const canSubmit=f.company&&f.email&&f.days.length>0&&f.message.trim();
+
+  async function submit(){
+    setSaving(true);
+    const {error}=await sb.from('spot_requests').insert([{
+      company:f.company, contact_name:f.contact_name, email:f.email, phone:f.phone,
+      days:f.days, time_slot:f.time_slot, duration:f.duration,
+      message:f.message, budget:f.budget, status:'new'
+    }]);
+    setSaving(false);
+    if(error){ toast('Envoi impossible — '+error.message); return; }
+    setDone(true);
+  }
+
+  if(done) return (
+    <div style={{textAlign:'center',padding:'60px 20px'}}>
+      <div style={{fontSize:52,marginBottom:12}}>📻</div>
+      <h2 style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,color:'var(--navy)',fontSize:28,margin:'0 0 12px'}}>Demande reçue !</h2>
+      <p style={{color:'#5a6178',fontSize:16,maxWidth:'44ch',margin:'0 auto 20px'}}>Merci {f.contact_name||f.company}. Notre équipe examinera votre demande et vous contactera rapidement.</p>
+      <button className="btn-ghost" onClick={onBack}>Retour à SportFM</button>
+    </div>
+  );
+
+  return (
+    <div className="wrap" style={{maxWidth:640,paddingTop:40,paddingBottom:60}}>
+      <button className="btn-ghost" style={{marginBottom:24}} onClick={onBack}>← Retour</button>
+      <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:13,letterSpacing:'.08em',color:'var(--red)',marginBottom:8}}>RÉSERVER UN SPOT RADIO</div>
+      <h1 style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:32,color:'var(--navy)',margin:'0 0 8px',lineHeight:1.1}}>Faites passer votre message sur SportFM 91.9</h1>
+      <p style={{color:'#5a6178',fontSize:15,marginBottom:32}}>Remplissez ce formulaire pour réserver un créneau publicitaire. Notre équipe vous recontacte pour finaliser.</p>
+
+      <div style={{background:'#fff',border:'1px solid var(--line)',borderRadius:14,padding:28,display:'flex',flexDirection:'column',gap:18}}>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+          <div className="field" style={{margin:0}}>
+            <label>Entreprise / Marque *</label>
+            <input className="inp" value={f.company} onChange={e=>set('company',e.target.value)} placeholder="Ex: Brasserie BB" />
+          </div>
+          <div className="field" style={{margin:0}}>
+            <label>Nom du contact</label>
+            <input className="inp" value={f.contact_name} onChange={e=>set('contact_name',e.target.value)} placeholder="Prénom Nom" />
+          </div>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+          <div className="field" style={{margin:0}}>
+            <label>Email *</label>
+            <input className="inp" type="email" value={f.email} onChange={e=>set('email',e.target.value)} placeholder="contact@entreprise.com" />
+          </div>
+          <div className="field" style={{margin:0}}>
+            <label>Téléphone</label>
+            <input className="inp" value={f.phone} onChange={e=>set('phone',e.target.value)} placeholder="+228 ..." />
+          </div>
+        </div>
+
+        <div className="field" style={{margin:0}}>
+          <label>Jour(s) de diffusion souhaité(s) *</label>
+          <div style={{display:'flex',flexWrap:'wrap',gap:8,marginTop:6}}>
+            {BROADCAST_DAYS.map(d=>(
+              <button key={d.key} type="button" onClick={()=>toggleDay(d.key)} style={{
+                padding:'7px 14px',borderRadius:8,fontSize:13,fontWeight:700,cursor:'pointer',border:'2px solid',
+                borderColor:f.days.includes(d.key)?'var(--navy)':'var(--line)',
+                background:f.days.includes(d.key)?'var(--navy)':'#fff',
+                color:f.days.includes(d.key)?'#fff':'#4a5168'}}>
+                {d.key}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+          <div className="field" style={{margin:0}}>
+            <label>Créneau horaire préféré</label>
+            <select className="inp" value={f.time_slot} onChange={e=>set('time_slot',e.target.value)}>
+              <option value="">Pas de préférence</option>
+              {['08H20-08H30','12H20-12H30','13H00-13H10','18H00-18H10','19H20-19H30'].map(s=>(
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field" style={{margin:0}}>
+            <label>Durée du spot</label>
+            <select className="inp" value={f.duration} onChange={e=>set('duration',e.target.value)}>
+              {DURATIONS.map(d=><option key={d} value={d}>{d}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className="field" style={{margin:0}}>
+          <label>Message / Script du spot *</label>
+          <textarea className="inp" rows={5} value={f.message} onChange={e=>set('message',e.target.value)}
+            placeholder="Écrivez ici le texte que vous souhaitez faire diffuser, ou décrivez votre message publicitaire..." style={{resize:'vertical'}} />
+        </div>
+
+        <div className="field" style={{margin:0}}>
+          <label>Budget approximatif (FCFA)</label>
+          <input className="inp" value={f.budget} onChange={e=>set('budget',e.target.value)} placeholder="Ex: 150 000 FCFA" />
+        </div>
+
+        <button className="btn-primary" disabled={saving||!canSubmit} onClick={submit} style={{marginTop:4}}>
+          {saving?'Envoi en cours…':'Envoyer ma demande 📻'}
+        </button>
+        {!canSubmit && <p style={{fontSize:12,color:'var(--muted)',margin:0,textAlign:'center'}}>* Entreprise, email, jour(s) et message sont obligatoires</p>}
+      </div>
+    </div>
+  );
+}
+
 function PartnerView({ onBack, toast }){
   const [step,setStep]=useState(0);
   const [done,setDone]=useState(false);
@@ -1978,8 +2090,104 @@ function PartnerCRM({ p, onClose, toast, reload, adminEmail }){
   );
 }
 
+function AdminSpots({ toast, adminEmail }){
+  const [spots,setSpots]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [open,setOpen]=useState(null);
+  const [creatingTask,setCreatingTask]=useState(null);
+  const [taskBusy,setTaskBusy]=useState(false);
+  const STATUS_COLORS={new:'#e8f0fe',contacted:'#fff3cd',in_progress:'#d4edda',done:'#f0f0f0'};
+  const STATUS_LABELS={new:'Nouveau',contacted:'Contacté',in_progress:'En traitement',done:'Terminé'};
+
+  async function load(){
+    setLoading(true);
+    const {data}=await sb.from('spot_requests').select('*').order('created_at',{ascending:false});
+    setSpots(data||[]); setLoading(false);
+  }
+  useEffect(()=>{ load(); },[]);
+
+  async function updateStatus(id,status){
+    await sb.from('spot_requests').update({status}).eq('id',id);
+    load();
+  }
+
+  async function createTask(spot){
+    setTaskBusy(true);
+    const title=`Spot: ${spot.company} — ${(spot.days||[]).join(', ')}${spot.time_slot?' ('+spot.time_slot+')':''}`;
+    const description=`Client: ${spot.contact_name||spot.company}\nEmail: ${spot.email}${spot.phone?'\nTél: '+spot.phone:''}\nDurée: ${spot.duration||'30s'}\nJours: ${(spot.days||[]).join(', ')}${spot.time_slot?'\nCréneau: '+spot.time_slot:''}\n\nMessage:\n${spot.message}`;
+    const {error}=await sb.from('content_tasks').insert([{
+      title, description, content_type:'Spot radio', platform:'Radio 91.9 FM',
+      status:'todo', priority:'normal', created_by:adminEmail
+    }]);
+    setTaskBusy(false);
+    if(error){ toast('Erreur création tâche: '+error.message); return; }
+    await sb.from('spot_requests').update({status:'in_progress'}).eq('id',spot.id);
+    toast('Tâche créée dans Contenu ✓'); setCreatingTask(null); load();
+  }
+
+  if(loading) return <Spinner/>;
+
+  return (
+    <div style={{paddingTop:8}}>
+      {spots.length===0 ? (
+        <div className="panel"><div className="empty">Aucune demande de spot reçue pour l'instant.</div></div>
+      ) : spots.map(s=>(
+        <div key={s.id} className="panel" style={{marginBottom:12,border:'1px solid var(--line)',borderRadius:12}}>
+          <div style={{display:'flex',alignItems:'flex-start',gap:16,flexWrap:'wrap'}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',marginBottom:4}}>
+                <span style={{fontWeight:700,fontSize:15,color:'var(--navy)'}}>{s.company}</span>
+                <span style={{padding:'3px 10px',borderRadius:20,fontSize:12,fontWeight:700,
+                  background:STATUS_COLORS[s.status||'new']||'#eee',color:'#333'}}>
+                  {STATUS_LABELS[s.status||'new']||s.status}
+                </span>
+                <span style={{fontSize:12,color:'var(--muted)'}}>{timeAgo(s.created_at)}</span>
+              </div>
+              <div style={{fontSize:13,color:'#4a5168',marginBottom:4}}>
+                {s.contact_name&&<span>{s.contact_name} · </span>}
+                <span>{s.email}</span>
+                {s.phone&&<span> · {s.phone}</span>}
+              </div>
+              <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:6}}>
+                {(s.days||[]).map(d=>(
+                  <span key={d} style={{padding:'2px 8px',background:'var(--navy)',color:'#fff',borderRadius:4,fontSize:11,fontWeight:700}}>{d}</span>
+                ))}
+                {s.time_slot&&<span style={{padding:'2px 8px',background:'#f0f2f6',borderRadius:4,fontSize:11,fontWeight:600}}>🕐 {s.time_slot}</span>}
+                {s.duration&&<span style={{padding:'2px 8px',background:'#f0f2f6',borderRadius:4,fontSize:11,fontWeight:600}}>{s.duration}</span>}
+              </div>
+              {open===s.id && (
+                <div style={{background:'#f8f9fc',border:'1px solid var(--line)',borderRadius:8,padding:12,marginTop:8,fontSize:13}}>
+                  <div style={{fontWeight:700,color:'var(--navy)',marginBottom:4,fontSize:11,letterSpacing:'.04em'}}>MESSAGE / SCRIPT</div>
+                  <p style={{margin:0,whiteSpace:'pre-wrap',color:'#4a5168',lineHeight:1.6}}>{s.message}</p>
+                  {s.budget&&<p style={{margin:'8px 0 0',fontSize:12,color:'var(--muted)'}}>Budget : {s.budget}</p>}
+                </div>
+              )}
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:8,flexShrink:0}}>
+              <button className="btn-ghost" style={{fontSize:12,padding:'6px 12px'}} onClick={()=>setOpen(open===s.id?null:s.id)}>
+                {open===s.id?'Réduire':'Voir message'}
+              </button>
+              {s.status!=='done' && (
+                <button className="btn-primary" style={{fontSize:12,padding:'7px 12px'}} disabled={taskBusy}
+                  onClick={()=>createTask(s)}>
+                  📋 Créer tâche
+                </button>
+              )}
+              <select value={s.status||'new'} onChange={e=>updateStatus(s.id,e.target.value)}
+                style={{fontSize:12,padding:'6px 8px',border:'1px solid var(--line)',borderRadius:7,cursor:'pointer'}}>
+                {Object.entries(STATUS_LABELS).map(([k,v])=><option key={k} value={k}>{v}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function AdminPartners({ partners, reload, toast, adminEmail }){
   const [open,setOpen]=useState(null);
+  const [pTab,setPTab]=useState('partners');
   const [filter,setFilter]=useState('all');
 
   const statusInfo=(s)=>PARTNER_STATUSES.find(x=>x.key===s)||{label:s,cls:'ft'};
@@ -1991,8 +2199,19 @@ function AdminPartners({ partners, reload, toast, adminEmail }){
 
   const visible = filter==='all' ? partners : partners.filter(p=>p.status===filter);
 
+  const tabStyle=k=>({padding:'10px 20px',border:'none',borderBottom:pTab===k?'2px solid var(--navy)':'2px solid transparent',
+    background:'none',fontWeight:700,fontSize:14,color:pTab===k?'var(--navy)':'var(--muted)',cursor:'pointer',marginBottom:'-1px'});
+
   return (
     <div>
+      {/* Tab switcher */}
+      <div style={{display:'flex',borderBottom:'1px solid var(--line)',marginBottom:20}}>
+        <button style={tabStyle('partners')} onClick={()=>setPTab('partners')}>🤝 Partenaires</button>
+        <button style={tabStyle('spots')} onClick={()=>setPTab('spots')}>📻 Spots Radio</button>
+      </div>
+
+      {pTab==='spots' && <AdminSpots toast={toast} adminEmail={adminEmail} />}
+      {pTab==='partners' && <>
       {/* KPI bar */}
       <div style={{display:'flex',gap:12,marginBottom:20,flexWrap:'wrap'}}>
         {[{key:'all',label:'Tous',n:counts.all},
@@ -2039,6 +2258,7 @@ function AdminPartners({ partners, reload, toast, adminEmail }){
           }
         </React.Fragment>
       ))}
+      </>}
     </div>
   );
 }
@@ -5131,6 +5351,7 @@ function App(){
 
   // ---------- PARTNER ROUTE ----------
   const isPartner = nav==='Partner';
+  const isSpot = nav==='Spot';
 
   // ---------- PUBLIC SITE ----------
   return (
@@ -5158,6 +5379,7 @@ function App(){
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9aa1b2" strokeWidth="2.4"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.5" y2="16.5"></line></svg>
           <input placeholder="Rechercher" />
         </label>
+        <button className="btn-partner" onClick={()=>navTo('Spot')} style={{background:'var(--red)',marginRight:6}}>📻 Réserver un spot</button>
         <button className="btn-partner" onClick={()=>navTo('Partner')}>Devenir partenaire</button>
         <button className="listen" onClick={()=>{ document.querySelector('.play-btn')?.click(); toast('Connexion au '+STATION_FREQ); }}><span className="dot"></span>Écouter en direct</button>
       </div></header>
@@ -5166,6 +5388,7 @@ function App(){
 
       {nav==='CDM' && !openArticle && <CDMPage articles={data.articles} toast={toast} session={session} />}
       {nav!=='CDM' && (loading ? <Spinner/> :
+        isSpot ? <SpotRequestForm onBack={()=>navTo('Home')} toast={toast} /> :
         isPartner ? <PartnerView onBack={()=>navTo('Home')} toast={toast} /> :
         openArticle ? <div className="wrap"><ArticleView article={openArticle} onBack={()=>setOpenArticle(null)} backLabel={navLabel(nav)} /></div> :
         <div className="wrap">
