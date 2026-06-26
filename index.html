@@ -2988,14 +2988,21 @@ function MonEspace({ session, userPerms, onClose, toast }){
   },[email]);
 
   async function changePassword(){
-    if(!newPw){ toast('Saisissez un mot de passe'); return; }
-    if(newPw!==confirmPw){ toast('Les mots de passe ne correspondent pas'); return; }
+    if(!newPw){ toast('Saisissez un nouveau mot de passe'); return; }
     if(newPw.length<6){ toast('Minimum 6 caractères'); return; }
+    if(newPw!==confirmPw){ toast('Les mots de passe ne correspondent pas'); return; }
     setPwBusy(true);
-    const { error }=await sb.auth.updateUser({password:newPw});
+    const { data, error }=await sb.auth.updateUser({password:newPw});
     setPwBusy(false);
-    if(error){ toast('Erreur : '+error.message); return; }
-    toast('Mot de passe changé ✓'); setNewPw(''); setConfirmPw('');
+    if(error){
+      console.error('changePassword error:', error);
+      if(error.message?.includes('same password')) toast('Choisissez un mot de passe différent');
+      else if(error.message?.includes('weak')) toast('Mot de passe trop faible');
+      else toast('Erreur : '+error.message);
+      return;
+    }
+    console.log('changePassword success:', data);
+    toast('Mot de passe mis à jour ✓'); setNewPw(''); setConfirmPw('');
   }
 
   async function publishAnnouncement(){
