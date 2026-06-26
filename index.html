@@ -755,10 +755,19 @@ function CategoryView({ cat, articles, onOpen, shows }){
               <div className="grid3">
                 {items.map((s,i)=>(
                   <div className="gcard" key={i}>
-                    <div style={{aspectRatio:'16/10',borderRadius:9,overflow:'hidden',background:'repeating-linear-gradient(135deg,#e9ebf2,#e9ebf2 11px,#e3e6ef 11px,#e3e6ef 22px)',display:'flex',alignItems:'center',justifyContent:'center'}}>
-                      {s.image_url
-                        ? <img src={s.image_url} alt={s.name} style={{width:'100%',height:'100%',objectFit:'cover'}} />
-                        : <span style={{fontSize:11,color:'#9aa1b6',fontFamily:'ui-monospace,monospace'}}>[ photo ]</span>}
+                    <div style={{aspectRatio:'16/10',borderRadius:9,overflow:'hidden',background:'repeating-linear-gradient(135deg,#e9ebf2,#e9ebf2 11px,#e3e6ef 11px,#e3e6ef 22px)',display:'flex',alignItems:'center',justifyContent:'center',position:'relative'}}>
+                      {s.link_url
+                        ? <a href={s.link_url} target="_blank" rel="noopener noreferrer" style={{display:'block',width:'100%',height:'100%'}}>
+                            {s.image_url
+                              ? <img src={s.image_url} alt={s.name} style={{width:'100%',height:'100%',objectFit:'cover'}} />
+                              : <span style={{fontSize:11,color:'#9aa1b6',fontFamily:'ui-monospace,monospace'}}>[ photo ]</span>}
+                            <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,0)',transition:'background .2s'}}
+                              onMouseEnter={e=>e.currentTarget.style.background='rgba(0,0,0,.18)'}
+                              onMouseLeave={e=>e.currentTarget.style.background='rgba(0,0,0,0)'} />
+                          </a>
+                        : (s.image_url
+                            ? <img src={s.image_url} alt={s.name} style={{width:'100%',height:'100%',objectFit:'cover'}} />
+                            : <span style={{fontSize:11,color:'#9aa1b6',fontFamily:'ui-monospace,monospace'}}>[ photo ]</span>)}
                     </div>
                     <div className="eyebrow" style={{marginTop:10}}>{s.tag}</div>
                     <h4 style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:700,fontSize:17,lineHeight:1.15,letterSpacing:'-.005em',margin:0,color:'var(--navy)'}}>{s.name}</h4>
@@ -4046,7 +4055,7 @@ const SHOW_GROUPS = [
 ];
 
 function ShowForm({ show, onSave, onCancel, adminEmail, toast }){
-  const [form,setForm]=useState(show||{ name:'', tag:'', schedule:'', description:'', group_title:SHOW_GROUPS[0], image_url:'', sort_order:0 });
+  const [form,setForm]=useState(show||{ name:'', tag:'', schedule:'', description:'', group_title:SHOW_GROUPS[0], image_url:'', link_url:'', sort_order:0 });
   const [file,setFile]=useState(null);
   const [busy,setBusy]=useState(false);
   const set=(k,v)=>setForm(p=>({...p,[k]:v}));
@@ -4099,6 +4108,8 @@ function ShowForm({ show, onSave, onCancel, adminEmail, toast }){
         <input type="file" accept="image/*" onChange={e=>setFile(e.target.files[0]||null)} style={{padding:'9px 0',fontSize:13.5}} />
         {form.image_url&&!file&&<div style={{marginTop:8}}><img src={form.image_url} style={{height:60,borderRadius:6,objectFit:'cover'}} /></div>}
       </div>
+      <div className="field"><label>Lien de l'émission (URL)</label>
+        <input value={form.link_url||''} onChange={e=>set('link_url',e.target.value)} placeholder="https://... (cliquer sur l'image redirige vers ce lien)" /></div>
       <div style={{display:'flex',gap:10,marginTop:4}}>
         <button className="btn-primary" disabled={busy} onClick={save}>{busy?'…':(show?'Enregistrer':'Ajouter')}</button>
         <button className="btn-ghost" onClick={onCancel}>Annuler</button>
@@ -5375,10 +5386,6 @@ function App(){
           <button className={`nav-link cdm-nav-btn${nav==='CDM'?' active':''}`} onClick={()=>navTo('CDM')}>⚽ <span>CDM 2026</span></button>
         </nav>
         <div className="grow"></div>
-        <label className="search">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9aa1b2" strokeWidth="2.4"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.5" y2="16.5"></line></svg>
-          <input placeholder="Rechercher" />
-        </label>
         <button className="btn-partner" onClick={()=>navTo('Spot')} style={{background:'var(--red)',marginRight:6}}>📻 Réserver un spot</button>
         <button className="btn-partner" onClick={()=>navTo('Partner')}>Devenir partenaire</button>
         <button className="listen" onClick={()=>{ document.querySelector('.play-btn')?.click(); toast('Connexion au '+STATION_FREQ); }}><span className="dot"></span>Écouter en direct</button>
