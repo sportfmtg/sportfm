@@ -4464,7 +4464,6 @@ function Admin({ session, onExit, data, reload, toast, userPerms, showProfile })
         {can('can_finance') && <button className={tab==='finance'?'active':''} onClick={()=>setTab('finance')}>💰 Paie</button>}
         {can('can_accounting') && <button className={tab==='accounting'?'active':''} onClick={()=>setTab('accounting')}>📊 Comptabilité</button>}
         {can('can_articles') && <button className={tab==='cdm'?'active':''} onClick={()=>setTab('cdm')}>⚽ CDM</button>}
-        {can('can_broadcast') && <button className={tab==='broadcast'?'active':''} onClick={()=>setTab('broadcast')}>📡 Diffusion</button>}
       </div></div>
       <div className="admin-body"><div className="wrap">
         {tab==='articles' && can('can_articles') && <><AdminArticles articles={data.articles} reload={reload} toast={toast} adminEmail={adminEmail} /><PageJournal section="articles" /></>}
