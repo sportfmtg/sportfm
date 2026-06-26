@@ -1041,6 +1041,7 @@ function recommendPackage({ budget, goals }){
 function SpotRequestForm({ onBack, toast }){
   const [done,setDone]=useState(false);
   const [saving,setSaving]=useState(false);
+  const DAYS=['LUNDI','MARDI','MERCREDI','JEUDI','VENDREDI','SAMEDI','DIMANCHE'];
   const DURATIONS=['30 secondes','60 secondes','90 secondes','2 minutes'];
   const [f,setF]=useState({company:'',contact_name:'',email:'',phone:'',days:[],time_slot:'',duration:'30 secondes',message:'',budget:''});
   const set=(k,v)=>setF(p=>({...p,[k]:v}));
@@ -1100,13 +1101,13 @@ function SpotRequestForm({ onBack, toast }){
         <div className="field" style={{margin:0}}>
           <label>Jour(s) de diffusion souhaité(s) *</label>
           <div style={{display:'flex',flexWrap:'wrap',gap:8,marginTop:6}}>
-            {BROADCAST_DAYS.map(d=>(
-              <button key={d.key} type="button" onClick={()=>toggleDay(d.key)} style={{
+            {DAYS.map(d=>(
+              <button key={d} type="button" onClick={()=>toggleDay(d)} style={{
                 padding:'7px 14px',borderRadius:8,fontSize:13,fontWeight:700,cursor:'pointer',border:'2px solid',
-                borderColor:f.days.includes(d.key)?'var(--navy)':'var(--line)',
-                background:f.days.includes(d.key)?'var(--navy)':'#fff',
-                color:f.days.includes(d.key)?'#fff':'#4a5168'}}>
-                {d.key}
+                borderColor:f.days.includes(d)?'var(--navy)':'var(--line)',
+                background:f.days.includes(d)?'var(--navy)':'#fff',
+                color:f.days.includes(d)?'#fff':'#4a5168'}}>
+                {d}
               </button>
             ))}
           </div>
