@@ -3712,9 +3712,11 @@ function AdminUsers({ adminEmail, toast }){
 // ============================================================
 const ENTRY_CATEGORIES = {
   AR: ['Publicité radio','Partenariat sponsoring','Abonnement numérique','Prestation événement','Don / Subvention','Autre recette','Couverture médiatique','Émission','Communiqué','Passage d\'album','Commission Radio','Site web','Digital'],
-  AP: ['Salaires & charges','Loyer & charges locatives','Équipement technique','Marketing & impression','Logiciels & abonnements','Déplacement & transport','Eau','Électricité','Internet','Sous-traitance','Impôts & taxes','Reportage journaliste','Autre dépense'],
+  AP: ['Salaires & charges','Loyer & charges locatives','Équipement technique','Marketing & impression','Logiciels & abonnements','Déplacement & transport','Eau','Électricité','Internet','Sous-traitance','Impôts & taxes','Reportage journaliste','Redevance','Reportages','Avance','Commissions','Versement','Autre dépense'],
 };
 const ENTRY_STATUSES = ['En attente','Payé','Partiel','En retard','Annulé'];
+const PAYMENT_METHODS = ['Espèces','Chèque','Virement','Mobile Money'];
+const PM_ICONS = {'Espèces':'💵','Chèque':'🧾','Virement':'🏦','Mobile Money':'📱'};
 const STATUS_COLORS  = {'En attente':'#9a6a00','Payé':'#1f7a48','Partiel':'#2a5bd0','En retard':'#c0392b','Annulé':'#888'};
 const STATUS_BG      = {'En attente':'#fff4e0','Payé':'#e3f6ea','Partiel':'#e7eefc','En retard':'#fce8e8','Annulé':'#f0f0f0'};
 const MONTHS_FR = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
@@ -3785,10 +3787,21 @@ function EntryForm({ entry, onSave, onCancel, adminEmail, toast }){
       </div>
 
       <div className="grid2">
+        <div className="field"><label>Mode de paiement</label>
+          <select value={form.payment_method||''} onChange={e=>set('payment_method',e.target.value)}>
+            <option value="">— Non précisé —</option>
+            {PAYMENT_METHODS.map(m=><option key={m} value={m}>{PM_ICONS[m]} {m}</option>)}
+          </select>
+          {form.payment_method==='Espèces' && <div className="hint" style={{color:'#2a5bd0'}}>💵 Une fois « Payé », ce montant sera comptabilisé dans la caisse.</div>}
+        </div>
         <div className="field"><label>Date *</label>
           <input type="date" value={form.date} onChange={e=>set('date',e.target.value)} /></div>
+      </div>
+
+      <div className="grid2">
         <div className="field"><label>Date d'échéance <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label>
           <input type="date" value={form.due_date||''} onChange={e=>set('due_date',e.target.value)} /></div>
+        <div />
       </div>
 
       <div className="grid2">
@@ -3886,12 +3899,31 @@ function AdminAccounting({ adminEmail, toast }){
   const [filterYear,setFilterYear]=useState(String(new Date().getFullYear()));
   const [filterCategory,setFilterCategory]=useState('all');
   const [filterParty,setFilterParty]=useState('');
+  const [tf,setTf]=useState({dir:'Transfert vers caisse',amount:'',date:new Date().toISOString().slice(0,10),label:''});
+  const [tfBusy,setTfBusy]=useState(false);
 
   async function load(){
     const { data }=await sb.from('accounting_entries').select('*').order('date',{ascending:false});
     setEntries(data||[]); setLoading(false);
   }
   useEffect(()=>{ load(); },[]);
+
+  async function saveTransfer(){
+    if(!tf.amount||isNaN(Number(tf.amount))||Number(tf.amount)<=0){ toast('Montant invalide'); return; }
+    if(!tf.date){ toast('Date requise'); return; }
+    setTfBusy(true);
+    const label = tf.label.trim() || (tf.dir==='Transfert vers caisse'?'Approvisionnement caisse':'Dépôt en banque');
+    const { error }=await sb.from('accounting_entries').insert([{
+      type:'TRANSFER', category:tf.dir, label, amount:Number(tf.amount), date:tf.date,
+      status:'Payé', payment_method:'Espèces', created_by:adminEmail
+    }]);
+    setTfBusy(false);
+    if(error){ toast('Erreur : '+error.message); return; }
+    await logAction(adminEmail,'Transfert caisse',`${tf.dir} — ${fmtFCFA(tf.amount)}`);
+    toast('Transfert enregistré ✓');
+    setTf({dir:'Transfert vers caisse',amount:'',date:new Date().toISOString().slice(0,10),label:''});
+    load();
+  }
 
   async function deleteEntry(id,label){
     if(!confirm(`Supprimer "${label}" ?`)) return;
@@ -3915,6 +3947,23 @@ function AdminAccounting({ adminEmail, toast }){
   const pendingAR = entries.filter(e=>e.type==='AR'&&e.status==='En attente').reduce((s,e)=>s+Number(e.amount||0),0);
   const pendingAP = entries.filter(e=>e.type==='AP'&&e.status==='En attente').reduce((s,e)=>s+Number(e.amount||0),0);
   const overdueAP = entries.filter(e=>e.type==='AP'&&e.status==='En retard').reduce((s,e)=>s+Number(e.amount||0),0);
+
+  // ---- Caisse (petty cash): cash entries marked Payé + manual transfers ----
+  const caisseMovs = entries.filter(e=>
+    e.type==='TRANSFER' ||
+    ((e.type==='AR'||e.type==='AP') && e.payment_method==='Espèces' && e.status==='Payé')
+  ).sort((a,b)=> a.date===b.date ? String(a.created_at||'').localeCompare(String(b.created_at||'')) : (a.date<b.date?-1:1));
+  let _run=0;
+  const caisseLedger = caisseMovs.map(e=>{
+    const inflow = e.type==='AR' || (e.type==='TRANSFER' && e.category==='Transfert vers caisse');
+    _run += (inflow?1:-1)*Number(e.amount||0);
+    return {...e, _in:inflow, _bal:_run};
+  });
+  const caisseBalance = _run;
+  const cashIn  = caisseLedger.filter(e=>e.type==='AR').reduce((s,e)=>s+Number(e.amount||0),0);
+  const cashOut = caisseLedger.filter(e=>e.type==='AP').reduce((s,e)=>s+Number(e.amount||0),0);
+  const tfIn  = caisseLedger.filter(e=>e.type==='TRANSFER'&&e._in).reduce((s,e)=>s+Number(e.amount||0),0);
+  const tfOut = caisseLedger.filter(e=>e.type==='TRANSFER'&&!e._in).reduce((s,e)=>s+Number(e.amount||0),0);
 
   // Monthly AR/AP for current year (chart)
   const monthlyData = Array.from({length:12},(_,m)=>({
@@ -3947,7 +3996,7 @@ function AdminAccounting({ adminEmail, toast }){
     <div>
       {/* Sub-tabs */}
       <div style={{display:'flex',gap:0,marginBottom:24,borderBottom:'2px solid var(--line)'}}>
-        {[{k:'dashboard',l:'📊 Tableau de bord'},{k:'ar',l:'💚 Recettes (AR)'},{k:'ap',l:'🔴 Dépenses (AP)'}].map(t=>(
+        {[{k:'dashboard',l:'📊 Tableau de bord'},{k:'ar',l:'💚 Recettes (AR)'},{k:'ap',l:'🔴 Dépenses (AP)'},{k:'caisse',l:'💵 Caisse'}].map(t=>(
           <button key={t.k} onClick={()=>setTab(t.k)}
             style={{padding:'10px 20px',border:'none',borderBottom:tab===t.k?'2px solid var(--navy)':'2px solid transparent',
               background:'none',fontWeight:700,fontSize:13.5,color:tab===t.k?'var(--navy)':'var(--muted)',cursor:'pointer',marginBottom:'-2px'}}>
@@ -3967,6 +4016,7 @@ function AdminAccounting({ adminEmail, toast }){
               {l:'Recettes YTD',     n:totalAR,  c:'#1f7a48', bg:'#e3f6ea', sign:'+'},
               {l:'Dépenses YTD',     n:totalAP,  c:'#c0392b', bg:'#fce8e8', sign:'-'},
               {l:'Résultat net',     n:net,       c:net>=0?'#1f7a48':'#c0392b', bg:net>=0?'#e3f6ea':'#fce8e8', sign:net>=0?'+':'-'},
+              {l:'Caisse (espèces)', n:caisseBalance, c:caisseBalance>=0?'#2a5bd0':'#c0392b', bg:'#e7eefc', sign:''},
               {l:'AR en attente',    n:pendingAR, c:'#9a6a00', bg:'#fff4e0', sign:''},
               {l:'AP en attente',    n:pendingAP, c:'#9a6a00', bg:'#fff4e0', sign:''},
               {l:'AP en retard',     n:overdueAP, c:'#c0392b', bg:'#fce8e8', sign:'⚠'},
@@ -4049,10 +4099,12 @@ function AdminAccounting({ adminEmail, toast }){
               {entries.slice(0,8).map(e=>(
                 <tr key={e.id}>
                   <td style={{fontSize:12.5,color:'var(--muted)'}}>{e.date}</td>
-                  <td><span style={{fontSize:11,fontWeight:800,padding:'2px 8px',borderRadius:20,background:e.type==='AR'?'#e3f6ea':'#fce8e8',color:e.type==='AR'?'#1f7a48':'#c0392b'}}>{e.type}</span></td>
-                  <td style={{fontSize:12.5}}>{e.category||'—'}</td>
+                  <td><span style={{fontSize:11,fontWeight:800,padding:'2px 8px',borderRadius:20,
+                    background:e.type==='AR'?'#e3f6ea':e.type==='AP'?'#fce8e8':'#e7eefc',
+                    color:e.type==='AR'?'#1f7a48':e.type==='AP'?'#c0392b':'#2a5bd0'}}>{e.type==='TRANSFER'?'↔ CAISSE':e.type}</span></td>
+                  <td style={{fontSize:12.5}}>{e.category||'—'}{e.payment_method&&<div style={{fontSize:11,color:'var(--muted)'}}>{PM_ICONS[e.payment_method]} {e.payment_method}</div>}</td>
                   <td style={{fontWeight:600,fontSize:13}}>{e.label}</td>
-                  <td style={{fontWeight:700,color:e.type==='AR'?'#1f7a48':'#c0392b'}}>{Number(e.amount).toLocaleString('fr-FR')} FCFA</td>
+                  <td style={{fontWeight:700,color:e.type==='AR'?'#1f7a48':e.type==='AP'?'#c0392b':'#2a5bd0'}}>{Number(e.amount).toLocaleString('fr-FR')} FCFA</td>
                   <td><span style={{fontSize:11,fontWeight:700,padding:'2px 9px',borderRadius:20,background:STATUS_BG[e.status]||'#f0f0f0',color:STATUS_COLORS[e.status]||'#888'}}>{e.status}</span></td>
                   <td style={{textAlign:'right',paddingRight:16}}>
                     <button className="icon-btn" onClick={()=>setEditing(e)}>Modifier</button>
@@ -4061,6 +4113,86 @@ function AdminAccounting({ adminEmail, toast }){
                 </tr>
               ))}
             </tbody></table>
+          </div>
+        </div>
+      ) : tab==='caisse' ? (
+        /* ===== CAISSE (petty cash) ===== */
+        <div>
+          {/* KPI row */}
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:12,marginBottom:24}}>
+            {[
+              {l:'Solde caisse',      n:caisseBalance, c:caisseBalance>=0?'#2a5bd0':'#c0392b', bg:'#e7eefc'},
+              {l:'Entrées espèces',   n:cashIn,  c:'#1f7a48', bg:'#e3f6ea'},
+              {l:'Sorties espèces',   n:cashOut, c:'#c0392b', bg:'#fce8e8'},
+              {l:'Transferts reçus',  n:tfIn,    c:'#9a6a00', bg:'#fff4e0'},
+              {l:'Transferts sortis', n:tfOut,   c:'#9a6a00', bg:'#fff4e0'},
+            ].map((k,i)=>(
+              <div key={i} style={{background:k.bg,border:`1px solid ${k.c}22`,borderRadius:10,padding:'14px 16px'}}>
+                <div style={{fontSize:10.5,fontWeight:700,letterSpacing:'.05em',color:k.c,opacity:.8,marginBottom:4}}>{k.l.toUpperCase()}</div>
+                <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:22,color:k.c,lineHeight:1}}>{Number(k.n).toLocaleString('fr-FR')}</div>
+                <div style={{fontSize:10,color:k.c,opacity:.7,marginTop:2}}>FCFA</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Transfer form */}
+          <div className="panel" style={{marginBottom:20}}>
+            <div style={{fontWeight:700,fontSize:14,color:'var(--navy)',marginBottom:12}}>↔ Nouveau transfert de fonds</div>
+            <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end'}}>
+              <div className="field" style={{margin:0,minWidth:220,flex:1}}>
+                <label>Direction</label>
+                <select value={tf.dir} onChange={e=>setTf(p=>({...p,dir:e.target.value}))}>
+                  <option value="Transfert vers caisse">⬇ Vers la caisse (approvisionnement)</option>
+                  <option value="Transfert vers banque">⬆ De la caisse vers la banque (dépôt)</option>
+                </select>
+              </div>
+              <div className="field" style={{margin:0,width:150}}>
+                <label>Montant (FCFA)</label>
+                <input type="number" min="0" value={tf.amount} onChange={e=>setTf(p=>({...p,amount:e.target.value}))} placeholder="0" />
+              </div>
+              <div className="field" style={{margin:0,width:160}}>
+                <label>Date</label>
+                <input type="date" value={tf.date} onChange={e=>setTf(p=>({...p,date:e.target.value}))} />
+              </div>
+              <div className="field" style={{margin:0,minWidth:200,flex:1}}>
+                <label>Libellé <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label>
+                <input value={tf.label} onChange={e=>setTf(p=>({...p,label:e.target.value}))} placeholder="Ex : Retrait banque pour caisse" />
+              </div>
+              <button className="btn-primary" disabled={tfBusy} onClick={saveTransfer} style={{marginBottom:0}}>
+                {tfBusy?'…':'Enregistrer'}
+              </button>
+            </div>
+            <div className="hint" style={{marginTop:8}}>💡 Les recettes et dépenses payées en espèces alimentent automatiquement la caisse — utilisez ce formulaire uniquement pour les mouvements banque ↔ caisse.</div>
+          </div>
+
+          {/* Ledger with running balance */}
+          <div className="panel" style={{padding:0,overflow:'hidden'}}>
+            <div style={{padding:'14px 18px',fontWeight:700,fontSize:14,color:'var(--navy)',borderBottom:'1px solid var(--line)'}}>Mouvements de caisse</div>
+            {caisseLedger.length===0 ? <div className="empty" style={{padding:24}}>Aucun mouvement de caisse. Les écritures payées en espèces apparaîtront ici.</div> : (
+              <table className="admin-table"><thead><tr>
+                <th style={{paddingLeft:16}}>Date</th><th>Type</th><th>Libellé</th>
+                <th style={{textAlign:'right'}}>Entrée</th><th style={{textAlign:'right'}}>Sortie</th>
+                <th style={{textAlign:'right'}}>Solde</th><th style={{textAlign:'right',paddingRight:16}}></th>
+              </tr></thead><tbody>
+                {[...caisseLedger].reverse().map(e=>(
+                  <tr key={e.id}>
+                    <td style={{paddingLeft:16,fontSize:12.5,color:'var(--muted)'}}>{e.date}</td>
+                    <td><span style={{fontSize:11,fontWeight:800,padding:'2px 8px',borderRadius:20,
+                      background:e.type==='AR'?'#e3f6ea':e.type==='AP'?'#fce8e8':'#e7eefc',
+                      color:e.type==='AR'?'#1f7a48':e.type==='AP'?'#c0392b':'#2a5bd0'}}>
+                      {e.type==='AR'?'💚 Recette':e.type==='AP'?'🔴 Dépense':e._in?'⬇ Transfert':'⬆ Transfert'}
+                    </span></td>
+                    <td style={{fontWeight:600,fontSize:13}}>{e.label}{e.category&&e.type!=='TRANSFER'&&<div style={{fontSize:11,color:'var(--muted)',fontWeight:400}}>{e.category}</div>}</td>
+                    <td style={{textAlign:'right',fontWeight:700,color:'#1f7a48'}}>{e._in?Number(e.amount).toLocaleString('fr-FR'):''}</td>
+                    <td style={{textAlign:'right',fontWeight:700,color:'#c0392b'}}>{!e._in?Number(e.amount).toLocaleString('fr-FR'):''}</td>
+                    <td style={{textAlign:'right',fontWeight:800,color:e._bal>=0?'var(--navy)':'#c0392b'}}>{Number(e._bal).toLocaleString('fr-FR')}</td>
+                    <td style={{textAlign:'right',paddingRight:16}}>
+                      {e.type==='TRANSFER' && <button className="icon-btn del" onClick={()=>deleteEntry(e.id,e.label)}>✕</button>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody></table>
+            )}
           </div>
         </div>
       ) : (
@@ -4118,6 +4250,7 @@ function AdminAccounting({ adminEmail, toast }){
                         <td style={{fontWeight:600}}>
                           {overdue&&<span style={{color:'#c0392b',marginRight:5,fontSize:12}}>⚠</span>}
                           {e.label}
+                          {e.payment_method&&<div style={{fontSize:11,color:e.payment_method==='Espèces'?'#2a5bd0':'var(--muted)',fontWeight:600}}>{PM_ICONS[e.payment_method]} {e.payment_method}</div>}
                           {e.party_name&&<div style={{fontSize:11,color:'#2a5bd0',fontWeight:600}}>👤 {e.party_name}</div>}
                           {e.notes&&<div style={{fontSize:11,color:'var(--muted)',fontWeight:400}}>{e.notes}</div>}
                         </td>
