@@ -5490,7 +5490,7 @@ function CDMPage({ articles, toast, session }){
               <h2 style={{fontSize:16}}>📰 Actualités CDM</h2><div className="line"></div>
             </div>
             <div className="grid3">
-              {cdmArticles.map(a=>(
+              {cdmArticles.slice(0,12).map(a=>(
                 <article key={a.id} className="gcard" style={{cursor:'pointer'}}>
                   <div className={imgCls(a)} style={{...imgStyle(a), position:'relative'}}>
                     <span style={{position:'absolute',top:10,left:10,background:'#c8102e',color:'#fff',fontWeight:800,fontSize:10,letterSpacing:'.07em',padding:'4px 9px',borderRadius:5}}>CDM 2026</span>
