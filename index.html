@@ -855,8 +855,9 @@ function CategoryView({ cat, articles, onOpen, shows }){
     if(cdmCats.includes(cat_lc)) return false;
     // If article has no category set, include on both Football & Basket
     if(!a.category) return true;
-    // Match by category
-    if(cat==='Football') return cat_lc==='football' || (a.tags||[]).some(t=>t.toLowerCase()==='football');
+    // Match by category — Football includes all football competitions (except CDM, which has its own page)
+    const footCats=['football','foot féminin','foot feminin','ldc','ligue des champions','europa league','conférence league','conference league','euro','ligue des nations','cdm clubs','can','ldc caf','coupe caf','uemoa','ufoa'];
+    if(cat==='Football') return footCats.includes(cat_lc) || (a.tags||[]).some(t=>t.toLowerCase()==='football');
     if(cat==='Basketball') return cat_lc==='basketball' || cat_lc==='basket' || (a.tags||[]).some(t=>['basketball','basket'].includes(t.toLowerCase()));
     return a.category===cat;
   });
@@ -902,47 +903,92 @@ function StandingsView({ standings }){
   );
 }
 
+// Two-tier article categories: Tier 1 tabs → Tier 2 sub-filter chips.
+// `match` lists the (lowercased) category values stored on articles.
+const ARTICLE_TREE = [
+  { key:'Football', subs:[
+    { label:'Football', match:['football'] },
+    { label:'Foot Féminin', match:['foot féminin','foot feminin'] },
+  ]},
+  { key:'International', subs:[
+    { label:'CDM', match:['cdm','coupe du monde','world cup'] },
+    { label:'LDC', match:['ldc','ligue des champions'] },
+    { label:'Europa League', match:['europa league'] },
+    { label:'Conférence League', match:['conférence league','conference league'] },
+    { label:'Euro', match:['euro'] },
+    { label:'Ligue des Nations', match:['ligue des nations'] },
+    { label:'CDM Clubs', match:['cdm clubs','coupe du monde des clubs'] },
+    { label:'JO', match:['jo','jeux olympiques'] },
+  ]},
+  { key:'Afrique', subs:[
+    { label:'CAN', match:['can'] },
+    { label:'LDC CAF', match:['ldc caf'] },
+    { label:'Coupe CAF', match:['coupe caf'] },
+    { label:'UEMOA', match:['uemoa'] },
+    { label:'UFOA', match:['ufoa'] },
+  ]},
+  { key:'Autres Sports', subs:[
+    { label:'Basket', match:['basketball','basket'] },
+    { label:'Handball', match:['handball'] },
+    { label:'Tennis', match:['tennis'] },
+    { label:'Moto GP', match:['moto gp','motogp'] },
+    { label:'Volley', match:['volley','volley-ball'] },
+    { label:'Athlétisme', match:['athlétisme','athletisme'] },
+  ]},
+  { key:'Émissions', subs:[
+    { label:'Émissions', match:['shows','émissions','emissions'] },
+  ]},
+  { key:'Actu', subs:[
+    { label:'Actu', match:['actu',''] },
+  ]},
+];
+
+// Returns { tier, sub } for an article; unknown categories fall into 'Autre'.
+function classifyArticle(a){
+  const c=(a.category||'').toLowerCase();
+  for(const node of ARTICLE_TREE){
+    for(const s of node.subs){ if(s.match.includes(c)) return { tier:node.key, sub:s.label }; }
+  }
+  return { tier:'Autre', sub:null };
+}
+
 function ArticlesPage({ articles, onOpen }){
   const [activeCat, setActiveCat] = useState('Tout');
-  const cdmCats = ['cdm','coupe du monde','world cup'];
+  const [activeSub, setActiveSub] = useState(null);
 
-  const filtered = (articles||[]).filter(a=>{
-    if(!a.published) return false;
+  const published = (articles||[]).filter(a=>a.published);
+
+  const tierCount = (key) => key==='Tout' ? published.length
+    : published.filter(a=>classifyArticle(a).tier===key).length;
+  const subCount = (tier,label) =>
+    published.filter(a=>{ const cl=classifyArticle(a); return cl.tier===tier && cl.sub===label; }).length;
+
+  const cats = ['Tout', ...ARTICLE_TREE.map(n=>n.key), 'Autre'];
+  const activeNode = ARTICLE_TREE.find(n=>n.key===activeCat);
+  // Chip row only when the active tab has several sub-categories
+  const visibleSubs = activeNode && activeNode.subs.length>1
+    ? activeNode.subs.filter(s=>subCount(activeCat,s.label)>0) : [];
+
+  const filtered = published.filter(a=>{
     if(activeCat==='Tout') return true;
-    const c = (a.category||'').toLowerCase();
-    if(activeCat==='CDM')      return cdmCats.includes(c);
-    if(activeCat==='Football') return c==='football';
-    if(activeCat==='Basket')   return c==='basketball'||c==='basket';
-    if(activeCat==='Actu')     return c==='actu'||c===''||!a.category;
-    if(activeCat==='Émissions')return c==='shows'||c==='émissions'||c==='emissions';
-    return c!=='football'&&c!=='basketball'&&c!=='basket'&&!cdmCats.includes(c)&&c!=='shows'&&c!=='émissions';
+    const cl = classifyArticle(a);
+    if(cl.tier!==activeCat) return false;
+    if(activeSub && cl.sub!==activeSub) return false;
+    return true;
   });
 
-  const cats = ['Tout','Football','Basket','Actu','CDM','Émissions','Autre'];
-  const catCount = (cat) => {
-    if(cat==='Tout') return (articles||[]).filter(a=>a.published).length;
-    return (articles||[]).filter(a=>{
-      if(!a.published) return false;
-      const c=(a.category||'').toLowerCase();
-      if(cat==='CDM') return cdmCats.includes(c);
-      if(cat==='Football') return c==='football';
-      if(cat==='Basket') return c==='basketball'||c==='basket';
-      if(cat==='Actu') return c==='actu'||c===''||!a.category;
-      if(cat==='Émissions') return c==='shows'||c==='émissions'||c==='emissions';
-      return c!=='football'&&c!=='basketball'&&c!=='basket'&&!cdmCats.includes(c)&&c!=='shows'&&c!=='émissions';
-    }).length;
-  };
+  const pickTab = (cat) => { setActiveCat(cat); setActiveSub(null); };
 
   return (
     <div>
-      {/* Category filter tabs */}
-      <div style={{borderBottom:'1px solid var(--line)',marginBottom:28,overflowX:'auto'}}>
+      {/* Tier 1 — category tabs */}
+      <div style={{borderBottom:'1px solid var(--line)',marginBottom:visibleSubs.length>1?0:28,overflowX:'auto'}}>
         <div style={{display:'flex',gap:0,minWidth:'max-content'}}>
           {cats.map(cat=>{
-            const count = catCount(cat);
+            const count = tierCount(cat);
             if(count===0 && cat!=='Tout') return null;
             return (
-              <button key={cat} onClick={()=>setActiveCat(cat)}
+              <button key={cat} onClick={()=>pickTab(cat)}
                 style={{padding:'12px 18px',border:'none',background:'none',cursor:'pointer',fontWeight:activeCat===cat?800:500,
                   fontSize:14,color:activeCat===cat?'var(--navy)':'var(--muted)',
                   borderBottom:activeCat===cat?'3px solid var(--navy)':'3px solid transparent',
@@ -957,6 +1003,27 @@ function ArticlesPage({ articles, onOpen }){
           })}
         </div>
       </div>
+
+      {/* Tier 2 — sub-filter chips */}
+      {visibleSubs.length>1 && (
+        <div style={{display:'flex',gap:8,overflowX:'auto',padding:'14px 0',marginBottom:14}}>
+          {[null,...visibleSubs.map(s=>s.label)].map(label=>{
+            const active = activeSub===label;
+            const count = label ? subCount(activeCat,label) : tierCount(activeCat);
+            return (
+              <button key={label||'__all'} onClick={()=>setActiveSub(label)}
+                style={{background:active?'var(--navy)':'#fff',color:active?'#fff':'#3a3f4a',
+                  border:active?'1px solid var(--navy)':'1px solid var(--line)',
+                  borderRadius:999,padding:'7px 14px',fontSize:13.5,fontWeight:600,cursor:'pointer',
+                  whiteSpace:'nowrap',display:'flex',alignItems:'center',gap:6,transition:'all .15s'}}>
+                {label||'Tous'}
+                <span style={{fontSize:11,fontWeight:700,color:active?'var(--navy)':'var(--muted)',
+                  background:active?'#fff':'#eef0f3',borderRadius:999,padding:'1px 6px'}}>{count}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Results */}
       {filtered.length===0 ? (
@@ -1797,7 +1864,38 @@ function ArticleEditor({ initial, onSave, onCancel, toast }){
         <div className="field"><label>Étiquette (sur-titre)</label><input value={a.tag} onChange={e=>set('tag',e.target.value)} placeholder="COMPTE-RENDU" /></div>
         <div className="field"><label>Catégorie</label>
           <select value={a.category} onChange={e=>set('category',e.target.value)}>
-            <option value="Football">Football</option><option value="Basketball">Basket</option><option value="Shows">Émissions</option></select></div>
+            <optgroup label="Football">
+              <option value="Football">Football</option>
+              <option value="Foot Féminin">Foot Féminin</option>
+            </optgroup>
+            <optgroup label="International">
+              <option value="CDM">Coupe du Monde</option>
+              <option value="LDC">Ligue des Champions</option>
+              <option value="Europa League">Europa League</option>
+              <option value="Conférence League">Conférence League</option>
+              <option value="Euro">Euro</option>
+              <option value="Ligue des Nations">Ligue des Nations</option>
+              <option value="CDM Clubs">CDM Clubs</option>
+              <option value="JO">Jeux Olympiques</option>
+            </optgroup>
+            <optgroup label="Afrique">
+              <option value="CAN">CAN</option>
+              <option value="LDC CAF">LDC CAF</option>
+              <option value="Coupe CAF">Coupe CAF</option>
+              <option value="UEMOA">UEMOA</option>
+              <option value="UFOA">UFOA</option>
+            </optgroup>
+            <optgroup label="Autres Sports">
+              <option value="Basketball">Basket</option>
+              <option value="Handball">Handball</option>
+              <option value="Tennis">Tennis</option>
+              <option value="Moto GP">Moto GP</option>
+              <option value="Volley">Volley-ball</option>
+              <option value="Athlétisme">Athlétisme</option>
+            </optgroup>
+            <option value="Shows">Émissions</option>
+            <option value="Actu">Actu</option>
+          </select></div>
       </div>
       <div className="field"><label>Chapô (résumé)</label><textarea style={{minHeight:60}} value={a.dek} onChange={e=>set('dek',e.target.value)} /></div>
       <div className="field"><label>Contenu</label><textarea style={{minHeight:200}} value={a.body} onChange={e=>set('body',e.target.value)} placeholder="Rédigez l'article. Laissez une ligne vide entre les paragraphes." /><div className="hint">Séparez les paragraphes par une ligne vide.</div></div>
