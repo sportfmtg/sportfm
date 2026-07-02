@@ -535,6 +535,26 @@ const STATION_HOSTS = "Radio · Web · Réseaux sociaux";
 const STATION_FREQ  = "91.9 FM";
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+// Articles are numerous (3000+ imported from the old site): load metadata only,
+// paged past Supabase's 1000-row cap; bodies are fetched on demand.
+const ART_META_COLS = 'id,title,tag,category,dek,author,read_time,image_url,is_hero,published,created_at,updated_at';
+async function fetchArticlesMeta(publishedOnly){
+  let all=[], off=0;
+  for(;;){
+    let q = sb.from('articles').select(ART_META_COLS).order('created_at',{ascending:false}).range(off, off+999);
+    if(publishedOnly) q = q.eq('published', true);
+    const { data } = await q;
+    all = all.concat(data||[]);
+    if(!data || data.length<1000) break;
+    off += 1000;
+  }
+  return all;
+}
+async function fetchArticleBody(id){
+  const { data } = await sb.from('articles').select('body').eq('id', id).single();
+  return data?.body || '';
+}
 const crests = ['#0B245E','#10307a','#3a4a6b','#5a3b8a','#1f6b4a','#7a4a1f','#444c5e','#6b1f3a'];
 const NAVS = [
   { key:'Home',      label:'Accueil' },
@@ -1963,7 +1983,7 @@ function AdminArticles({ articles, reload, toast, adminEmail }){
             <td><span className={"pill "+(a.published?'pub':'draft')}>{a.published?'Publié':'Brouillon'}</span></td>
             <td style={{color:'var(--muted)'}}>{timeAgo(a.updated_at||a.created_at)}</td>
             <td style={{textAlign:'right',whiteSpace:'nowrap'}}>
-              <button className="icon-btn" onClick={()=>setEditing(a)}>Modifier</button>
+              <button className="icon-btn" onClick={async()=>setEditing(a.body!==undefined?a:{...a, body:await fetchArticleBody(a.id)})}>Modifier</button>
               <button className="icon-btn del" onClick={()=>del(a)}>Supprimer</button>
             </td>
           </tr>
@@ -3274,7 +3294,7 @@ function AdminCDM({ articles, reload, toast, adminEmail }){
                   <td><span className={"pill "+(a.published?'pub':'draft')}>{a.published?'Publié':'Brouillon'}</span></td>
                   <td style={{color:'var(--muted)'}}>{timeAgo(a.updated_at||a.created_at)}</td>
                   <td style={{textAlign:'right',whiteSpace:'nowrap'}}>
-                    <button className="icon-btn" onClick={()=>setEditingCdm(a)}>Modifier</button>
+                    <button className="icon-btn" onClick={async()=>setEditingCdm(a.body!==undefined?a:{...a, body:await fetchArticleBody(a.id)})}>Modifier</button>
                     <button className="icon-btn del" onClick={()=>deleteCdmArticle(a)}>Supprimer</button>
                   </td>
                 </tr>
@@ -5524,7 +5544,7 @@ function App(){
 
   const loadPublic = useCallback(async ()=>{
     const [art,st,sc,fx,ads,sh]=await Promise.all([
-      sb.from('articles').select('*').eq('published',true).order('created_at',{ascending:false}),
+      fetchArticlesMeta(true),
       sb.from('standings').select('*'),
       sb.from('scores').select('*').order('created_at',{ascending:false}),
       sb.from('fixtures').select('*'),
@@ -5532,14 +5552,14 @@ function App(){
       sb.from('shows').select('*').order('sort_order',{ascending:true}),
     ]);
     setData(d=>({ ...d,
-      articles:art.data||[], standings:st.data||[], scores:sc.data||[],
+      articles:art, standings:st.data||[], scores:sc.data||[],
       fixtures:fx.data||[], ads:ads.data||[], shows:sh.data||[] }));
     setLoading(false);
   },[]);
 
   const loadAdmin = useCallback(async ()=>{
     const [art,st,sc,fx,pt,ads,sh]=await Promise.all([
-      sb.from('articles').select('*').order('created_at',{ascending:false}),
+      fetchArticlesMeta(false),
       sb.from('standings').select('*'),
       sb.from('scores').select('*').order('created_at',{ascending:false}),
       sb.from('fixtures').select('*'),
@@ -5547,7 +5567,7 @@ function App(){
       sb.from('ads').select('*').order('sort_order',{ascending:true}),
       sb.from('shows').select('*').order('sort_order',{ascending:true}),
     ]);
-    setData({ articles:art.data||[], standings:st.data||[], scores:sc.data||[],
+    setData({ articles:art, standings:st.data||[], scores:sc.data||[],
       fixtures:fx.data||[], partners:pt.data||[], ads:ads.data||[], shows:sh.data||[] });
   },[]);
 
@@ -5582,7 +5602,16 @@ function App(){
   const goSite=()=>{ location.hash=''; setRoute('site'); };
 
   function navTo(n){ setNav(n); setOpenArticle(null); setDrawer(false); window.scrollTo({top:0,behavior:'smooth'}); }
-  function open(a){ setOpenArticle(a); window.scrollTo({top:0,behavior:'smooth'}); }
+  async function open(a){
+    if(a && a.body===undefined){
+      setOpenArticle({...a, body:''});
+      window.scrollTo({top:0,behavior:'smooth'});
+      const body = await fetchArticleBody(a.id);
+      setOpenArticle(prev=>prev&&prev.id===a.id ? {...prev, body} : prev);
+      return;
+    }
+    setOpenArticle(a); window.scrollTo({top:0,behavior:'smooth'});
+  }
 
   // ---------- ADMIN ROUTE ----------
   if(route==='admin'){
