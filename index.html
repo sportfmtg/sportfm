@@ -3576,6 +3576,7 @@ const MODULES = [
   { key:'can_logs',       label:'Journal global' },
   { key:'can_announcements', label:'Annonces' },
   { key:'can_broadcast',    label:'Planning Diffusion' },
+  { key:'can_manager',      label:'Manager (Évaluations)' },
 ];
 
 function PermCheckboxes({ perms, onChange }){
@@ -4457,6 +4458,7 @@ const PAGE_LOG_KEYWORDS = {
   finance:    ['fiche','employé','paie'],
   accounting: ['écriture','comptab','recette','dépense','ap','ar'],
   users:      ['utilisateur','accès','rôle','retiré','ajouté'],
+  manager:    ['évalu'],
   logs:       [],
 };
 
@@ -4701,6 +4703,235 @@ function AdminBroadcast({ adminEmail, toast, isAdmin }){
   );
 }
 
+// ============================================================
+//  MANAGER — PERFORMANCE EVALUATIONS
+// ============================================================
+function StarPicker({ label, value, onChange }){
+  return (
+    <div style={{display:'flex',alignItems:'center',gap:10}}>
+      <span style={{fontSize:13,fontWeight:600,width:110,color:'var(--navy)'}}>{label}</span>
+      <div style={{display:'flex',gap:2}}>
+        {[1,2,3,4,5].map(n=>(
+          <button key={n} type="button" onClick={()=>onChange(n)}
+            style={{background:'none',border:'none',cursor:'pointer',fontSize:22,padding:'0 1px',
+              filter:n<=value?'none':'grayscale(1) opacity(.3)',transition:'filter .1s'}}>⭐</button>
+        ))}
+      </div>
+      <span style={{fontSize:12,color:'var(--muted)',fontWeight:600}}>{value}/5</span>
+    </div>
+  );
+}
+
+function AdminManager({ adminEmail, toast }){
+  const [tab,setTab]=useState('pending');
+  const [tasks,setTasks]=useState([]);
+  const [evals,setEvals]=useState([]);
+  const [team,setTeam]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [evaluating,setEvaluating]=useState(null);
+  const [form,setForm]=useState({quality:3,speed:3,initiative:3,points:18,notes:''});
+  const [busy,setBusy]=useState(false);
+  const [period,setPeriod]=useState('all');
+
+  async function load(){
+    setLoading(true);
+    const [t,e,u]=await Promise.all([
+      sb.from('content_tasks').select('*').eq('status','done').order('updated_at',{ascending:false}),
+      sb.from('task_evaluations').select('*').order('created_at',{ascending:false}),
+      sb.from('user_roles').select('email,name'),
+    ]);
+    if(e.error) toast('Table task_evaluations manquante — exécutez le SQL fourni');
+    setTasks(t.data||[]); setEvals(e.data||[]); setTeam(u.data||[]); setLoading(false);
+  }
+  useEffect(()=>{ load(); },[]);
+
+  const nameOf=(em)=>team.find(u=>u.email===em)?.name||em;
+  const evaluatedIds=new Set(evals.map(e=>e.task_id));
+  const pending=tasks.filter(t=>!evaluatedIds.has(t.id));
+
+  function openEval(t){
+    setForm({quality:3,speed:3,initiative:3,points:18,notes:''});
+    setEvaluating(t);
+  }
+  const setCrit=(k,v)=>setForm(f=>{
+    const n={...f,[k]:v};
+    n.points=(n.quality+n.speed+n.initiative)*2;
+    return n;
+  });
+
+  async function saveEval(){
+    setBusy(true);
+    const assignees=parseAssignees(evaluating.assigned_to);
+    const {error}=await sb.from('task_evaluations').insert([{
+      task_id:evaluating.id, task_title:evaluating.title, assignees,
+      quality:form.quality, speed:form.speed, initiative:form.initiative,
+      points:Number(form.points)||0, notes:form.notes.trim()||null,
+      evaluated_by:adminEmail,
+    }]);
+    setBusy(false);
+    if(error){ toast('Erreur : '+error.message); return; }
+    await logAction(adminEmail,'Tâche évaluée',`${evaluating.title} — ${form.points} pts`);
+    toast('Évaluation enregistrée ✓'); setEvaluating(null); load();
+  }
+
+  async function deleteEval(ev){
+    if(!confirm('Supprimer cette évaluation ?')) return;
+    await sb.from('task_evaluations').delete().eq('id',ev.id);
+    toast('Évaluation supprimée'); load();
+  }
+
+  // Leaderboard aggregation — each assignee of an evaluated task earns its points
+  const months=[...new Set(evals.map(e=>(e.created_at||'').slice(0,7)))].filter(Boolean).sort().reverse();
+  const fEvals=period==='all'?evals:evals.filter(e=>(e.created_at||'').startsWith(period));
+  const board={};
+  fEvals.forEach(e=>{
+    const as=parseAssignees(e.assignees);
+    const avg=((e.quality||0)+(e.speed||0)+(e.initiative||0))/3;
+    (as.length?as:['(non assigné)']).forEach(em=>{
+      if(!board[em]) board[em]={points:0,tasks:0,scoreSum:0};
+      board[em].points+=e.points||0; board[em].tasks+=1; board[em].scoreSum+=avg;
+    });
+  });
+  const ranked=Object.entries(board).map(([em,b])=>({email:em,...b,avg:b.scoreSum/b.tasks}))
+    .sort((a,b)=>b.points-a.points);
+  const maxPts=ranked.length?ranked[0].points:1;
+  const monthLabel=m=>m==='all'?'Toute la période':new Date(m+'-01T00:00:00').toLocaleDateString('fr-FR',{month:'long',year:'numeric'});
+
+  const tabStyle=k=>({padding:'10px 18px',border:'none',borderBottom:tab===k?'2px solid var(--navy)':'2px solid transparent',
+    background:'none',fontWeight:700,fontSize:14,color:tab===k?'var(--navy)':'var(--muted)',cursor:'pointer',marginBottom:'-1px'});
+  const starRow=n=>'⭐'.repeat(n)+'☆'.repeat(5-n);
+
+  return (
+    <div>
+      <div style={{display:'flex',borderBottom:'1px solid var(--line)',marginBottom:20,overflowX:'auto'}}>
+        <button style={tabStyle('pending')} onClick={()=>setTab('pending')}>📋 À évaluer ({pending.length})</button>
+        <button style={tabStyle('board')} onClick={()=>setTab('board')}>🏆 Classement</button>
+        <button style={tabStyle('history')} onClick={()=>setTab('history')}>🗂 Historique ({evals.length})</button>
+      </div>
+
+      {loading ? <Spinner/> : tab==='pending' ? (
+        pending.length===0
+          ? <div className="panel"><div className="empty">Aucune tâche terminée en attente d'évaluation. Les tâches marquées « Terminé ✓ » dans Contenu apparaissent ici.</div></div>
+          : pending.map(t=>{
+              const as=parseAssignees(t.assigned_to);
+              const isOpen=evaluating&&evaluating.id===t.id;
+              return (
+                <div key={t.id} className="panel" style={{marginBottom:12}}>
+                  <div style={{display:'flex',alignItems:'flex-start',gap:14,flexWrap:'wrap'}}>
+                    <div style={{flex:1,minWidth:220}}>
+                      <div style={{fontWeight:700,fontSize:15,color:'var(--navy)'}}>{t.title}</div>
+                      <div style={{fontSize:12.5,color:'var(--muted)',marginTop:3}}>
+                        {t.content_type} · {t.platform} · terminé {timeAgo(t.updated_at||t.created_at)}
+                      </div>
+                      <div style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:6}}>
+                        {as.length===0
+                          ? <span style={{fontSize:12,color:'var(--muted)',fontStyle:'italic'}}>Aucun assigné</span>
+                          : as.map(em=><span key={em} style={{padding:'2px 10px',background:'var(--navy)',color:'#fff',borderRadius:20,fontSize:11.5,fontWeight:700}}>{nameOf(em)}</span>)}
+                      </div>
+                      {t.completion_notes&&<div style={{fontSize:12.5,color:'#5a6178',marginTop:6,fontStyle:'italic'}}>📝 {t.completion_notes}</div>}
+                    </div>
+                    <button className="btn-primary" style={{fontSize:13,padding:'8px 16px',flexShrink:0}}
+                      onClick={()=>isOpen?setEvaluating(null):openEval(t)}>
+                      {isOpen?'Fermer':'⭐ Évaluer'}
+                    </button>
+                  </div>
+
+                  {isOpen && (
+                    <div style={{marginTop:16,paddingTop:16,borderTop:'1px solid var(--line)',display:'flex',flexDirection:'column',gap:12}}>
+                      <StarPicker label="Qualité" value={form.quality} onChange={v=>setCrit('quality',v)} />
+                      <StarPicker label="Respect délais" value={form.speed} onChange={v=>setCrit('speed',v)} />
+                      <StarPicker label="Initiative" value={form.initiative} onChange={v=>setCrit('initiative',v)} />
+                      <div style={{display:'flex',alignItems:'center',gap:10}}>
+                        <span style={{fontSize:13,fontWeight:600,width:110,color:'var(--navy)'}}>Points</span>
+                        <input type="number" min={0} max={100} value={form.points}
+                          onChange={e=>setForm(f=>({...f,points:e.target.value}))}
+                          style={{width:90,padding:'8px 10px',border:'1px solid var(--line)',borderRadius:8,fontSize:14,fontWeight:700,outline:'none'}} />
+                        <span style={{fontSize:12,color:'var(--muted)'}}>suggéré : (notes × 2), max 30 — attribués à chaque assigné</span>
+                      </div>
+                      <div className="field" style={{margin:0}}><label>Notes du manager</label>
+                        <textarea value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))}
+                          style={{minHeight:60}} placeholder="Observations, axes d'amélioration, félicitations…" /></div>
+                      <div><button className="btn-primary" disabled={busy} onClick={saveEval}>{busy?'…':'Enregistrer l\'évaluation'}</button></div>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+      ) : tab==='board' ? (
+        <div>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:18,alignItems:'center'}}>
+            <span style={{fontSize:13,fontWeight:700,color:'var(--navy)'}}>Période :</span>
+            {['all',...months].map(m=>(
+              <button key={m} onClick={()=>setPeriod(m)}
+                style={{padding:'6px 13px',borderRadius:20,fontSize:12.5,fontWeight:700,cursor:'pointer',border:'2px solid',
+                  borderColor:period===m?'var(--navy)':'var(--line)',
+                  background:period===m?'var(--navy)':'#fff',color:period===m?'#fff':'#4a5168'}}>
+                {monthLabel(m)}
+              </button>
+            ))}
+          </div>
+          {ranked.length===0
+            ? <div className="panel"><div className="empty">Aucune évaluation sur cette période.</div></div>
+            : <div className="panel" style={{padding:0,overflow:'hidden'}}>
+                <table className="admin-table" style={{width:'100%'}}>
+                  <thead><tr>
+                    <th style={{paddingLeft:16,width:50}}>#</th><th>Membre</th>
+                    <th style={{textAlign:'center'}}>Tâches évaluées</th>
+                    <th style={{textAlign:'center'}}>Score moyen</th>
+                    <th style={{width:'30%'}}>Points</th>
+                  </tr></thead>
+                  <tbody>
+                    {ranked.map((r,i)=>(
+                      <tr key={r.email} style={i<3?{background:'#fffbe8'}:null}>
+                        <td style={{paddingLeft:16,fontSize:18}}>{['🥇','🥈','🥉'][i]||<span style={{fontSize:13,color:'var(--muted)',fontWeight:700}}>{i+1}</span>}</td>
+                        <td>
+                          <div style={{fontWeight:700,color:'var(--navy)'}}>{nameOf(r.email)}</div>
+                          <div style={{fontSize:11.5,color:'var(--muted)'}}>{r.email}</div>
+                        </td>
+                        <td style={{textAlign:'center',fontWeight:600}}>{r.tasks}</td>
+                        <td style={{textAlign:'center'}}>{r.avg.toFixed(1)}/5</td>
+                        <td style={{paddingRight:16}}>
+                          <div style={{display:'flex',alignItems:'center',gap:10}}>
+                            <div style={{flex:1,height:8,background:'#eef0f4',borderRadius:6,overflow:'hidden'}}>
+                              <div style={{width:`${Math.round(r.points/maxPts*100)}%`,height:'100%',background:i===0?'var(--red)':'var(--navy)',borderRadius:6}} />
+                            </div>
+                            <span style={{fontWeight:800,fontSize:15,color:i===0?'var(--red)':'var(--navy)',minWidth:44,textAlign:'right'}}>{r.points} pts</span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>}
+        </div>
+      ) : (
+        evals.length===0
+          ? <div className="panel"><div className="empty">Aucune évaluation enregistrée.</div></div>
+          : evals.map(ev=>(
+              <div key={ev.id} className="panel" style={{marginBottom:12}}>
+                <div style={{display:'flex',alignItems:'flex-start',gap:14,flexWrap:'wrap'}}>
+                  <div style={{flex:1,minWidth:220}}>
+                    <div style={{fontWeight:700,fontSize:14.5,color:'var(--navy)'}}>{ev.task_title}</div>
+                    <div style={{fontSize:12,color:'var(--muted)',marginTop:3}}>
+                      {parseAssignees(ev.assignees).map(nameOf).join(', ')||'Aucun assigné'} · évalué {timeAgo(ev.created_at)} par {nameOf(ev.evaluated_by)}
+                    </div>
+                    <div style={{fontSize:13,marginTop:6}}>
+                      Qualité {starRow(ev.quality||0)} · Délais {starRow(ev.speed||0)} · Initiative {starRow(ev.initiative||0)}
+                    </div>
+                    {ev.notes&&<div style={{fontSize:12.5,color:'#5a6178',marginTop:6,fontStyle:'italic',background:'#f8f9fc',padding:'8px 12px',borderRadius:8}}>📝 {ev.notes}</div>}
+                  </div>
+                  <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:8,flexShrink:0}}>
+                    <span style={{fontWeight:800,fontSize:19,color:'var(--red)'}}>{ev.points} pts</span>
+                    <button className="icon-btn del" onClick={()=>deleteEval(ev)}>✕</button>
+                  </div>
+                </div>
+              </div>
+            ))
+      )}
+    </div>
+  );
+}
+
 function Admin({ session, onExit, data, reload, toast, userPerms, showProfile }){
   const full = userPerms?.__full;
   const can = (k) => !!(full || userPerms?.[k]);
@@ -4732,6 +4963,7 @@ function Admin({ session, onExit, data, reload, toast, userPerms, showProfile })
         {can('can_finance') && <button className={tab==='finance'?'active':''} onClick={()=>setTab('finance')}>💰 Paie</button>}
         {can('can_accounting') && <button className={tab==='accounting'?'active':''} onClick={()=>setTab('accounting')}>📊 Comptabilité</button>}
         {can('can_articles') && <button className={tab==='cdm'?'active':''} onClick={()=>setTab('cdm')}>⚽ CDM</button>}
+        {can('can_manager') && <button className={tab==='manager'?'active':''} onClick={()=>setTab('manager')}>⭐ Manager</button>}
       </div></div>
       <div className="admin-body"><div className="wrap">
         {tab==='articles' && can('can_articles') && <><AdminArticles articles={data.articles} reload={reload} toast={toast} adminEmail={adminEmail} /><PageJournal section="articles" /></>}
@@ -4746,6 +4978,7 @@ function Admin({ session, onExit, data, reload, toast, userPerms, showProfile })
         {tab==='accounting' && can('can_accounting') && <><AdminAccounting adminEmail={adminEmail} toast={toast} /><PageJournal section="accounting" /></>}
         {tab==='cdm' && can('can_articles') && <AdminCDM articles={data.articles} reload={reload} toast={toast} adminEmail={adminEmail} />}
         {tab==='broadcast' && can('can_broadcast') && <AdminBroadcast adminEmail={adminEmail} toast={toast} isAdmin={userPerms?.__full||userPerms?.can_team} />}
+        {tab==='manager' && can('can_manager') && <><AdminManager adminEmail={adminEmail} toast={toast} /><PageJournal section="manager" /></>}
       </div></div>
     </div>
   );
