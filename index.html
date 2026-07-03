@@ -1612,6 +1612,9 @@ function AdminContent({ adminEmail, userRole, toast }){
 
   const visible=tasks.filter(t=>{
     const assignees=parseAssignees(t.assigned_to);
+    // Terminé tasks are auto-archived: hidden from the default list (kept in DB
+    // and visible in Manager), shown only when the Terminé filter is selected
+    if(t.status==='done' && statusFilter!=='done') return false;
     return (statusFilter==='all'||t.status===statusFilter) &&
       (assigneeFilter==='all'||assignees.includes(assigneeFilter));
   });
@@ -1671,7 +1674,7 @@ function AdminContent({ adminEmail, userRole, toast }){
       ) : view==='board' ? (
         /* ---- KANBAN BOARD ---- */
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:16,alignItems:'start'}}>
-          {TASK_STATUSES.filter(s=>s.key!=='cancelled').map(s=>{
+          {TASK_STATUSES.filter(s=>s.key!=='cancelled'&&(s.key!=='done'||statusFilter==='done')).map(s=>{
             const col=visible.filter(t=>t.status===s.key);
             return (
               <div key={s.key} style={{background:'#fff',border:'1px solid var(--line)',borderRadius:12,overflow:'hidden'}}>
