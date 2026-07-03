@@ -4733,10 +4733,12 @@ function AdminManager({ adminEmail, toast }){
   const [busy,setBusy]=useState(false);
   const [period,setPeriod]=useState('all');
 
+  const [statusFilter,setStatusFilter]=useState('all');
+
   async function load(){
     setLoading(true);
     const [t,e,u]=await Promise.all([
-      sb.from('content_tasks').select('*').eq('status','done').order('updated_at',{ascending:false}),
+      sb.from('content_tasks').select('*').order('updated_at',{ascending:false}),
       sb.from('task_evaluations').select('*').order('created_at',{ascending:false}),
       sb.from('user_roles').select('email,name'),
     ]);
@@ -4747,7 +4749,11 @@ function AdminManager({ adminEmail, toast }){
 
   const nameOf=(em)=>team.find(u=>u.email===em)?.name||em;
   const evaluatedIds=new Set(evals.map(e=>e.task_id));
-  const pending=tasks.filter(t=>!evaluatedIds.has(t.id));
+  const notEvaluated=tasks.filter(t=>!evaluatedIds.has(t.id)&&t.status!=='cancelled');
+  const pending=notEvaluated.filter(t=>
+    statusFilter==='all' ? true :
+    statusFilter==='done' ? t.status==='done' :
+    t.status!=='done');
 
   function openEval(t){
     setForm({quality:3,speed:3,initiative:3,points:18,notes:''});
@@ -4804,24 +4810,43 @@ function AdminManager({ adminEmail, toast }){
   return (
     <div>
       <div style={{display:'flex',borderBottom:'1px solid var(--line)',marginBottom:20,overflowX:'auto'}}>
-        <button style={tabStyle('pending')} onClick={()=>setTab('pending')}>📋 À évaluer ({pending.length})</button>
+        <button style={tabStyle('pending')} onClick={()=>setTab('pending')}>📋 À évaluer ({notEvaluated.length})</button>
         <button style={tabStyle('board')} onClick={()=>setTab('board')}>🏆 Classement</button>
         <button style={tabStyle('history')} onClick={()=>setTab('history')}>🗂 Historique ({evals.length})</button>
       </div>
 
       {loading ? <Spinner/> : tab==='pending' ? (
-        pending.length===0
-          ? <div className="panel"><div className="empty">Aucune tâche terminée en attente d'évaluation. Les tâches marquées « Terminé ✓ » dans Contenu apparaissent ici.</div></div>
-          : pending.map(t=>{
+        <div>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:16}}>
+            {[['all','Toutes',notEvaluated.length],
+              ['done','Terminées',notEvaluated.filter(t=>t.status==='done').length],
+              ['open','En cours',notEvaluated.filter(t=>t.status!=='done').length]].map(([k,l,n])=>(
+              <button key={k} onClick={()=>setStatusFilter(k)}
+                style={{padding:'6px 14px',borderRadius:20,fontSize:12.5,fontWeight:700,cursor:'pointer',border:'2px solid',
+                  borderColor:statusFilter===k?'var(--navy)':'var(--line)',
+                  background:statusFilter===k?'var(--navy)':'#fff',color:statusFilter===k?'#fff':'#4a5168'}}>
+                {l} <span style={{opacity:.7}}>({n})</span>
+              </button>
+            ))}
+          </div>
+          {pending.length===0
+            ? <div className="panel"><div className="empty">Aucune tâche à évaluer dans cette catégorie. Les tâches du planning Contenu apparaissent ici.</div></div>
+            : pending.map(t=>{
               const as=parseAssignees(t.assigned_to);
               const isOpen=evaluating&&evaluating.id===t.id;
+              const st=TASK_STATUSES.find(s=>s.key===t.status)||TASK_STATUSES[0];
               return (
                 <div key={t.id} className="panel" style={{marginBottom:12}}>
                   <div style={{display:'flex',alignItems:'flex-start',gap:14,flexWrap:'wrap'}}>
                     <div style={{flex:1,minWidth:220}}>
-                      <div style={{fontWeight:700,fontSize:15,color:'var(--navy)'}}>{t.title}</div>
+                      <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+                        <span style={{fontWeight:700,fontSize:15,color:'var(--navy)'}}>{t.title}</span>
+                        <span style={{padding:'2px 10px',borderRadius:20,fontSize:11,fontWeight:700,background:st.bg,color:st.color}}>{st.label}</span>
+                      </div>
                       <div style={{fontSize:12.5,color:'var(--muted)',marginTop:3}}>
-                        {t.content_type} · {t.platform} · terminé {timeAgo(t.updated_at||t.created_at)}
+                        {t.content_type} · {t.platform} · mis à jour {timeAgo(t.updated_at||t.created_at)}
+                        {t.due_date&&t.status!=='done'&&new Date(t.due_date+'T00:00:00')<new Date()&&
+                          <span style={{color:'var(--red)',fontWeight:700}}> · ⚠ En retard (échéance {new Date(t.due_date).toLocaleDateString('fr-FR')})</span>}
                       </div>
                       <div style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:6}}>
                         {as.length===0
@@ -4856,7 +4881,8 @@ function AdminManager({ adminEmail, toast }){
                   )}
                 </div>
               );
-            })
+            })}
+        </div>
       ) : tab==='board' ? (
         <div>
           <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:18,alignItems:'center'}}>
