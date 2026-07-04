@@ -5495,9 +5495,13 @@ function CDMPage({ articles, toast, session }){
     return cat==='cdm' || cat==='coupe du monde' || cat==='world cup';
   });
 
-  const preMatches = espnScores.filter(ev=>ev.status?.type?.state==='pre');
+  // Upcoming list only shows the next 3 days (full schedule stays in the bracket)
+  const preMatches = espnScores.filter(ev=>ev.status?.type?.state==='pre'
+    && new Date(ev.date).getTime()-Date.now() < 3*24*3600*1000);
   const activeMatches = espnScores.filter(ev=>ev.status?.type?.state==='in');
-  const doneMatches = espnScores.filter(ev=>ev.status?.type?.state==='post');
+  // Results list only keeps games from the last 2 days (full history stays in the bracket)
+  const doneMatches = espnScores.filter(ev=>ev.status?.type?.state==='post'
+    && Date.now()-new Date(ev.date).getTime() < 2*24*3600*1000);
 
   // Static fallback stats (CDM 2026 — updated June 25)
   const STATIC_GOALS = [
