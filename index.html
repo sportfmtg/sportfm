@@ -5828,6 +5828,43 @@ function CDMPage({ articles, toast, session }){
                                       : st?.state==='post' ? 'Terminé'
                                       : new Date(ev.date).toLocaleDateString('fr-FR',{day:'numeric',month:'short'})+' · '+new Date(ev.date).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}
                                   </div>
+                                  {/* Inline pronostic for upcoming matches */}
+                                  {st?.state==='pre' && comps.length===2 && (()=>{
+                                    const h=comps.find(t=>t.homeAway==='home')||comps[0];
+                                    const a2=comps.find(t=>t.homeAway==='away')||comps[1];
+                                    const hn=h.team?.displayName||'Équipe 1', an=a2.team?.displayName||'Équipe 2';
+                                    const hs=h.team?.shortDisplayName||hn, as2=a2.team?.shortDisplayName||an;
+                                    const myVote=votedMap[ev.id], pd=polls[ev.id];
+                                    const tot=(pd?.votes_home||0)+(pd?.votes_draw||0)+(pd?.votes_away||0)||1;
+                                    const pct=n=>Math.round(((n||0)/tot)*100);
+                                    if(!myVote) return (
+                                      <div style={{marginTop:6,borderTop:'1px solid #f0f1f5',paddingTop:6}}>
+                                        <div style={{fontSize:9.5,fontWeight:800,letterSpacing:'.05em',color:'var(--muted)',marginBottom:4,textTransform:'uppercase'}}>🗳️ Qui va gagner ?</div>
+                                        <div style={{display:'flex',gap:4}}>
+                                          <button onClick={()=>votePoll(ev.id,hn,an,'home')} title={hn}
+                                            style={{flex:1,background:'var(--navy)',color:'#fff',border:'none',borderRadius:6,padding:'5px 3px',fontSize:10,fontWeight:700,cursor:'pointer',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{hs}</button>
+                                          <button onClick={()=>votePoll(ev.id,hn,an,'draw')}
+                                            style={{background:'#f1f2f6',color:'var(--navy)',border:'none',borderRadius:6,padding:'5px 7px',fontSize:10,fontWeight:700,cursor:'pointer'}}>Nul</button>
+                                          <button onClick={()=>votePoll(ev.id,hn,an,'away')} title={an}
+                                            style={{flex:1,background:'#c8102e',color:'#fff',border:'none',borderRadius:6,padding:'5px 3px',fontSize:10,fontWeight:700,cursor:'pointer',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{as2}</button>
+                                        </div>
+                                      </div>
+                                    );
+                                    return (
+                                      <div style={{marginTop:6,borderTop:'1px solid #f0f1f5',paddingTop:5}}>
+                                        {[[hs,pct(pd?.votes_home),'#0B245E'],['Nul',pct(pd?.votes_draw),'#8a90a2'],[as2,pct(pd?.votes_away),'#c8102e']].map(([l,p,c])=>(
+                                          <div key={l} style={{display:'flex',alignItems:'center',gap:5,marginBottom:2}}>
+                                            <span style={{fontSize:9.5,fontWeight:700,color:'var(--navy)',width:52,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l}</span>
+                                            <div style={{flex:1,height:5,background:'#f1f2f6',borderRadius:3,overflow:'hidden'}}>
+                                              <div style={{width:`${p}%`,height:'100%',background:c,borderRadius:3}}/>
+                                            </div>
+                                            <span style={{fontSize:9.5,fontWeight:800,color:'var(--muted)',width:26,textAlign:'right'}}>{p}%</span>
+                                          </div>
+                                        ))}
+                                        <div style={{fontSize:9,color:'#1f7a48',fontWeight:700,marginTop:3}}>✅ Voté : {myVote==='home'?hs:myVote==='draw'?'Nul':as2}</div>
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                               );
                             })}
@@ -5839,81 +5876,6 @@ function CDMPage({ articles, toast, session }){
             );
           })()}
         </div>
-
-        {/* ─── PREDICTIONS / POLLS ─── */}
-        {preMatches.length>0 && (
-          <div style={{marginTop:32}}>
-            <div className="sechead">
-              <h2 style={{fontSize:16}}>🗳️ Vos Pronostics</h2><div className="line"></div>
-            </div>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:16}}>
-              {preMatches.slice(0,6).map(ev=>{
-                const comp=ev.competitions?.[0];
-                const home=comp?.competitors?.find(c=>c.homeAway==='home');
-                const away=comp?.competitors?.find(c=>c.homeAway==='away');
-                const matchId=ev.id;
-                const myVote=votedMap[matchId];
-                const pollData=polls[matchId];
-                const total=(pollData?.votes_home||0)+(pollData?.votes_draw||0)+(pollData?.votes_away||0)||1;
-                const pct=(n)=>Math.round(((n||0)/total)*100);
-                const homeName=home?.team?.displayName||home?.team?.name||'Équipe 1';
-                const awayName=away?.team?.displayName||away?.team?.name||'Équipe 2';
-                return (
-                  <div key={matchId} style={{background:'#fff',border:'1px solid var(--line)',borderRadius:14,padding:20}}>
-                    <div style={{fontSize:11,fontWeight:800,letterSpacing:'.06em',color:'var(--muted)',marginBottom:10,textTransform:'uppercase'}}>
-                      {ev.status?.type?.shortDetail||ev.status?.type?.description||'À venir'}
-                    </div>
-                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
-                      <span style={{fontWeight:800,fontSize:15,color:'var(--navy)',flex:1}}>{homeName}</span>
-                      <span style={{fontWeight:900,fontSize:13,color:'var(--muted)',padding:'0 10px'}}>VS</span>
-                      <span style={{fontWeight:800,fontSize:15,color:'var(--navy)',flex:1,textAlign:'right'}}>{awayName}</span>
-                    </div>
-                    <div style={{fontSize:12.5,fontWeight:700,color:'var(--muted)',marginBottom:10,textAlign:'center'}}>Qui va gagner ?</div>
-                    {!myVote ? (
-                      <div style={{display:'flex',gap:8}}>
-                        <button onClick={()=>votePoll(matchId,homeName,awayName,'home')}
-                          style={{flex:1,background:'linear-gradient(135deg,#0a1628,#1a3a2a)',color:'#fff',border:'none',borderRadius:9,padding:'10px 6px',fontSize:12,fontWeight:700,cursor:'pointer',lineHeight:1.3}}>
-                          🏠 {homeName.split(' ')[0]}
-                        </button>
-                        <button onClick={()=>votePoll(matchId,homeName,awayName,'draw')}
-                          style={{flex:0,background:'#f1f2f6',color:'var(--navy)',border:'none',borderRadius:9,padding:'10px 12px',fontSize:12,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
-                          🤝 Nul
-                        </button>
-                        <button onClick={()=>votePoll(matchId,homeName,awayName,'away')}
-                          style={{flex:1,background:'linear-gradient(135deg,#c8102e,#8a0b20)',color:'#fff',border:'none',borderRadius:9,padding:'10px 6px',fontSize:12,fontWeight:700,cursor:'pointer',lineHeight:1.3}}>
-                          {awayName.split(' ')[0]} ✈️
-                        </button>
-                      </div>
-                    ) : (
-                      <div>
-                        <div style={{fontSize:11,color:'#1f7a48',fontWeight:700,marginBottom:8,textAlign:'center'}}>
-                          ✅ Votre vote : {myVote==='home'?homeName:myVote==='draw'?'Nul':awayName}
-                        </div>
-                        {[
-                          {label:homeName,key:'votes_home',color:'#c8102e',pct:pct(pollData?.votes_home)},
-                          {label:'Nul',key:'votes_draw',color:'#8a90a2',pct:pct(pollData?.votes_draw)},
-                          {label:awayName,key:'votes_away',color:'#006b3f',pct:pct(pollData?.votes_away)},
-                        ].map(b=>(
-                          <div key={b.key} style={{marginBottom:8}}>
-                            <div style={{display:'flex',justifyContent:'space-between',fontSize:12,fontWeight:700,marginBottom:3,color:myVote===b.key.replace('votes_','')?b.color:'var(--navy)'}}>
-                              <span>{b.label}</span><span>{b.pct}%</span>
-                            </div>
-                            <div style={{height:8,background:'#f1f2f6',borderRadius:4,overflow:'hidden'}}>
-                              <div className="cdm-poll-bar" style={{height:'100%',width:`${b.pct}%`,background:b.color,borderRadius:4}}/>
-                            </div>
-                          </div>
-                        ))}
-                        <div style={{fontSize:11,color:'var(--muted)',textAlign:'center',marginTop:6}}>
-                          {(pollData?.votes_home||0)+(pollData?.votes_draw||0)+(pollData?.votes_away||0)} vote{((pollData?.votes_home||0)+(pollData?.votes_draw||0)+(pollData?.votes_away||0))>1?'s':''}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
 
         {/* ─── CDM ARTICLES ─── */}
         {cdmArticles.length>0 && (
