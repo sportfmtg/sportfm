@@ -736,7 +736,15 @@ function Rail({ standings, fixtures, onNav, onTrial, ads }){
 
 function Home({ articles, standings, fixtures, onOpen, onNav, onTrial, ads }){
   const fullwidthAds=(ads||[]).filter(a=>a.position==='fullwidth');
-  const hero = articles.find(a=>a.is_hero) || articles[0];
+  // All "à la une" articles rotate every 3 seconds
+  const heroes = articles.filter(a=>a.is_hero);
+  const [heroIdx,setHeroIdx]=useState(0);
+  useEffect(()=>{
+    if(heroes.length<2) return;
+    const t=setInterval(()=>setHeroIdx(i=>(i+1)%heroes.length), 3000);
+    return ()=>clearInterval(t);
+  },[heroes.length]);
+  const hero = heroes.length ? heroes[heroIdx%heroes.length] : articles[0];
   if(!hero) return <div className="empty">Aucun article publié pour le moment.</div>;
   const rest = articles.filter(a=>a.id!==hero.id);
   const secondary = rest.slice(0,3);
@@ -754,6 +762,15 @@ function Home({ articles, standings, fixtures, onOpen, onNav, onTrial, ads }){
           <h1>{hero.title}</h1>
           {hero.dek && <p>{hero.dek}</p>}
           <div className="byline"><span className="who">{hero.author}</span><span>·</span><span>{hero.read_time}</span><span>·</span><span>{timeAgo(hero.created_at)}</span></div>
+          {heroes.length>1 && (
+            <div style={{display:'flex',gap:6,marginTop:12}}>
+              {heroes.map((h,i)=>(
+                <span key={h.id} onClick={e=>{e.stopPropagation();setHeroIdx(i);}}
+                  style={{width:i===heroIdx%heroes.length?22:8,height:8,borderRadius:20,cursor:'pointer',
+                    background:i===heroIdx%heroes.length?'var(--red)':'#d7dbe6',transition:'all .3s'}} />
+              ))}
+            </div>
+          )}
         </article>
         <div className="rule"></div>
         {fullwidthAds.map(ad=>(
