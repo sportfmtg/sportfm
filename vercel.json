@@ -1,0 +1,10 @@
+{
+  "redirects": [
+    {
+      "source": "/(.*)",
+      "has": [{ "type": "host", "value": "sportfm.vercel.app" }],
+      "destination": "https://sportfmtg.com/$1",
+      "permanent": true
+    }
+  ]
+}
