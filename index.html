@@ -1961,6 +1961,8 @@ function ArticleEditor({ initial, onSave, onCancel, toast }){
 
 function AdminArticles({ articles, reload, toast, adminEmail }){
   const [editing,setEditing]=useState(null);
+  const [range,setRange]=useState('week'); // 'week' = last 7 days | 'all' = full archive
+  const [search,setSearch]=useState('');
   async function del(a){
     if(!confirm(`Supprimer « ${a.title} » ?`)) return;
     const { error }=await sb.from('articles').delete().eq('id',a.id);
@@ -1969,17 +1971,37 @@ function AdminArticles({ articles, reload, toast, adminEmail }){
     toast('Article supprimé'); reload();
   }
   if(editing!==null) return <ArticleEditor initial={editing} onSave={async(msg)=>{await logAction(adminEmail,editing.id?'Modification article':'Nouvel article',editing.title||msg);setEditing(null);reload();}} onCancel={()=>setEditing(null)} toast={toast} />;
+
+  // Rolling 7-day window: older articles phase out of this list automatically
+  // (they stay in the database and on the public site)
+  const weekAgo=Date.now()-7*24*3600*1000;
+  const recent=articles.filter(a=>new Date(a.updated_at||a.created_at).getTime()>=weekAgo);
+  const base=range==='week'?recent:articles;
+  const shown=search.trim()
+    ? base.filter(a=>(a.title||'').toLowerCase().includes(search.trim().toLowerCase()))
+    : (range==='all'?base.slice(0,300):base);
+
   return (
     <div className="panel">
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18}}>
-        <h3 style={{margin:0}}>Articles ({articles.length})</h3>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14,flexWrap:'wrap',gap:10}}>
+        <h3 style={{margin:0}}>Articles ({shown.length}{range==='week'?` cette semaine · ${articles.length} au total`:''})</h3>
         <button className="btn-primary" onClick={()=>setEditing(EMPTY_ARTICLE)}>+ Nouvel article</button>
       </div>
-      {articles.length===0 ? <div className="empty">Aucun article. Publiez votre premier sujet.</div> :
+      <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap',alignItems:'center'}}>
+        {[['week','7 derniers jours'],['all','Tout l\'historique']].map(([k,l])=>(
+          <button key={k} onClick={()=>setRange(k)}
+            style={{padding:'6px 14px',borderRadius:20,fontSize:12.5,fontWeight:700,cursor:'pointer',border:'2px solid',
+              borderColor:range===k?'var(--navy)':'var(--line)',
+              background:range===k?'var(--navy)':'#fff',color:range===k?'#fff':'#4a5168'}}>{l}</button>
+        ))}
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Rechercher un article…"
+          style={{flex:1,minWidth:180,padding:'8px 12px',border:'1px solid var(--line)',borderRadius:9,fontSize:13,outline:'none'}} />
+      </div>
+      {shown.length===0 ? <div className="empty">{search?'Aucun article ne correspond à la recherche.':'Aucun article publié cette semaine.'}</div> :
       <table className="admin-table"><thead><tr>
         <th>Titre</th><th>Catégorie</th><th>Statut</th><th>Modifié</th><th></th>
       </tr></thead><tbody>
-        {articles.map(a=>(
+        {shown.map(a=>(
           <tr key={a.id}>
             <td style={{fontWeight:600,maxWidth:380}}>{a.is_hero && <span style={{color:'var(--red)',marginRight:6}}>★</span>}{a.title}</td>
             <td>{a.category==='Basketball'?'Basket':a.category==='Shows'?'Émissions':a.category}</td>
