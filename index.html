@@ -5442,16 +5442,32 @@ function CDMPage({ articles, toast, session }){
       .then(r=>r.json())
       .then(d=>setGroups(d.standings?.groups||[]))
       .catch(()=>{});
-    // Leaders — try with season year first, then without
-    fetch('https://site.api.espn.com/apis/v2/sports/soccer/FIFA.WORLD/leaders?season=2026&limit=20')
-      .then(r=>r.json())
-      .then(d=>{
-        const ls = d.leaders||[];
-        if(ls.length>0){ setAllLeaders(ls); return; }
-        return fetch('https://site.api.espn.com/apis/v2/sports/soccer/FIFA.WORLD/leaders?limit=20')
-          .then(r=>r.json()).then(d2=>setAllLeaders(d2.leaders||[]));
-      })
-      .catch(()=>{});
+    // Leaders — ESPN core API has live goals/assists/yellow/red card leaders;
+    // athlete names/photos hydrated from their individual resources
+    (async()=>{
+      try{
+        const r=await fetch('https://sports.core.api.espn.com/v2/sports/soccer/leagues/FIFA.WORLD/seasons/2026/types/1/leaders?limit=10');
+        const d=await r.json();
+        const cats=d.categories||[];
+        const wanted=[['goals','Goals'],['assists','Assists'],['yellowCards','Yellow Cards'],['redCards','Red Cards']];
+        const sel=wanted.map(([n,dn])=>({displayName:dn, raw:(cats.find(c=>c.name===n)?.leaders||[]).slice(0,10)}));
+        const refs={};
+        sel.forEach(c=>c.raw.forEach(l=>{ const u=(l.athlete?.['$ref']||'').replace('http://','https://'); if(u) refs[u]=null; }));
+        await Promise.all(Object.keys(refs).map(async u=>{
+          try{
+            const a=await (await fetch(u)).json();
+            refs[u]={ displayName:a.displayName||a.fullName||'—',
+              team:{displayName:a.citizenship||''},
+              headshot:{href:a.headshot?.href||a.flag?.href||''} };
+          }catch{}
+        }));
+        const built=sel.map(c=>({ displayName:c.displayName, leaders:c.raw.map((l,i)=>({
+          rank:i+1, value:l.value,
+          athlete:refs[(l.athlete?.['$ref']||'').replace('http://','https://')]||{displayName:'—',team:{displayName:''},headshot:{href:''}},
+        })) }));
+        if(built.some(c=>c.leaders.length)) setAllLeaders(built);
+      }catch{}
+    })();
   }
 
   async function loadPolls(){
@@ -5760,17 +5776,17 @@ function CDMPage({ articles, toast, session }){
             <h2 style={{fontSize:16}}>🏆 Tableau Final</h2><div className="line"></div>
           </div>
           {(()=>{
-            const d8=ev=>(ev.date||'').slice(0,10).replace(/-/g,'');
+            // Rounds come from ESPN's own round identifier (season.slug) — exact, no date guessing
             const ROUNDS=[
-              {label:'16es de finale', from:'20260628', to:'20260703'},
-              {label:'8es de finale',  from:'20260704', to:'20260707'},
-              {label:'Quarts de finale', from:'20260708', to:'20260712'},
-              {label:'Demi-finales',   from:'20260713', to:'20260716'},
-              {label:'Match 3e place', from:'20260717', to:'20260718'},
-              {label:'FINALE',         from:'20260719', to:'20260719'},
+              {slug:'round-of-32',     label:'16es de finale'},
+              {slug:'round-of-16',     label:'8es de finale'},
+              {slug:'quarterfinals',   label:'Quarts de finale'},
+              {slug:'semifinals',      label:'Demi-finales'},
+              {slug:'3rd-place-match', label:'Match 3e place'},
+              {slug:'final',           label:'FINALE'},
             ];
             const rounds=ROUNDS.map(r=>({...r, matches:espnScores
-              .filter(ev=>{ const d=d8(ev); return d>=r.from && d<=r.to; })
+              .filter(ev=>ev.season?.slug===r.slug)
               .sort((a,b)=>(a.date||'').localeCompare(b.date||''))}));
             if(rounds.every(r=>r.matches.length===0)) return (
               <div style={{background:'#fff',border:'1px solid var(--line)',borderRadius:12,padding:'20px 24px',color:'var(--muted)',fontSize:13,textAlign:'center'}}>
