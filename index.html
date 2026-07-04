@@ -736,8 +736,11 @@ function Rail({ standings, fixtures, onNav, onTrial, ads }){
 
 function Home({ articles, standings, fixtures, onOpen, onNav, onTrial, ads }){
   const fullwidthAds=(ads||[]).filter(a=>a.position==='fullwidth');
-  // All "à la une" articles rotate every 3 seconds
-  const heroes = articles.filter(a=>a.is_hero);
+  // All "à la une" articles rotate every 3 seconds.
+  // A hero expires after 2 days (based on when it was last saved).
+  const HERO_TTL = 2*24*3600*1000;
+  const heroes = articles.filter(a=>a.is_hero &&
+    Date.now()-new Date(a.updated_at||a.created_at).getTime() < HERO_TTL);
   const [heroIdx,setHeroIdx]=useState(0);
   useEffect(()=>{
     if(heroes.length<2) return;
@@ -5890,6 +5893,10 @@ function App(){
   },[]);
 
   const loadAdmin = useCallback(async ()=>{
+    // Auto-expire "à la une": clear hero flags older than 2 days
+    const heroCutoff = new Date(Date.now()-2*24*3600*1000).toISOString();
+    await sb.from('articles').update({is_hero:false})
+      .eq('is_hero',true).lt('updated_at',heroCutoff);
     const [art,st,sc,fx,pt,ads,sh]=await Promise.all([
       fetchArticlesMeta(false),
       sb.from('standings').select('*'),
