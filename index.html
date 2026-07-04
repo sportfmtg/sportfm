@@ -258,6 +258,8 @@
   .player .listeners{ display:flex; align-items:center; gap:6px; color:#cdd6ec; font-size:12px; flex:0 0 auto; }
   .player .listeners .dot{ animation:pulse 1.5s ease-in-out infinite; }
   .player .live-pill{ font-size:11px; font-weight:700; color:#9fb0d8; }
+  .player-social{ flex:0 0 auto; }
+  .player-social a{ width:30px; height:30px; font-size:14px; }
 
   /* toast */
   .toast{ position:fixed; left:50%; bottom:96px; transform:translateX(-50%) translateY(20px);
@@ -379,6 +381,7 @@
   @media (max-width:720px){
     /* public site header */
     nav.main,.search,.grow{ display:none; }
+    .player-social{ display:none; }
     .menu-btn{ display:flex; flex-direction:column; gap:4px; padding:6px; }
     .menu-btn i{ width:20px; height:2px; background:#27304a; display:block; border-radius:2px; }
     header .wrap{ gap:12px; }
@@ -599,7 +602,24 @@ function Player({ liveScores }){
   const [vol,setVol]=useState(0.7);
   const [err,setErr]=useState(false);
   const audioRef=useRef(null);
-  const liveCount = liveScores.filter(s=>s.is_live).length;
+
+  // Simulated live listener count: drifts naturally between 390 and 849
+  const [listeners,setListeners]=useState(()=>390+Math.floor(Math.random()*460));
+  useEffect(()=>{
+    let alive=true, timer;
+    function tick(){
+      if(!alive) return;
+      setListeners(n=>{
+        // small random drift, occasionally a bigger jump (show start/end effect)
+        const big=Math.random()<0.08;
+        const delta=big ? Math.round((Math.random()-0.5)*60) : Math.round((Math.random()-0.48)*14);
+        return Math.max(390, Math.min(849, n+delta));
+      });
+      timer=setTimeout(tick, 4000+Math.random()*9000);
+    }
+    timer=setTimeout(tick, 4000);
+    return ()=>{ alive=false; clearTimeout(timer); };
+  },[]);
 
   useEffect(()=>{ if(audioRef.current) audioRef.current.volume=vol; },[vol]);
 
@@ -632,7 +652,18 @@ function Player({ liveScores }){
         </div>
         <div className="wave"><i></i><i></i><i></i><i></i><i></i><i></i></div>
         <div className="progress">
-          <span className="listeners"><span className="dot"></span>{liveCount} personne{liveCount===1?'':'s'} en ligne</span>
+          <span className="listeners"><span className="dot"></span>{listeners.toLocaleString('fr-FR')} auditeurs en ligne</span>
+        </div>
+        <div className="social-links player-social">
+          <a href="https://www.youtube.com/@SportfmReplay" target="_blank" rel="noopener noreferrer" title="YouTube">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.5 12 3.5 12 3.5s-7.5 0-9.4.6A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.6 9.4.6 9.4.6s7.5 0 9.4-.6a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8zM9.7 15.5V8.5l6.3 3.5-6.3 3.5z"/></svg>
+          </a>
+          <a href="https://www.instagram.com/sportfmtg/" target="_blank" rel="noopener noreferrer" title="Instagram">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.2c3.2 0 3.6 0 4.9.1 3.3.1 4.8 1.7 4.9 4.9.1 1.3.1 1.6.1 4.8 0 3.2 0 3.6-.1 4.8-.1 3.2-1.7 4.8-4.9 4.9-1.3.1-1.6.1-4.9.1-3.2 0-3.6 0-4.8-.1-3.3-.1-4.8-1.7-4.9-4.9C2.2 15.6 2.2 15.2 2.2 12c0-3.2 0-3.6.1-4.8C2.4 3.9 4 2.3 7.2 2.3c1.2-.1 1.6-.1 4.8-.1zM12 0C8.7 0 8.3 0 7.1.1 2.7.3.3 2.7.1 7.1.0 8.3 0 8.7 0 12s0 3.7.1 4.9c.2 4.4 2.6 6.8 7 7C8.3 24 8.7 24 12 24s3.7 0 4.9-.1c4.4-.2 6.8-2.6 7-7 .1-1.2.1-1.6.1-4.9s0-3.7-.1-4.9c-.2-4.4-2.6-6.8-7-7C15.7 0 15.3 0 12 0zm0 5.8a6.2 6.2 0 1 0 0 12.4A6.2 6.2 0 0 0 12 5.8zm0 10.2a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.4-11.8a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8z"/></svg>
+          </a>
+          <a href="https://www.tiktok.com/@sportfmtg" target="_blank" rel="noopener noreferrer" title="TikTok">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19.6 3.3A4.5 4.5 0 0 1 15.2 0h-3.3v15.6a2.7 2.7 0 0 1-2.7 2.3 2.7 2.7 0 0 1-2.7-2.7 2.7 2.7 0 0 1 2.7-2.7c.3 0 .5 0 .8.1V9.2a6 6 0 0 0-.8-.1 6 6 0 0 0-6 6 6 6 0 0 0 6 6 6 6 0 0 0 6-6V8.2a7.8 7.8 0 0 0 4.6 1.5V6.4a4.5 4.5 0 0 1-3.2-3.1h1.8z"/></svg>
+          </a>
         </div>
         <div className="vol">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9fb0d8" strokeWidth="2"><path d="M3 10v4h4l5 4V6L7 10H3z"></path><path d="M16 8a5 5 0 0 1 0 8"></path></svg>
