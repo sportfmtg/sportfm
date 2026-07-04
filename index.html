@@ -685,9 +685,46 @@ function Player({ liveScores }){
 //  PUBLIC SITE
 // ============================================================
 function Ticker({ scores }){
-  if(!scores.length) return null;
-  const one = scores.map((g,i)=>(
-    <div className="tk" key={i}>
+  // Live matches auto-updated from ESPN (score + minute), refreshed every 45s.
+  const [espn,setEspn]=useState([]);
+  useEffect(()=>{
+    let alive=true;
+    async function load(){
+      try{
+        const r=await fetch('https://site.api.espn.com/apis/site/v2/sports/soccer/FIFA.WORLD/scoreboard');
+        const d=await r.json();
+        if(!alive) return;
+        const evs=(d.events||[]).map(ev=>{
+          const c=ev.competitions?.[0]; const comps=c?.competitors||[];
+          const home=comps.find(x=>x.homeAway==='home'), away=comps.find(x=>x.homeAway==='away');
+          if(!home||!away) return null;
+          const st=ev.status?.type; if(!st||st.state==='pre') return null;
+          return {
+            id:'espn-'+ev.id,
+            home:home.team?.shortDisplayName||home.team?.displayName||'',
+            away:away.team?.shortDisplayName||away.team?.displayName||'',
+            score:`${home.score??0} - ${away.score??0}`,
+            status: st.state==='in' ? (st.shortDetail||ev.status?.displayClock||'LIVE') : 'FT',
+            is_live: st.state==='in',
+          };
+        }).filter(Boolean);
+        setEspn(evs);
+      }catch{}
+    }
+    load();
+    const t=setInterval(load, 45000);
+    return ()=>{ alive=false; clearInterval(t); };
+  },[]);
+
+  // Manual scores kept unless ESPN already covers the same match
+  const norm=s=>(s||'').toLowerCase().replace(/[^a-zà-ÿ]/g,'');
+  const espnKeys=new Set(espn.flatMap(g=>[norm(g.home)+'|'+norm(g.away), norm(g.away)+'|'+norm(g.home)]));
+  const manual=scores.filter(g=>!espnKeys.has(norm(g.home)+'|'+norm(g.away)));
+  const all=[...espn.filter(g=>g.is_live), ...manual, ...espn.filter(g=>!g.is_live)];
+
+  if(!all.length) return null;
+  const one = all.map((g,i)=>(
+    <div className="tk" key={g.id||i}>
       <span style={{fontWeight:700}}>{g.home}</span>
       <span className="score">{g.score}</span>
       <span style={{fontWeight:700}}>{g.away}</span>
