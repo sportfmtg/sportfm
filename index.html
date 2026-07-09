@@ -1189,6 +1189,73 @@ function ArticlesPage({ articles, onOpen }){
   );
 }
 
+function ArticleComments({ articleId }){
+  const [comments,setComments]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [name,setName]=useState(()=>{ try{ return localStorage.getItem('commenter_name')||''; }catch{ return ''; } });
+  const [text,setText]=useState('');
+  const [busy,setBusy]=useState(false);
+  const [err,setErr]=useState('');
+
+  async function load(){
+    const { data }=await sb.from('article_comments').select('*')
+      .eq('article_id',articleId).order('created_at',{ascending:false}).limit(200);
+    setComments(data||[]); setLoading(false);
+  }
+  useEffect(()=>{ setLoading(true); load(); },[articleId]);
+
+  async function submit(){
+    if(!name.trim()){ setErr('Entrez votre nom'); return; }
+    if(!text.trim()){ setErr('Écrivez un commentaire'); return; }
+    setErr(''); setBusy(true);
+    const { error }=await sb.from('article_comments').insert([{
+      article_id:articleId, name:name.trim().slice(0,60), comment:text.trim().slice(0,1200) }]);
+    setBusy(false);
+    if(error){ setErr('Envoi impossible — réessayez plus tard'); console.error(error); return; }
+    try{ localStorage.setItem('commenter_name',name.trim()); }catch{}
+    setText(''); load();
+  }
+
+  return (
+    <div style={{marginTop:36,borderTop:'2px solid var(--line)',paddingTop:24}}>
+      <h3 style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:19,color:'var(--navy)',margin:'0 0 16px'}}>
+        💬 Commentaires {comments.length>0&&<span style={{color:'var(--muted)',fontWeight:600,fontSize:14}}>({comments.length})</span>}
+      </h3>
+
+      {/* form */}
+      <div style={{background:'#f8f9fc',border:'1px solid var(--line)',borderRadius:12,padding:16,marginBottom:22}}>
+        <input value={name} onChange={e=>setName(e.target.value)} placeholder="Votre nom"
+          style={{width:'100%',maxWidth:280,padding:'9px 12px',border:'1px solid var(--line)',borderRadius:8,fontSize:13.5,outline:'none',marginBottom:8,display:'block'}} />
+        <textarea value={text} onChange={e=>setText(e.target.value)} placeholder="Partagez votre avis sur cet article…"
+          style={{width:'100%',minHeight:70,padding:'10px 12px',border:'1px solid var(--line)',borderRadius:8,fontSize:13.5,outline:'none',resize:'vertical'}} />
+        <div style={{display:'flex',alignItems:'center',gap:12,marginTop:8}}>
+          <button className="btn-primary" style={{fontSize:13,padding:'9px 18px'}} disabled={busy} onClick={submit}>
+            {busy?'Envoi…':'Publier le commentaire'}
+          </button>
+          {err&&<span style={{fontSize:12.5,color:'var(--red)',fontWeight:600}}>{err}</span>}
+        </div>
+      </div>
+
+      {/* list */}
+      {loading ? <Spinner/> : comments.length===0 ? (
+        <p style={{color:'var(--muted)',fontSize:13.5,fontStyle:'italic'}}>Aucun commentaire — soyez le premier à réagir !</p>
+      ) : comments.map(c=>(
+        <div key={c.id} style={{padding:'12px 0',borderBottom:'1px solid var(--line)'}}>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+            <span style={{width:28,height:28,borderRadius:'50%',background:'var(--navy)',color:'#fff',display:'inline-flex',
+              alignItems:'center',justifyContent:'center',fontWeight:800,fontSize:12,flexShrink:0}}>
+              {(c.name||'?').trim().charAt(0).toUpperCase()}
+            </span>
+            <span style={{fontWeight:700,fontSize:13.5,color:'var(--navy)'}}>{c.name}</span>
+            <span style={{fontSize:11.5,color:'var(--muted)'}}>{timeAgo(c.created_at)}</span>
+          </div>
+          <p style={{margin:'0 0 0 36px',fontSize:14,color:'#2b3142',lineHeight:1.55,whiteSpace:'pre-wrap'}}>{c.comment}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ArticleView({ article, onBack, backLabel }){
   const blocks=(article.body||'').split(/\n\s*\n/).filter(Boolean);
   const [copied,setCopied]=useState(false);
@@ -1240,6 +1307,7 @@ function ArticleView({ article, onBack, backLabel }){
       </div>
       <div className="prose">{blocks.map((b,i)=><p key={i}>{b}</p>)}</div>
       {shareRow}
+      <ArticleComments articleId={article.id} />
     </article>
   );
 }
@@ -2001,6 +2069,29 @@ function ArticleEditor({ initial, onSave, onCancel, toast }){
   const imgRef=useRef(null);
   const set=(k,v)=>setA(p=>({...p,[k]:v}));
 
+  // Auto-save: work is stored locally every 1.5s; restorable if the tab
+  // crashes or is closed before publishing
+  const draftKey='article_draft_'+((initial&&initial.id)||'new');
+  const [draftFound,setDraftFound]=useState(()=>{
+    try{
+      const raw=localStorage.getItem(draftKey);
+      if(!raw) return null;
+      const d=JSON.parse(raw);
+      return (d.data&&(d.data.title||d.data.body)) ? d : null;
+    }catch{ return null; }
+  });
+  const [savedAt,setSavedAt]=useState(null);
+  useEffect(()=>{
+    const t=setTimeout(()=>{
+      if(a.title||a.body){
+        localStorage.setItem(draftKey, JSON.stringify({data:a, at:Date.now()}));
+        setSavedAt(new Date());
+      }
+    },1500);
+    return ()=>clearTimeout(t);
+  },[a]);
+  const clearDraft=()=>{ try{ localStorage.removeItem(draftKey); }catch{} };
+
   async function handleImgUpload(e){
     const file=e.target.files?.[0]; if(!file) return;
     if(!file.type.startsWith('image/')){ toast('Fichier invalide — image uniquement'); return; }
@@ -2030,12 +2121,29 @@ function ArticleEditor({ initial, onSave, onCancel, toast }){
     else { res=await sb.from('articles').insert([payload]); }
     setBusy(false);
     if(res.error){ toast('Échec de l\'enregistrement — '+res.error.message); return; }
+    clearDraft();
     toast(a.id?'Article mis à jour':'Article publié');
     onSave(a.title);
   }
   return (
     <div className="panel">
-      <h3>{a.id?'Modifier l\'article':'Nouvel article'}</h3>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}}>
+        <h3 style={{margin:0}}>{a.id?'Modifier l\'article':'Nouvel article'}</h3>
+        {savedAt && <span style={{fontSize:11.5,color:'#1f7a48',fontWeight:600}}>💾 Auto-sauvegardé à {savedAt.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>}
+      </div>
+      {draftFound && (
+        <div style={{background:'#fff8e6',border:'1px solid #e8c85a',borderRadius:10,padding:'10px 14px',margin:'12px 0',
+          display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+          <span style={{fontSize:13,fontWeight:600,color:'#7a5c00',flex:1}}>
+            💾 Brouillon auto-sauvegardé trouvé ({timeAgo(new Date(draftFound.at).toISOString())}) : « {(draftFound.data.title||'Sans titre').slice(0,60)} »
+          </span>
+          <button className="btn-primary" style={{fontSize:12,padding:'7px 14px'}}
+            onClick={()=>{ setA(d=>({...draftFound.data, id:d.id})); setDraftFound(null); }}>Reprendre</button>
+          <button className="btn-ghost" style={{fontSize:12,padding:'7px 14px'}}
+            onClick={()=>{ clearDraft(); setDraftFound(null); }}>Ignorer</button>
+        </div>
+      )}
+      <div style={{height:14}}/>
       <div className="field"><label>Titre *</label><input value={a.title} onChange={e=>set('title',e.target.value)} placeholder="Les Hawks dominent United…" /></div>
       <div className="grid2">
         <div className="field"><label>Étiquette (sur-titre)</label><input value={a.tag} onChange={e=>set('tag',e.target.value)} placeholder="COMPTE-RENDU" /></div>
@@ -2141,6 +2249,21 @@ function AdminArticles({ articles, reload, toast, adminEmail }){
         <h3 style={{margin:0}}>Articles ({shown.length}{range==='week'?` cette semaine · ${articles.length} au total`:''})</h3>
         <button className="btn-primary" onClick={()=>setEditing(EMPTY_ARTICLE)}>+ Nouvel article</button>
       </div>
+      {(()=>{ // unfinished auto-saved draft notice
+        try{
+          const d=JSON.parse(localStorage.getItem('article_draft_new')||'null');
+          if(d&&d.data&&(d.data.title||d.data.body)) return (
+            <div style={{background:'#fff8e6',border:'1px solid #e8c85a',borderRadius:10,padding:'9px 14px',marginBottom:14,
+              display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+              <span style={{fontSize:13,fontWeight:600,color:'#7a5c00',flex:1}}>
+                💾 Brouillon en cours : « {(d.data.title||'Sans titre').slice(0,60)} » ({timeAgo(new Date(d.at).toISOString())})
+              </span>
+              <button className="btn-ghost" style={{fontSize:12,padding:'6px 14px'}} onClick={()=>setEditing(EMPTY_ARTICLE)}>Continuer la rédaction →</button>
+            </div>
+          );
+        }catch{}
+        return null;
+      })()}
       <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap',alignItems:'center'}}>
         {[['week','7 derniers jours'],['all','Tout l\'historique']].map(([k,l])=>(
           <button key={k} onClick={()=>setRange(k)}
