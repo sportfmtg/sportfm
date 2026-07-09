@@ -2223,8 +2223,21 @@ function ArticleEditor({ initial, onSave, onCancel, toast }){
 
 function AdminArticles({ articles, reload, toast, adminEmail }){
   const [editing,setEditing]=useState(null);
-  const [range,setRange]=useState('week'); // 'week' = last 7 days | 'all' = full archive
+  const [range,setRange]=useState('week'); // 'week' | 'all' | 'comments'
   const [search,setSearch]=useState('');
+  const [allComments,setAllComments]=useState(null);
+  async function loadComments(){
+    const { data }=await sb.from('article_comments').select('*').order('created_at',{ascending:false}).limit(300);
+    setAllComments(data||[]);
+  }
+  useEffect(()=>{ if(range==='comments'&&allComments===null) loadComments(); },[range]);
+  async function delComment(c){
+    if(!confirm(`Supprimer le commentaire de ${c.name} ?`)) return;
+    const { error }=await sb.from('article_comments').delete().eq('id',c.id);
+    if(error){ toast('Échec de la suppression'); return; }
+    await logAction(adminEmail,'Commentaire supprimé',`${c.name} : ${c.comment.slice(0,60)}`);
+    toast('Commentaire supprimé'); loadComments();
+  }
   async function del(a){
     if(!confirm(`Supprimer « ${a.title} » ?`)) return;
     const { error }=await sb.from('articles').delete().eq('id',a.id);
@@ -2265,16 +2278,43 @@ function AdminArticles({ articles, reload, toast, adminEmail }){
         return null;
       })()}
       <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap',alignItems:'center'}}>
-        {[['week','7 derniers jours'],['all','Tout l\'historique']].map(([k,l])=>(
+        {[['week','7 derniers jours'],['all','Tout l\'historique'],['comments','💬 Commentaires']].map(([k,l])=>(
           <button key={k} onClick={()=>setRange(k)}
             style={{padding:'6px 14px',borderRadius:20,fontSize:12.5,fontWeight:700,cursor:'pointer',border:'2px solid',
               borderColor:range===k?'var(--navy)':'var(--line)',
               background:range===k?'var(--navy)':'#fff',color:range===k?'#fff':'#4a5168'}}>{l}</button>
         ))}
-        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Rechercher un article…"
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder={range==='comments'?'Rechercher un commentaire…':'Rechercher un article…'}
           style={{flex:1,minWidth:180,padding:'8px 12px',border:'1px solid var(--line)',borderRadius:9,fontSize:13,outline:'none'}} />
       </div>
-      {shown.length===0 ? <div className="empty">{search?'Aucun article ne correspond à la recherche.':'Aucun article publié cette semaine.'}</div> :
+      {range==='comments' ? (
+        allComments===null ? <Spinner/> :
+        (()=>{
+          const titleOf=id=>articles.find(a=>a.id===id)?.title||'Article supprimé';
+          const q=search.trim().toLowerCase();
+          const list=q ? allComments.filter(c=>(c.name+' '+c.comment+' '+titleOf(c.article_id)).toLowerCase().includes(q)) : allComments;
+          return list.length===0
+            ? <div className="empty">{q?'Aucun commentaire ne correspond à la recherche.':'Aucun commentaire pour le moment.'}</div>
+            : list.map(c=>(
+                <div key={c.id} style={{display:'flex',alignItems:'flex-start',gap:12,padding:'12px 4px',borderBottom:'1px solid var(--line)'}}>
+                  <span style={{width:30,height:30,borderRadius:'50%',background:'var(--navy)',color:'#fff',display:'inline-flex',
+                    alignItems:'center',justifyContent:'center',fontWeight:800,fontSize:12,flexShrink:0}}>
+                    {(c.name||'?').trim().charAt(0).toUpperCase()}
+                  </span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                      <span style={{fontWeight:700,fontSize:13.5,color:'var(--navy)'}}>{c.name}</span>
+                      <span style={{fontSize:11.5,color:'var(--muted)'}}>{timeAgo(c.created_at)}</span>
+                    </div>
+                    <div style={{fontSize:13.5,color:'#2b3142',lineHeight:1.5,margin:'3px 0',whiteSpace:'pre-wrap'}}>{c.comment}</div>
+                    <div style={{fontSize:11.5,color:'var(--muted)'}}>📰 {titleOf(c.article_id).slice(0,90)}</div>
+                  </div>
+                  <button className="icon-btn del" style={{flexShrink:0}} onClick={()=>delComment(c)}>✕ Supprimer</button>
+                </div>
+              ));
+        })()
+      ) :
+      shown.length===0 ? <div className="empty">{search?'Aucun article ne correspond à la recherche.':'Aucun article publié cette semaine.'}</div> :
       <table className="admin-table"><thead><tr>
         <th>Titre</th><th>Catégorie</th><th>Statut</th><th>Modifié</th><th></th>
       </tr></thead><tbody>
