@@ -1259,7 +1259,10 @@ function ArticleComments({ articleId }){
 function ArticleView({ article, onBack, backLabel }){
   const blocks=(article.body||'').split(/\n\s*\n/).filter(Boolean);
   const [copied,setCopied]=useState(false);
-  const shareUrl=`https://sportfmtg.com/#article=${article.id}`;
+  // /a/<id> serves real Open Graph tags (title, summary, photo) so
+  // Facebook/WhatsApp previews show the article, not just a bare link.
+  // It redirects human visitors straight into the article.
+  const shareUrl=`https://sportfmtg.com/a/${article.id}`;
   const shareText=article.title;
   async function copyLink(){
     try{ await navigator.clipboard.writeText(shareUrl); }
@@ -1305,7 +1308,12 @@ function ArticleView({ article, onBack, backLabel }){
       <div className={"img shot"+(article.image_url?" has-img":"")} style={article.image_url?{'--img':`url(${article.image_url})`}:null}>
         {!article.image_url && <span className="imglabel">[ photo de l'article ]</span>}
       </div>
-      <div className="prose">{blocks.map((b,i)=><p key={i}>{b}</p>)}</div>
+      <div className="prose">{blocks.map((b,i)=>{
+        const m=b.trim().match(/^\[img:(\S+)\]$/);
+        return m
+          ? <img key={i} src={m[1]} alt="" style={{width:'100%',borderRadius:12,margin:'6px 0 20px',display:'block'}} />
+          : <p key={i}>{b}</p>;
+      })}</div>
       {shareRow}
       <ArticleComments articleId={article.id} />
     </article>
@@ -2067,6 +2075,9 @@ function ArticleEditor({ initial, onSave, onCancel, toast }){
   const [busy,setBusy]=useState(false);
   const [uploading,setUploading]=useState(false);
   const imgRef=useRef(null);
+  const bodyImgRef=useRef(null);
+  const bodyTaRef=useRef(null);
+  const [bodyImgBusy,setBodyImgBusy]=useState(false);
   const set=(k,v)=>setA(p=>({...p,[k]:v}));
 
   // Auto-save: work is stored locally every 1.5s; restorable if the tab
@@ -2111,6 +2122,41 @@ function ArticleEditor({ initial, onSave, onCancel, toast }){
       toast(msg);
     }
     finally{ setUploading(false); }
+  }
+  // Uploads an image and inserts an [img:URL] marker at the cursor position
+  // in the body textarea — ArticleView renders that marker as a real <img>
+  // between the surrounding paragraphs.
+  async function handleBodyImgUpload(e){
+    const file=e.target.files?.[0]; if(!file) return;
+    if(!file.type.startsWith('image/')){ toast('Fichier invalide — image uniquement'); return; }
+    if(file.size>8*1024*1024){ toast('Image trop lourde (max 8 Mo)'); return; }
+    setBodyImgBusy(true);
+    try{
+      const ext=file.name.split('.').pop().toLowerCase();
+      const path=`articles/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+      const { error }=await sb.storage.from('article-images').upload(path,file,{contentType:file.type});
+      if(error) throw error;
+      const { data }=sb.storage.from('article-images').getPublicUrl(path);
+      const marker=`\n\n[img:${data.publicUrl}]\n\n`;
+      const ta=bodyTaRef.current;
+      const pos = ta ? ta.selectionStart : a.body.length;
+      const before=a.body.slice(0,pos), after=a.body.slice(pos);
+      const next=before+marker+after;
+      set('body',next);
+      toast('Image insérée ✓');
+      // restore focus/cursor after the inserted marker
+      requestAnimationFrame(()=>{
+        if(!ta) return;
+        const cursor=before.length+marker.length;
+        ta.focus(); ta.setSelectionRange(cursor,cursor);
+      });
+    } catch(err){
+      const msg = err.message?.includes('Bucket not found')
+        ? 'Bucket introuvable — créez le bucket "article-images" dans Supabase → Storage'
+        : 'Erreur upload : '+err.message;
+      toast(msg);
+    }
+    finally{ setBodyImgBusy(false); if(bodyImgRef.current) bodyImgRef.current.value=''; }
   }
   async function save(){
     if(!a.title){ toast('Le titre est obligatoire'); return; }
@@ -2183,7 +2229,18 @@ function ArticleEditor({ initial, onSave, onCancel, toast }){
           </select></div>
       </div>
       <div className="field"><label>Chapô (résumé)</label><textarea style={{minHeight:60}} value={a.dek} onChange={e=>set('dek',e.target.value)} /></div>
-      <div className="field"><label>Contenu</label><textarea style={{minHeight:200}} value={a.body} onChange={e=>set('body',e.target.value)} placeholder="Rédigez l'article. Laissez une ligne vide entre les paragraphes." /><div className="hint">Séparez les paragraphes par une ligne vide.</div></div>
+      <div className="field">
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}}>
+          <label style={{margin:0}}>Contenu</label>
+          <input hidden ref={bodyImgRef} type="file" accept="image/*" onChange={handleBodyImgUpload} />
+          <button type="button" className="btn-ghost" style={{fontSize:12,padding:'6px 12px'}}
+            onClick={()=>bodyImgRef.current?.click()} disabled={bodyImgBusy}>
+            {bodyImgBusy?'Envoi…':'🖼️ Insérer une image ici'}
+          </button>
+        </div>
+        <textarea ref={bodyTaRef} style={{minHeight:200}} value={a.body} onChange={e=>set('body',e.target.value)} placeholder="Rédigez l'article. Laissez une ligne vide entre les paragraphes." />
+        <div className="hint">Séparez les paragraphes par une ligne vide. Placez le curseur où vous voulez une photo, puis cliquez « Insérer une image ici ».</div>
+      </div>
       <div className="grid2">
         <div className="field"><label>Auteur</label><input value={a.author} onChange={e=>set('author',e.target.value)} /></div>
         <div className="field"><label>Temps de lecture</label><input value={a.read_time} onChange={e=>set('read_time',e.target.value)} placeholder="6 min de lecture" /></div>

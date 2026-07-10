@@ -6,5 +6,8 @@
       "destination": "https://sportfmtg.com/$1",
       "permanent": true
     }
+  ],
+  "rewrites": [
+    { "source": "/a/:id", "destination": "/api/share?id=:id" }
   ]
 }
