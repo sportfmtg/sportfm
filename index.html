@@ -223,6 +223,25 @@ if (location.hostname.endsWith('.vercel.app')) {
   .article .byline{ margin-bottom:20px; }
   .article .img{ aspect-ratio:16/9; border-radius:12px; overflow:hidden; margin-bottom:24px; }
   .article .prose p{ font-size:17px; line-height:1.65; color:#2b3142; margin:0 0 18px; }
+  .article .prose div{ font-size:17px; line-height:1.65; color:#2b3142; }
+  .article .prose img{ width:100%; border-radius:12px; margin:6px 0 20px; display:block; }
+  .article .prose blockquote{ margin:24px 0; padding:18px 24px 18px 56px; background:#f6f8fc;
+    border-left:4px solid var(--red); border-radius:0 12px 12px 0; font-size:19px; line-height:1.5;
+    color:var(--navy); font-style:italic; font-weight:600; position:relative; }
+  .article .prose blockquote::before{ content:'“'; position:absolute; left:16px; top:6px;
+    font-family:'Barlow Semi Condensed',sans-serif; font-size:44px; color:var(--red); font-style:normal; line-height:1; }
+
+  /* rich text editor (admin) */
+  .rich-editor{ width:100%; min-height:220px; padding:12px 14px; border:1px solid var(--line);
+    border-radius:9px; font-size:14.5px; line-height:1.6; color:var(--ink); background:#fff; outline:none; overflow-y:auto; max-height:520px; }
+  .rich-editor:focus{ border-color:var(--red); box-shadow:0 0 0 3px rgba(239,0,63,.1); }
+  .rich-editor p{ margin:0 0 12px; }
+  .rich-editor img{ max-width:260px; border-radius:8px; display:block; margin:8px 0; }
+  .rich-editor blockquote{ border-left:3px solid var(--red); background:#f6f8fc; padding:8px 14px; margin:10px 0; font-style:italic; color:var(--navy); border-radius:0 8px 8px 0; }
+  .rich-toolbar{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px; }
+  .rich-toolbar button{ padding:6px 12px; border:1px solid var(--line); border-radius:7px; background:#fff;
+    font-size:13px; font-weight:700; cursor:pointer; color:var(--navy); }
+  .rich-toolbar button:hover{ background:#f1f2f6; }
 
   /* footer */
   footer{ background:var(--navy-deep); color:#9aa6c8; }
@@ -1338,12 +1357,14 @@ function ArticleView({ article, onBack, backLabel }){
       <div className={"img shot"+(article.image_url?" has-img":"")} style={article.image_url?{'--img':`url(${article.image_url})`}:null}>
         {!article.image_url && <span className="imglabel">[ photo de l'article ]</span>}
       </div>
-      <div className="prose">{blocks.map((b,i)=>{
-        const m=b.trim().match(/^\[img:(\S+)\]$/);
-        return m
-          ? <img key={i} src={m[1]} alt="" style={{width:'100%',borderRadius:12,margin:'6px 0 20px',display:'block'}} />
-          : <p key={i}>{b}</p>;
-      })}</div>
+      {/(<[a-z][^>]*>)/i.test(article.body||'')
+        ? <div className="prose" dangerouslySetInnerHTML={{__html:article.body}} />
+        : <div className="prose">{blocks.map((b,i)=>{
+            const m=b.trim().match(/^\[img:\s*(\S+?)\s*\]$/);
+            return m
+              ? <img key={i} src={m[1]} alt="" style={{width:'100%',borderRadius:12,margin:'6px 0 20px',display:'block'}} />
+              : <p key={i}>{b}</p>;
+          })}</div>}
       {shareRow}
       <ArticleComments articleId={article.id} />
     </article>
@@ -2106,9 +2127,44 @@ function ArticleEditor({ initial, onSave, onCancel, toast }){
   const [uploading,setUploading]=useState(false);
   const imgRef=useRef(null);
   const bodyImgRef=useRef(null);
-  const bodyTaRef=useRef(null);
+  const bodyEdRef=useRef(null);
   const [bodyImgBusy,setBodyImgBusy]=useState(false);
   const set=(k,v)=>setA(p=>({...p,[k]:v}));
+
+  // ---- rich text body editor (contentEditable) ----
+  // Legacy plain-text bodies (incl. [img:URL] markers) are converted to HTML on open.
+  const bodyToHtml=(body)=>{
+    if(!body) return '';
+    if(/<[a-z][^>]*>/i.test(body)) return body;
+    return body.split(/\n\s*\n/).filter(Boolean).map(b=>{
+      const m=b.trim().match(/^\[img:\s*(\S+?)\s*\]$/);
+      if(m) return `<img src="${m[1]}">`;
+      return '<p>'+b.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'<br>')+'</p>';
+    }).join('');
+  };
+  const syncFromEditor=()=>{ if(bodyEdRef.current) set('body', bodyEdRef.current.innerHTML); };
+  const setEditorHtml=(body)=>{ if(bodyEdRef.current) bodyEdRef.current.innerHTML=bodyToHtml(body); };
+  useEffect(()=>{
+    try{ document.execCommand('defaultParagraphSeparator',false,'p'); }catch{}
+    setEditorHtml((initial&&initial.body)||'');
+  },[]);
+  const exec=(cmd,val)=>{
+    bodyEdRef.current&&bodyEdRef.current.focus();
+    document.execCommand(cmd,false,val||null);
+    syncFromEditor();
+  };
+  const toggleQuote=()=>{
+    const sel=window.getSelection();
+    const inQuote=sel&&sel.anchorNode&&(sel.anchorNode.nodeType===1?sel.anchorNode:sel.anchorNode.parentElement)?.closest?.('blockquote');
+    exec('formatBlock', inQuote?'<p>':'<blockquote>');
+  };
+  const onEditorPaste=(e)=>{
+    // paste as plain text so fonts stay uniform across all articles
+    e.preventDefault();
+    const text=(e.clipboardData||window.clipboardData).getData('text/plain');
+    document.execCommand('insertText',false,text);
+    syncFromEditor();
+  };
 
   // Auto-save: work is stored locally every 1.5s; restorable if the tab
   // crashes or is closed before publishing
@@ -2167,19 +2223,15 @@ function ArticleEditor({ initial, onSave, onCancel, toast }){
       const { error }=await sb.storage.from('article-images').upload(path,file,{contentType:file.type});
       if(error) throw error;
       const { data }=sb.storage.from('article-images').getPublicUrl(path);
-      const marker=`\n\n[img:${data.publicUrl}]\n\n`;
-      const ta=bodyTaRef.current;
-      const pos = ta ? ta.selectionStart : a.body.length;
-      const before=a.body.slice(0,pos), after=a.body.slice(pos);
-      const next=before+marker+after;
-      set('body',next);
+      const ed=bodyEdRef.current;
+      if(ed){
+        ed.focus();
+        document.execCommand('insertHTML',false,`<img src="${data.publicUrl}"><p><br></p>`);
+        syncFromEditor();
+      } else {
+        set('body',(a.body||'')+`<img src="${data.publicUrl}">`);
+      }
       toast('Image insérée ✓');
-      // restore focus/cursor after the inserted marker
-      requestAnimationFrame(()=>{
-        if(!ta) return;
-        const cursor=before.length+marker.length;
-        ta.focus(); ta.setSelectionRange(cursor,cursor);
-      });
     } catch(err){
       const msg = err.message?.includes('Bucket not found')
         ? 'Bucket introuvable — créez le bucket "article-images" dans Supabase → Storage'
@@ -2214,7 +2266,7 @@ function ArticleEditor({ initial, onSave, onCancel, toast }){
             💾 Brouillon auto-sauvegardé trouvé ({timeAgo(new Date(draftFound.at).toISOString())}) : « {(draftFound.data.title||'Sans titre').slice(0,60)} »
           </span>
           <button className="btn-primary" style={{fontSize:12,padding:'7px 14px'}}
-            onClick={()=>{ setA(d=>({...draftFound.data, id:d.id})); setDraftFound(null); }}>Reprendre</button>
+            onClick={()=>{ setA(d=>({...draftFound.data, id:d.id})); setEditorHtml(draftFound.data.body||''); setDraftFound(null); }}>Reprendre</button>
           <button className="btn-ghost" style={{fontSize:12,padding:'7px 14px'}}
             onClick={()=>{ clearDraft(); setDraftFound(null); }}>Ignorer</button>
         </div>
@@ -2260,16 +2312,21 @@ function ArticleEditor({ initial, onSave, onCancel, toast }){
       </div>
       <div className="field"><label>Chapô (résumé)</label><textarea style={{minHeight:60}} value={a.dek} onChange={e=>set('dek',e.target.value)} /></div>
       <div className="field">
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}}>
-          <label style={{margin:0}}>Contenu</label>
+        <label>Contenu</label>
+        <div className="rich-toolbar">
+          <button type="button" onMouseDown={e=>e.preventDefault()} onClick={()=>exec('bold')} title="Gras (Ctrl+B)"><b>B</b></button>
+          <button type="button" onMouseDown={e=>e.preventDefault()} onClick={()=>exec('italic')} title="Italique (Ctrl+I)"><i>I</i></button>
+          <button type="button" onMouseDown={e=>e.preventDefault()} onClick={()=>exec('underline')} title="Souligné (Ctrl+U)"><u>U</u></button>
+          <button type="button" onMouseDown={e=>e.preventDefault()} onClick={toggleQuote} title="Mettre la sélection en citation"
+            style={{color:'var(--red)'}}>❝ Citation</button>
           <input hidden ref={bodyImgRef} type="file" accept="image/*" onChange={handleBodyImgUpload} />
-          <button type="button" className="btn-ghost" style={{fontSize:12,padding:'6px 12px'}}
-            onClick={()=>bodyImgRef.current?.click()} disabled={bodyImgBusy}>
-            {bodyImgBusy?'Envoi…':'🖼️ Insérer une image ici'}
+          <button type="button" onClick={()=>bodyImgRef.current?.click()} disabled={bodyImgBusy}>
+            {bodyImgBusy?'Envoi…':'🖼️ Image'}
           </button>
         </div>
-        <textarea ref={bodyTaRef} style={{minHeight:200}} value={a.body} onChange={e=>set('body',e.target.value)} placeholder="Rédigez l'article. Laissez une ligne vide entre les paragraphes." />
-        <div className="hint">Séparez les paragraphes par une ligne vide. Placez le curseur où vous voulez une photo, puis cliquez « Insérer une image ici ».</div>
+        <div ref={bodyEdRef} className="rich-editor" contentEditable suppressContentEditableWarning
+          onInput={syncFromEditor} onBlur={syncFromEditor} onPaste={onEditorPaste} />
+        <div className="hint">Sélectionnez du texte puis B / I / U pour le mettre en forme, ou « ❝ Citation » pour l'encadrer comme une citation mise en valeur. Placez le curseur où vous voulez une photo puis « 🖼️ Image » — elle s'affiche directement ici et dans l'article.</div>
       </div>
       <div className="grid2">
         <div className="field"><label>Auteur</label><input value={a.author} onChange={e=>set('author',e.target.value)} /></div>
