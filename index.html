@@ -42,6 +42,7 @@ if (location.hostname.endsWith('.vercel.app')) {
   @keyframes pulse{ 0%,100%{ opacity:1 } 50%{ opacity:.35 } }
   @keyframes fadein{ from{ opacity:0; transform:translateY(8px) } to{ opacity:1; transform:none } }
   @keyframes spin{ to{ transform:rotate(360deg) } }
+  @keyframes popIn{ from{ opacity:0; transform:scale(.92) } to{ opacity:1; transform:scale(1) } }
   @media (prefers-reduced-motion: reduce){ *{ animation:none !important; transition:none !important; } }
 
   .spinner{ width:34px; height:34px; border:3px solid var(--line); border-top-color:var(--red);
@@ -5486,7 +5487,55 @@ function AdBlock({ ad }){
     : card;
 }
 
-const EMPTY_AD = { title:'', type:'banner', image_url:'', video_url:'', link_url:'', active:true, position:'sidebar', page_placement:'all', sort_order:0 };
+// Popup ad: appears 10s after arrival; closing it hides it for 24h (per ad).
+function PopupAd({ ads }){
+  const ad=(ads||[]).find(a=>a.position==='popup'&&a.active);
+  const [show,setShow]=useState(false);
+  useEffect(()=>{
+    if(!ad) return;
+    try{
+      const closedAt=Number(localStorage.getItem('popup_closed_'+ad.id)||0);
+      if(Date.now()-closedAt < 24*3600*1000) return;
+    }catch{}
+    const t=setTimeout(()=>setShow(true),10000);
+    return ()=>clearTimeout(t);
+  },[ad&&ad.id]);
+  if(!ad||!show) return null;
+  function close(){
+    try{ localStorage.setItem('popup_closed_'+ad.id, String(Date.now())); }catch{}
+    setShow(false);
+  }
+  return (
+    <div onClick={e=>{ if(e.target===e.currentTarget) close(); }}
+      style={{position:'fixed',inset:0,background:'rgba(8,20,55,.55)',zIndex:150,
+        display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
+      <div style={{background:'#fff',borderRadius:16,maxWidth:420,width:'100%',overflow:'hidden',
+        boxShadow:'0 24px 80px rgba(0,0,0,.35)',position:'relative',animation:'popIn .3s ease'}}>
+        <button onClick={close} aria-label="Fermer"
+          style={{position:'absolute',top:10,right:10,zIndex:2,width:32,height:32,borderRadius:'50%',
+            border:'none',background:'rgba(0,0,0,.55)',color:'#fff',fontSize:15,cursor:'pointer',lineHeight:1}}>✕</button>
+        {ad.link_url
+          ? <a href={ad.link_url} target="_blank" rel="noopener noreferrer" onClick={close} style={{display:'block'}}>
+              {ad.image_url && <img src={ad.image_url} style={{width:'100%',display:'block'}} alt={ad.title||''} />}
+            </a>
+          : ad.image_url && <img src={ad.image_url} style={{width:'100%',display:'block'}} alt={ad.title||''} />}
+        <div style={{padding:'18px 20px'}}>
+          <div style={{fontSize:10,fontWeight:800,letterSpacing:'.08em',color:'var(--muted)',marginBottom:6}}>PUBLICITÉ</div>
+          {ad.title && <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:20,color:'var(--navy)',marginBottom:12,lineHeight:1.2}}>{ad.title}</div>}
+          {ad.link_url && (
+            <a href={ad.link_url} target="_blank" rel="noopener noreferrer" onClick={close}
+              style={{display:'block',textAlign:'center',background:'var(--red)',color:'#fff',fontWeight:800,
+                fontSize:15,padding:'13px 18px',borderRadius:10,textDecoration:'none'}}>
+              {ad.cta_text||'En savoir plus →'}
+            </a>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const EMPTY_AD = { title:'', type:'banner', image_url:'', video_url:'', link_url:'', active:true, position:'sidebar', page_placement:'all', sort_order:0, cta_text:'' };
 const AD_PAGES = [
   { value:'all',       label:'Toutes les pages' },
   { value:'home',      label:'Accueil' },
@@ -5521,7 +5570,8 @@ function AdminAds({ ads, reload, toast, adminEmail }){
     if(!editing.title){ toast('Le titre est obligatoire'); return; }
     const payload={ title:editing.title, type:editing.type, image_url:editing.image_url||null,
       video_url:editing.video_url||null, link_url:editing.link_url||null,
-      active:editing.active, position:editing.position, page_placement:editing.page_placement||'all', sort_order:editing.sort_order||0 };
+      active:editing.active, position:editing.position, page_placement:editing.page_placement||'all', sort_order:editing.sort_order||0,
+      cta_text:editing.cta_text||null };
     const res = editing.id
       ? await sb.from('ads').update(payload).eq('id',editing.id)
       : await sb.from('ads').insert([payload]);
@@ -5559,12 +5609,21 @@ function AdminAds({ ads, reload, toast, adminEmail }){
           <select value={editing.position} onChange={e=>setEditing(p=>({...p,position:e.target.value}))}>
             <option value="sidebar">Barre latérale</option>
             <option value="fullwidth">Pleine largeur (sous hero)</option>
+            <option value="popup">Pop-up (10s après l'arrivée)</option>
           </select></div>
         <div className="field"><label>Page de placement</label>
           <select value={editing.page_placement||'all'} onChange={e=>setEditing(p=>({...p,page_placement:e.target.value}))}>
             {AD_PAGES.map(p=><option key={p.value} value={p.value}>{p.label}</option>)}
           </select></div>
       </div>
+      {editing.position==='popup' && (
+        <div className="field">
+          <label>Texte du bouton (CTA)</label>
+          <input value={editing.cta_text||''} onChange={e=>setEditing(p=>({...p,cta_text:e.target.value}))}
+            placeholder="Ex : Profitez de l'offre →" />
+          <div className="hint">La pop-up apparaît 10 secondes après l'arrivée du visiteur. S'il la ferme, elle ne réapparaît pas pendant 24h. Le clic sur l'image ou le bouton ouvre le lien.</div>
+        </div>
+      )}
       {editing.type==='banner' && (
         <div className="field">
           <label>Image de bannière</label>
@@ -5620,7 +5679,7 @@ function AdminAds({ ads, reload, toast, adminEmail }){
           <tr key={ad.id}>
             <td style={{fontWeight:600}}>{ad.title}</td>
             <td>{ad.type==='banner'?'Bannière':'Vidéo'}</td>
-            <td>{ad.position==='sidebar'?'Latérale':'Pleine largeur'}</td>
+            <td>{ad.position==='sidebar'?'Latérale':ad.position==='popup'?'Pop-up':'Pleine largeur'}</td>
             <td>{(AD_PAGES.find(p=>p.value===(ad.page_placement||'all'))||AD_PAGES[0]).label}</td>
             <td><span className={'pill '+(ad.active?'pub':'draft')}>{ad.active?'Actif':'Inactif'}</span></td>
             <td style={{textAlign:'right',whiteSpace:'nowrap'}}>
@@ -6381,6 +6440,7 @@ function App(){
       </div></footer>
 
       <Player liveScores={data.scores} />
+      <PopupAd ads={data.ads} />
 
       <div className={"drawer"+(drawer?" open":"")} onClick={e=>{if(e.target.className.includes('drawer'))setDrawer(false);}}>
         <div className="panel-d">
