@@ -6048,6 +6048,14 @@ function Admin({ session, onExit, data, reload, toast, userPerms, showProfile })
 // ============================================================
 //  ADS
 // ============================================================
+// Links saved without protocol (e.g. "jeuxdia.com") would otherwise resolve
+// relative to sportfmtg.com — force an absolute external URL.
+function extUrl(u){
+  if(!u) return u;
+  u=String(u).trim();
+  return /^https?:\/\//i.test(u) ? u : 'https://'+u.replace(/^\/+/,'');
+}
+
 function AdBlock({ ad }){
   if(!ad) return null;
   const isYT = ad.video_url && (ad.video_url.includes('youtube.com')||ad.video_url.includes('youtu.be'));
@@ -6069,7 +6077,7 @@ function AdBlock({ ad }){
     </div>
   );
   return ad.link_url
-    ? <a href={ad.link_url} target="_blank" rel="noopener noreferrer" style={{display:'block',textDecoration:'none'}}>{card}</a>
+    ? <a href={extUrl(ad.link_url)} target="_blank" rel="noopener noreferrer" style={{display:'block',textDecoration:'none'}}>{card}</a>
     : card;
 }
 
@@ -6101,7 +6109,7 @@ function PopupAd({ ads }){
           style={{position:'absolute',top:10,right:10,zIndex:2,width:32,height:32,borderRadius:'50%',
             border:'none',background:'rgba(0,0,0,.55)',color:'#fff',fontSize:15,cursor:'pointer',lineHeight:1}}>✕</button>
         {ad.link_url
-          ? <a href={ad.link_url} target="_blank" rel="noopener noreferrer" onClick={close} style={{display:'block'}}>
+          ? <a href={extUrl(ad.link_url)} target="_blank" rel="noopener noreferrer" onClick={close} style={{display:'block'}}>
               {ad.image_url && <img src={ad.image_url} style={{width:'100%',display:'block'}} alt={ad.title||''} />}
             </a>
           : ad.image_url && <img src={ad.image_url} style={{width:'100%',display:'block'}} alt={ad.title||''} />}
@@ -6109,7 +6117,7 @@ function PopupAd({ ads }){
           <div style={{fontSize:10,fontWeight:800,letterSpacing:'.08em',color:'var(--muted)',marginBottom:6}}>PUBLICITÉ</div>
           {ad.title && <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:20,color:'var(--navy)',marginBottom:12,lineHeight:1.2}}>{ad.title}</div>}
           {ad.link_url && (
-            <a href={ad.link_url} target="_blank" rel="noopener noreferrer" onClick={close}
+            <a href={extUrl(ad.link_url)} target="_blank" rel="noopener noreferrer" onClick={close}
               style={{display:'block',textAlign:'center',background:'var(--red)',color:'#fff',fontWeight:800,
                 fontSize:15,padding:'13px 18px',borderRadius:10,textDecoration:'none'}}>
               {ad.cta_text||'En savoir plus →'}
