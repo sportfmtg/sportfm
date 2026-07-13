@@ -2065,6 +2065,39 @@ function AdminContent({ adminEmail, userRole, toast }){
 // ============================================================
 //  ADMIN — LOGIN
 // ============================================================
+// Shown when the user arrives via a password-recovery email link
+function RecoveryForm({ toast, onDone }){
+  const [pw,setPw]=useState(''); const [pw2,setPw2]=useState('');
+  const [show,setShow]=useState(false); const [busy,setBusy]=useState(false);
+  const [err,setErr]=useState('');
+  async function submit(){
+    if(pw.length<6){ setErr('Minimum 6 caractères'); return; }
+    if(pw!==pw2){ setErr('Les mots de passe ne correspondent pas'); return; }
+    setErr(''); setBusy(true);
+    const { error }=await sb.auth.updateUser({ password:pw });
+    setBusy(false);
+    if(error){ setErr('Erreur : '+error.message); return; }
+    toast('Mot de passe mis à jour ✓');
+    onDone();
+  }
+  return (
+    <div>
+      {err && <div className="err">{err}</div>}
+      <div className="field"><label>Nouveau mot de passe</label>
+        <input type={show?'text':'password'} value={pw} onChange={e=>setPw(e.target.value)} placeholder="••••••••" /></div>
+      <div className="field"><label>Confirmer le mot de passe</label>
+        <input type={show?'text':'password'} value={pw2} onChange={e=>setPw2(e.target.value)} placeholder="••••••••"
+          onKeyDown={e=>e.key==='Enter'&&submit()} /></div>
+      <label style={{display:'flex',alignItems:'center',gap:8,fontSize:13,marginBottom:14,cursor:'pointer'}}>
+        <input type="checkbox" checked={show} onChange={e=>setShow(e.target.checked)} /> Afficher les mots de passe
+      </label>
+      <button className="btn-primary" style={{width:'100%'}} disabled={busy} onClick={submit}>
+        {busy?'Enregistrement…':'Définir le mot de passe'}
+      </button>
+    </div>
+  );
+}
+
 function AdminLogin({ onAuthed, onExit }){
   const [username,setUsername]=useState(''); const [pw,setPw]=useState('');
   const [err,setErr]=useState(''); const [busy,setBusy]=useState(false);
@@ -6767,6 +6800,7 @@ function App(){
   const [userPerms,setUserPerms]=useState(null); // null = loading
   const [toast,toastNode]=useToast();
   const [showProfile,setShowProfile]=useState(false);
+  const [showRecovery,setShowRecovery]=useState(false);
 
   const [data,setData]=useState({ articles:[],standings:[],scores:[],fixtures:[],partners:[],ads:[],shows:[] });
 
@@ -6842,7 +6876,10 @@ function App(){
     const { data:sub }=sb.auth.onAuthStateChange((_e,s)=>{
       setSession(s);
       if(s) fetchPerms(s.user.email); else setUserPerms(null);
+      if(_e==='PASSWORD_RECOVERY') setShowRecovery(true);
     });
+    // Recovery links land with type=recovery in the hash
+    if(location.hash.includes('type=recovery')) setShowRecovery(true);
     return ()=>sub.subscription.unsubscribe();
   },[]);
 
@@ -6887,6 +6924,24 @@ function App(){
       return;
     }
     setOpenArticle(a); window.scrollTo({top:0,behavior:'smooth'});
+  }
+
+  // ---------- PASSWORD RECOVERY (from email link) ----------
+  if(showRecovery){
+    return (
+      <div className="login-wrap">
+        <div className="login-card">
+          <Logo onClick={()=>{}} />
+          <div className="sub">Choisissez votre nouveau mot de passe</div>
+          <RecoveryForm toast={toast} onDone={()=>{
+            setShowRecovery(false);
+            history.replaceState(null,'',location.pathname+'#admin');
+            setRoute('admin');
+          }} />
+        </div>
+        {toastNode}
+      </div>
+    );
   }
 
   // ---------- ADMIN ROUTE ----------
