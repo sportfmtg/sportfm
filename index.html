@@ -6269,18 +6269,47 @@ function App(){
   const [data,setData]=useState({ articles:[],standings:[],scores:[],fixtures:[],partners:[],ads:[],shows:[] });
 
   const loadPublic = useCallback(async ()=>{
-    const [art,st,sc,fx,ads,sh]=await Promise.all([
-      fetchArticlesMeta(true),
+    // 1) Instant paint from the last visit's cached snapshot
+    try{
+      const cached=JSON.parse(localStorage.getItem('public_cache_v1')||'null');
+      if(cached&&cached.articles&&cached.articles.length){
+        setData(d=>({...d,...cached}));
+        setLoading(false);
+      }
+    }catch{}
+
+    // 2) Fresh first screen: newest 1000 articles + the small tables, in parallel
+    const [art1,st,sc,fx,ads,sh]=await Promise.all([
+      sb.from('articles').select(ART_META_COLS).eq('published',true)
+        .order('created_at',{ascending:false}).range(0,999),
       sb.from('standings').select('*'),
       sb.from('scores').select('*').order('created_at',{ascending:false}),
       sb.from('fixtures').select('*'),
       sb.from('ads').select('*').eq('active',true).order('sort_order',{ascending:true}),
       sb.from('shows').select('*').order('sort_order',{ascending:true}),
     ]);
-    setData(d=>({ ...d,
-      articles:art, standings:st.data||[], scores:sc.data||[],
-      fixtures:fx.data||[], ads:ads.data||[], shows:sh.data||[] }));
+    const fresh={ articles:art1.data||[], standings:st.data||[], scores:sc.data||[],
+      fixtures:fx.data||[], ads:ads.data||[], shows:sh.data||[] };
+    setData(d=>({...d,...fresh}));
     setLoading(false);
+
+    // 3) Cache a slim snapshot for instant next visits (~150KB)
+    try{
+      localStorage.setItem('public_cache_v1', JSON.stringify({
+        ...fresh, articles:fresh.articles.slice(0,300) }));
+    }catch{}
+
+    // 4) Remaining archive pages stream in the background (tabs/counts fill up)
+    let all=fresh.articles;
+    for(let off=1000; all.length>=off; off+=1000){
+      const { data:page }=await sb.from('articles').select(ART_META_COLS).eq('published',true)
+        .order('created_at',{ascending:false}).range(off,off+999);
+      if(!page||!page.length) break;
+      all=all.concat(page);
+      const snapshot=all;
+      setData(d=>({...d, articles:snapshot}));
+      if(page.length<1000) break;
+    }
   },[]);
 
   const loadAdmin = useCallback(async ()=>{
