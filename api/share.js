@@ -18,7 +18,7 @@ module.exports = async (req, res) => {
   const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   let title = 'SportFM — 91.9 FM';
-  let desc = 'La référence sport au Togo — radio, web et réseaux sociaux.';
+  let desc = 'La référence sportive au Togo et en Afrique — radio, web et réseaux sociaux.';
   let image = DEFAULT_IMAGE;
   let target = SITE + '/';
 
