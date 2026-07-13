@@ -704,6 +704,20 @@ function Player({ liveScores }){
 // the minute counts up on its own — 1st half caps at 45' (shows MT until the
 // admin starts the 2nd half), 2nd half caps at 90' then flips to FT.
 function liveMinuteInfo(g){
+  // Scheduled match: before kickoff_at it shows the kickoff time; once the
+  // time passes, the 1st-half clock starts on its own from kickoff_at.
+  if(!g.half && g.kickoff_at){
+    const ms=Date.now()-new Date(g.kickoff_at).getTime();
+    if(ms<0){
+      const d=new Date(g.kickoff_at);
+      const sameDay=d.toDateString()===new Date().toDateString();
+      const label=(sameDay?'':d.toLocaleDateString('fr-FR',{day:'numeric',month:'short'})+' ')+
+        d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+      return { status:label, live:false, upcoming:true };
+    }
+    const m=Math.min(45,Math.floor(ms/60000)+1);
+    return m>=45 ? {status:'MT',live:true} : {status:m+"'",live:true};
+  }
   if(!g.half||!g.half_start) return { status:g.status, live:g.is_live };
   const mins=Math.floor((Date.now()-new Date(g.half_start).getTime())/60000);
   if(g.half===1){
@@ -2413,6 +2427,7 @@ function AdminArticles({ articles, reload, toast, adminEmail }){
 // ============================================================
 function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail }){
   const [ns,setNs]=useState({home:'',away:'',score:'0 - 0',status:"0'",is_live:true});
+  const [nsKick,setNsKick]=useState('');
   const [nf,setNf]=useState({home:'',away:'',kickoff_time:'',kickoff_day:'',sort_order:0});
   const [,setClockTick]=useState(0);
   useEffect(()=>{ const t=setInterval(()=>setClockTick(x=>x+1),30000); return ()=>clearInterval(t); },[]);
@@ -2431,13 +2446,24 @@ function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail })
     await logAction(adminEmail,'Coup d\'envoi',`${ns.home} vs ${ns.away}`);
     setNs({home:'',away:'',score:'0 - 0',status:"0'",is_live:true}); toast('⏱ Chrono lancé — 1re mi-temps'); reload();
   }
+  async function scheduleMatch(){
+    if(!ns.home||!ns.away){ toast('Renseignez les deux équipes'); return; }
+    if(!nsKick){ toast('Choisissez la date et l\'heure du coup d\'envoi'); return; }
+    const when=new Date(nsKick);
+    if(isNaN(when.getTime())){ toast('Date invalide'); return; }
+    const { error }=await sb.from('scores').insert([{...ns, status:'—', is_live:true, kickoff_at:when.toISOString()}]);
+    if(error){ toast('Échec : '+error.message+' — colonne kickoff_at manquante ?'); return; }
+    await logAction(adminEmail,'Match programmé',`${ns.home} vs ${ns.away} — ${when.toLocaleString('fr-FR')}`);
+    setNs({home:'',away:'',score:'0 - 0',status:"0'",is_live:true}); setNsKick('');
+    toast('🗓 Match programmé — le chrono partira tout seul'); reload();
+  }
   async function secondHalf(s){
     await updScore(s.id,{half:2, half_start:new Date().toISOString()});
     await logAction(adminEmail,'2e mi-temps',`${s.home} vs ${s.away}`);
     toast('▶ 2e mi-temps — chrono reprend à 45\'');
   }
   async function endMatch(s){
-    await updScore(s.id,{is_live:false, status:'FT', half:null, half_start:null});
+    await updScore(s.id,{is_live:false, status:'FT', half:null, half_start:null, kickoff_at:null});
     await logAction(adminEmail,'Fin de match',`${s.home} vs ${s.away}`);
     toast('Match terminé (FT)');
   }
@@ -2490,14 +2516,16 @@ function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail })
               <td data-label="Score"><input className="inline-edit" defaultValue={s.score} onBlur={e=>updScore(s.id,{score:e.target.value})} /></td>
               <td data-label="Extérieur"><input className="inline-edit wide" defaultValue={s.away} onBlur={e=>updScore(s.id,{away:e.target.value})} /></td>
               <td data-label="Statut">
-                {s.half
-                  ? <span style={{fontWeight:800,color:li.status==='MT'?'#9a6a00':'var(--red)'}}>⏱ {li.status}</span>
+                {(s.half||s.kickoff_at)
+                  ? <span style={{fontWeight:800,color:li.upcoming?'var(--muted)':li.status==='MT'?'#9a6a00':'var(--red)'}}>
+                      {li.upcoming?'🗓 ':'⏱ '}{li.status}
+                    </span>
                   : <input className="inline-edit" defaultValue={s.status} onBlur={e=>updScore(s.id,{status:e.target.value})} />}
               </td>
               <td data-label="Direct"><input type="checkbox" defaultChecked={s.is_live} onChange={e=>updScore(s.id,{is_live:e.target.checked})} /></td>
               <td style={{whiteSpace:'nowrap'}}>
-                {s.half===1 && li.status==='MT' && <button className="icon-btn" style={{color:'#1f7a48',fontWeight:700}} onClick={()=>secondHalf(s)}>▶ 2e MT</button>}
-                {s.half && <button className="icon-btn" onClick={()=>endMatch(s)}>FT</button>}
+                {li.status==='MT' && s.half!==2 && <button className="icon-btn" style={{color:'#1f7a48',fontWeight:700}} onClick={()=>secondHalf(s)}>▶ 2e MT</button>}
+                {(s.half||s.kickoff_at) && !li.upcoming && <button className="icon-btn" onClick={()=>endMatch(s)}>FT</button>}
                 <button className="icon-btn del" onClick={()=>delScore(s.id,`${s.home} vs ${s.away}`)}>Retirer</button>
               </td>
             </tr>
@@ -2514,9 +2542,19 @@ function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail })
               <button className="icon-btn" style={{color:'#1f7a48',fontWeight:700}} onClick={kickoff}>⏱ Coup d'envoi</button>
             </td>
           </tr>
+          <tr style={{background:'#eef4ff'}}>
+            <td colSpan={6} style={{padding:'6px 12px 12px'}}>
+              <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+                <span style={{fontSize:12.5,fontWeight:700,color:'var(--navy)'}}>🗓 Ou programmer le coup d'envoi :</span>
+                <input type="datetime-local" value={nsKick} onChange={e=>setNsKick(e.target.value)}
+                  style={{padding:'7px 10px',border:'1px solid var(--line)',borderRadius:8,fontSize:13,outline:'none',background:'#fff'}} />
+                <button className="icon-btn" style={{color:'var(--navy)',fontWeight:700}} onClick={scheduleMatch}>🗓 Programmer</button>
+              </div>
+            </td>
+          </tr>
         </tbody></table>
         <div className="hint" style={{marginTop:10,fontSize:12,color:'var(--muted)'}}>
-          Remplissez la ligne « Nouveau match » puis « + Ajouter le match » : il apparaît au-dessus avec un bouton Retirer, et la ligne se vide pour le match suivant. ⏱ Coup d'envoi ajoute le match ET lance le chrono automatique : il monte jusqu'à 45' (MT), reprend avec « ▶ 2e MT » jusqu'à 90' puis passe en FT tout seul. Le score se modifie à la main pendant le match.
+          Remplissez la ligne « Nouveau match » puis « + Ajouter le match » (statut libre), « ⏱ Coup d'envoi » (chrono immédiat) ou choisissez une date/heure et « 🗓 Programmer » : le match affiche son heure dans le bandeau, puis le chrono démarre tout seul au moment prévu — 1' → 45' (MT), « ▶ 2e MT » pour reprendre, FT automatique à 90'. Le score se modifie à la main pendant le match.
         </div>
       </div>
 
