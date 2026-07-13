@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SportFM</title>
+<title>SportFM — 91.9 FM, la référence sport au Togo</title>
+<meta name="description" content="SportFM 91.9 FM est la radio sportive de référence au Togo : actualités football et sport africain, résultats en direct, classements, émissions et podcasts.">
 <script>
 // Canonical domain: any *.vercel.app host redirects to sportfmtg.com (keeps path + #admin etc.)
 if (location.hostname.endsWith('.vercel.app')) {
@@ -524,7 +525,20 @@ if (location.hostname.endsWith('.vercel.app')) {
 </style>
 </head>
 <body>
-<div id="root"></div>
+<div id="root">
+  <!-- Static fallback shown until React mounts (and to crawlers that don't
+       execute JS) so the page never renders as blank/content-free. React
+       replaces this the instant the app hydrates. -->
+  <main style="max-width:760px;margin:0 auto;padding:40px 24px;font-family:system-ui,-apple-system,sans-serif;color:#0B245E;">
+    <h1 style="font-size:28px;margin:0 0 12px;">SportFM — 91.9 FM</h1>
+    <p style="font-size:16px;line-height:1.6;color:#3a4156;">
+      SportFM est la radio sportive de référence au Togo, à l'antenne sur 91.9 FM depuis 25 ans.
+      Retrouvez l'actualité du football togolais et africain, les résultats en direct, les
+      classements, nos émissions sportives et bien plus sur le site et les réseaux sociaux de SportFM.
+    </p>
+    <p style="font-size:14px;color:#5a6178;">Chargement du site…</p>
+  </main>
+</div>
 
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef, useCallback } = React;
