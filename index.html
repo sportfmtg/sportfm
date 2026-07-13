@@ -5156,17 +5156,17 @@ function AdminAccounting({ adminEmail, toast }){
           </div>
 
           {filtered.length===0 ? <div className="panel"><div className="empty">Aucune écriture pour ce filtre.</div></div> : (
-            <div className="panel" style={{padding:0,overflow:'hidden'}}>
-              <table className="admin-table" style={{tableLayout:'fixed',width:'100%'}}>
+            <div className="panel" style={{padding:0,overflowX:'auto'}}>
+              <table className="admin-table" style={{tableLayout:'fixed',width:'100%',minWidth:900}}>
                 <thead><tr>
-                  <th style={{paddingLeft:16,width:'10%'}}>Date</th>
-                  <th style={{width:'16%'}}>Catégorie</th>
-                  <th style={{width:'22%'}}>Libellé</th>
+                  <th style={{paddingLeft:16,width:'8%'}}>Date</th>
+                  <th style={{width:'12%'}}>Catégorie</th>
+                  <th style={{width:'21%'}}>Libellé</th>
                   <th style={{width:'8%'}}>Réf.</th>
-                  <th style={{width:'14%',textAlign:'right'}}>Montant</th>
-                  <th style={{width:'10%'}}>Échéance</th>
-                  <th style={{width:'12%'}}>Statut</th>
-                  <th style={{width:'8%',textAlign:'right',paddingRight:16}}></th>
+                  <th style={{width:'12%',textAlign:'right'}}>Montant</th>
+                  <th style={{width:'9%'}}>Échéance</th>
+                  <th style={{width:'11%'}}>Statut</th>
+                  <th style={{width:'19%',textAlign:'right',paddingRight:16}}></th>
                 </tr></thead>
                 <tbody>
                   {filtered.map(e=>{
@@ -5214,8 +5214,8 @@ function AdminAccounting({ adminEmail, toast }){
                             💰{pays.length>0?` (${pays.length})`:''}
                           </button>
                           <button className="icon-btn" title="Générer le reçu" onClick={()=>generateReceiptPDF(e)}>🧾</button>
-                          <button className="icon-btn" onClick={()=>setEditing(e)}>Modifier</button>
-                          <button className="icon-btn del" onClick={()=>deleteEntry(e.id,e.label)}>✕</button>
+                          <button className="icon-btn" title="Modifier" onClick={()=>setEditing(e)}>✏️</button>
+                          <button className="icon-btn del" title="Supprimer" onClick={()=>deleteEntry(e.id,e.label)}>✕</button>
                         </td>
                       </tr>
                       {isOpen && (
