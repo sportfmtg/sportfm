@@ -4512,8 +4512,8 @@ function AdminAccounting({ adminEmail, toast }){
   const [filterParty,setFilterParty]=useState('');
   const [tf,setTf]=useState({dir:'Transfert vers caisse',amount:'',date:new Date().toISOString().slice(0,10),label:''});
   const [tfBusy,setTfBusy]=useState(false);
-  // payments panel
-  const [expandedPay,setExpandedPay]=useState(null);
+  // invoice view (payments are applied inside the open invoice)
+  const [invoiceId,setInvoiceId]=useState(null);
   const [payForm,setPayForm]=useState({amount:'',method:'Espèces',check_number:'',date:new Date().toISOString().slice(0,10)});
   const [payBusy,setPayBusy]=useState(false);
   // agents form
@@ -4772,7 +4772,7 @@ function AdminAccounting({ adminEmail, toast }){
       {/* Sub-tabs */}
       <div style={{display:'flex',gap:0,marginBottom:24,borderBottom:'2px solid var(--line)'}}>
         {[{k:'dashboard',l:'📊 Tableau de bord'},{k:'ar',l:'💚 Recettes (AR)'},{k:'ap',l:'🔴 Dépenses (AP)'},{k:'caisse',l:'💵 Caisse'},{k:'cheques',l:'🧾 Chèques'},{k:'agents',l:'🤝 Agents'}].map(t=>(
-          <button key={t.k} onClick={()=>setTab(t.k)}
+          <button key={t.k} onClick={()=>{setTab(t.k);setInvoiceId(null);}}
             style={{padding:'10px 20px',border:'none',borderBottom:tab===t.k?'2px solid var(--navy)':'2px solid transparent',
               background:'none',fontWeight:700,fontSize:13.5,color:tab===t.k?'var(--navy)':'var(--muted)',cursor:'pointer',marginBottom:'-2px'}}>
             {t.l}
@@ -5123,6 +5123,112 @@ function AdminAccounting({ adminEmail, toast }){
               );
             })}
         </div>
+      ) : invoiceId && entryById[invoiceId] ? (
+        /* ===== INVOICE VIEW — all payments happen here ===== */
+        (()=>{
+          const e=entryById[invoiceId];
+          const pays=paysFor(e.id); const paid=paidOf(e); const rest=restOf(e); const st=effStatus(e);
+          const isAR=e.type==='AR';
+          return (
+            <div>
+              <button className="btn-ghost" style={{marginBottom:16}} onClick={()=>setInvoiceId(null)}>← Retour à la liste</button>
+              <div className="panel" style={{maxWidth:820,padding:0,overflow:'hidden'}}>
+                {/* header */}
+                <div style={{background:'var(--navy)',padding:'18px 24px',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:10}}>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:800,letterSpacing:'.08em',color:'#9fb0d8'}}>{isAR?'FACTURE CLIENT':'FACTURE FOURNISSEUR'}</div>
+                    <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:22,color:'#fff'}}>{e.label}</div>
+                    <div style={{fontSize:12,color:'#9fb0d8',marginTop:2}}>Réf : {e.reference||('SFM-'+String(e.id).slice(0,8).toUpperCase())} · {e.date}</div>
+                  </div>
+                  <span style={{fontSize:13,fontWeight:800,padding:'6px 16px',borderRadius:20,
+                    background:STATUS_BG[st]||'#f0f0f0',color:STATUS_COLORS[st]||'#888'}}>{st}</span>
+                </div>
+                {/* details */}
+                <div style={{padding:'18px 24px',borderBottom:'1px solid var(--line)',display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:'10px 20px',fontSize:13}}>
+                  <div><span style={{color:'var(--muted)',fontSize:10.5,fontWeight:700,letterSpacing:'.04em'}}>{isAR?'CLIENT':'FOURNISSEUR'}</span><br/><strong>{e.party_name||'—'}</strong></div>
+                  <div><span style={{color:'var(--muted)',fontSize:10.5,fontWeight:700,letterSpacing:'.04em'}}>CATÉGORIE</span><br/>{e.category||'—'}</div>
+                  <div><span style={{color:'var(--muted)',fontSize:10.5,fontWeight:700,letterSpacing:'.04em'}}>ÉCHÉANCE</span><br/>{e.due_date||'—'}</div>
+                  {e.agent_id&&agentName(e.agent_id)&&<div><span style={{color:'var(--muted)',fontSize:10.5,fontWeight:700,letterSpacing:'.04em'}}>AGENT COMMERCIAL</span><br/>🤝 {agentName(e.agent_id)}</div>}
+                  {e.notes&&<div style={{gridColumn:'1/-1'}}><span style={{color:'var(--muted)',fontSize:10.5,fontWeight:700,letterSpacing:'.04em'}}>NOTES</span><br/>{e.notes}</div>}
+                </div>
+                {/* totals */}
+                <div style={{padding:'16px 24px',display:'flex',gap:14,flexWrap:'wrap',borderBottom:'1px solid var(--line)'}}>
+                  {[
+                    {l:'MONTANT TOTAL', v:e.amount, c:'var(--navy)', bg:'#f0f2f6'},
+                    {l:'TOTAL PAYÉ', v:paid, c:'#1f7a48', bg:'#e3f6ea'},
+                    {l:rest>0?'RESTE À PAYER':'SOLDÉ ✓', v:rest, c:rest>0?'#c0392b':'#1f7a48', bg:rest>0?'#fce8e8':'#e3f6ea'},
+                  ].map((k,i)=>(
+                    <div key={i} style={{flex:1,minWidth:150,background:k.bg,borderRadius:10,padding:'12px 16px'}}>
+                      <div style={{fontSize:10.5,fontWeight:800,letterSpacing:'.05em',color:k.c,opacity:.8}}>{k.l}</div>
+                      <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:22,color:k.c}}>{Number(k.v).toLocaleString('fr-FR')} <span style={{fontSize:11}}>FCFA</span></div>
+                    </div>
+                  ))}
+                </div>
+                {/* payments history */}
+                <div style={{padding:'16px 24px'}}>
+                  <div style={{fontSize:12,fontWeight:800,letterSpacing:'.04em',color:'var(--navy)',marginBottom:10}}>💰 PAIEMENTS ({pays.length})</div>
+                  {pays.length===0
+                    ? <p style={{fontSize:13,color:'var(--muted)',fontStyle:'italic',margin:'0 0 12px'}}>Aucun paiement enregistré sur cette facture.</p>
+                    : <table className="admin-table" style={{width:'100%',marginBottom:14}}><thead><tr>
+                        <th>Date</th><th>Mode</th><th style={{textAlign:'right'}}>Montant</th><th style={{width:50}}></th>
+                      </tr></thead><tbody>
+                        {pays.map(p=>(
+                          <tr key={p.id}>
+                            <td style={{fontSize:12.5,color:'var(--muted)'}}>{p.date}</td>
+                            <td style={{fontSize:12.5}}>{PM_ICONS[p.method]||''} {p.method}{p.check_number&&<span style={{color:'var(--muted)'}}> n°{p.check_number}</span>}</td>
+                            <td style={{textAlign:'right',fontWeight:700}}>{Number(p.amount).toLocaleString('fr-FR')}</td>
+                            <td style={{textAlign:'right'}}><button className="icon-btn del" onClick={()=>deletePayment(p,e)}>✕</button></td>
+                          </tr>
+                        ))}
+                      </tbody></table>}
+
+                  {/* add payment */}
+                  {rest>0 ? (
+                    <div style={{background:'#f4f7ff',border:'1px solid #d8e2f5',borderRadius:12,padding:16}}>
+                      <div style={{fontSize:12,fontWeight:800,letterSpacing:'.04em',color:'var(--navy)',marginBottom:10}}>➕ APPLIQUER UN PAIEMENT</div>
+                      <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end'}}>
+                        <div className="field" style={{margin:0,width:150}}>
+                          <label>Montant (FCFA)</label>
+                          <input type="number" min="0" value={payForm.amount} onChange={ev=>setPayForm(f=>({...f,amount:ev.target.value}))} placeholder={String(rest)} />
+                        </div>
+                        <div className="field" style={{margin:0,width:170}}>
+                          <label>Mode</label>
+                          <select value={payForm.method} onChange={ev=>setPayForm(f=>({...f,method:ev.target.value}))}>
+                            {PAYMENT_METHODS.map(m=><option key={m} value={m}>{PM_ICONS[m]} {m}</option>)}
+                          </select>
+                        </div>
+                        {payForm.method==='Chèque'&&(
+                          <div className="field" style={{margin:0,width:130}}>
+                            <label>N° chèque</label>
+                            <input value={payForm.check_number} onChange={ev=>setPayForm(f=>({...f,check_number:ev.target.value}))} placeholder="000123" />
+                          </div>
+                        )}
+                        <div className="field" style={{margin:0,width:160}}>
+                          <label>Date</label>
+                          <input type="date" value={payForm.date} onChange={ev=>setPayForm(f=>({...f,date:ev.target.value}))} />
+                        </div>
+                        <button className="btn-primary" disabled={payBusy} onClick={()=>addPayment(e)} style={{marginBottom:0}}>
+                          {payBusy?'…':'💰 Encaisser'}
+                        </button>
+                      </div>
+                      {payForm.method==='Espèces'&&<div className="hint" style={{marginTop:8}}>💵 Ce paiement en espèces sera comptabilisé dans la caisse.</div>}
+                      {payForm.method==='Chèque'&&<div className="hint" style={{marginTop:8}}>🧾 Ce chèque ira dans l'onglet Chèques — il n'entre pas dans la caisse.</div>}
+                    </div>
+                  ) : (
+                    <div style={{background:'#e3f6ea',borderRadius:12,padding:'14px 18px',fontWeight:700,color:'#1f7a48',fontSize:14}}>
+                      ✓ Facture soldée — plus rien à payer.
+                    </div>
+                  )}
+
+                  <div style={{display:'flex',gap:10,marginTop:16,flexWrap:'wrap'}}>
+                    <button className="btn-primary" onClick={()=>generateReceiptPDF(e)}>🧾 Télécharger le reçu</button>
+                    <button className="btn-ghost" onClick={()=>setEditing(e)}>✏️ Modifier la facture</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()
       ) : (
         /* ===== AR / AP LIST ===== */
         <div>
@@ -5174,15 +5280,15 @@ function AdminAccounting({ adminEmail, toast }){
                     const overdue = st==='En attente'&&e.due_date&&new Date(e.due_date)<new Date();
                     const pays=paysFor(e.id);
                     const paid=paidOf(e), rest=restOf(e);
-                    const isOpen=expandedPay===e.id;
+                    const openInvoice=()=>{ setInvoiceId(e.id); setPayForm(f=>({...f,amount:rest>0?String(rest):''})); };
                     return (
                       <React.Fragment key={e.id}>
-                      <tr style={{background:isOpen?'#f4f7ff':overdue?'#fff8f8':''}}>
+                      <tr style={{background:overdue?'#fff8f8':''}}>
                         <td style={{paddingLeft:16,fontSize:12.5,color:'var(--muted)'}}>{e.date}</td>
                         <td style={{fontSize:12.5}}>{e.category||'—'}</td>
-                        <td style={{fontWeight:600}}>
+                        <td style={{fontWeight:600,cursor:'pointer'}} onClick={openInvoice} title="Ouvrir la facture">
                           {overdue&&<span style={{color:'#c0392b',marginRight:5,fontSize:12}}>⚠</span>}
-                          {e.label}
+                          <span style={{color:'var(--navy)',textDecoration:'underline',textDecorationColor:'#c9d2e8'}}>{e.label}</span>
                           {e.payment_method&&<div style={{fontSize:11,color:e.payment_method==='Espèces'?'#2a5bd0':'var(--muted)',fontWeight:600}}>{PM_ICONS[e.payment_method]} {e.payment_method}</div>}
                           {e.party_name&&<div style={{fontSize:11,color:'#2a5bd0',fontWeight:600}}>👤 {e.party_name}</div>}
                           {e.agent_id&&agentName(e.agent_id)&&<div style={{fontSize:11,color:'#9a6a00',fontWeight:700}}>🤝 Agent : {agentName(e.agent_id)}</div>}
@@ -5209,8 +5315,8 @@ function AdminAccounting({ adminEmail, toast }){
                               </select>}
                         </td>
                         <td style={{textAlign:'right',paddingRight:16,whiteSpace:'nowrap'}}>
-                          <button className="icon-btn" style={{color:'#1f7a48',fontWeight:700}}
-                            onClick={()=>{ setExpandedPay(isOpen?null:e.id); setPayForm(f=>({...f,amount:rest>0?String(rest):''})); }}>
+                          <button className="icon-btn" style={{color:'#1f7a48',fontWeight:700}} title="Ouvrir la facture / paiements"
+                            onClick={openInvoice}>
                             💰{pays.length>0?` (${pays.length})`:''}
                           </button>
                           <button className="icon-btn" title="Générer le reçu" onClick={()=>generateReceiptPDF(e)}>🧾</button>
@@ -5218,61 +5324,6 @@ function AdminAccounting({ adminEmail, toast }){
                           <button className="icon-btn del" title="Supprimer" onClick={()=>deleteEntry(e.id,e.label)}>✕</button>
                         </td>
                       </tr>
-                      {isOpen && (
-                        <tr style={{background:'#f4f7ff'}}>
-                          <td colSpan={8} style={{padding:'4px 16px 16px'}}>
-                            <div style={{fontSize:12,fontWeight:800,letterSpacing:'.04em',color:'var(--navy)',margin:'8px 0'}}>
-                              💰 PAIEMENTS — {e.label}
-                            </div>
-                            {pays.length>0 && (
-                              <table style={{width:'100%',borderCollapse:'collapse',marginBottom:10,background:'#fff',borderRadius:8,overflow:'hidden'}}>
-                                <tbody>
-                                  {pays.map(p=>(
-                                    <tr key={p.id} style={{borderBottom:'1px solid var(--line)'}}>
-                                      <td style={{padding:'7px 12px',fontSize:12.5,color:'var(--muted)',width:100}}>{p.date}</td>
-                                      <td style={{padding:'7px 12px',fontSize:12.5}}>{PM_ICONS[p.method]||''} {p.method}{p.check_number&&<span style={{color:'var(--muted)'}}> n°{p.check_number}</span>}</td>
-                                      <td style={{padding:'7px 12px',textAlign:'right',fontWeight:700,fontSize:13}}>{Number(p.amount).toLocaleString('fr-FR')}</td>
-                                      <td style={{padding:'7px 12px',width:40,textAlign:'right'}}>
-                                        <button className="icon-btn del" onClick={()=>deletePayment(p,e)}>✕</button>
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            )}
-                            <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end'}}>
-                              <div className="field" style={{margin:0,width:150}}>
-                                <label>Montant (FCFA)</label>
-                                <input type="number" min="0" value={payForm.amount} onChange={ev=>setPayForm(f=>({...f,amount:ev.target.value}))} placeholder={rest>0?String(rest):'0'} />
-                              </div>
-                              <div className="field" style={{margin:0,width:170}}>
-                                <label>Mode</label>
-                                <select value={payForm.method} onChange={ev=>setPayForm(f=>({...f,method:ev.target.value}))}>
-                                  {PAYMENT_METHODS.map(m=><option key={m} value={m}>{PM_ICONS[m]} {m}</option>)}
-                                </select>
-                              </div>
-                              {payForm.method==='Chèque'&&(
-                                <div className="field" style={{margin:0,width:130}}>
-                                  <label>N° chèque</label>
-                                  <input value={payForm.check_number} onChange={ev=>setPayForm(f=>({...f,check_number:ev.target.value}))} placeholder="000123" />
-                                </div>
-                              )}
-                              <div className="field" style={{margin:0,width:160}}>
-                                <label>Date</label>
-                                <input type="date" value={payForm.date} onChange={ev=>setPayForm(f=>({...f,date:ev.target.value}))} />
-                              </div>
-                              <button className="btn-primary" disabled={payBusy} onClick={()=>addPayment(e)} style={{marginBottom:0}}>
-                                {payBusy?'…':'Encaisser'}
-                              </button>
-                              <div style={{fontSize:12.5,fontWeight:700,paddingBottom:10,color:rest>0?'#9a6a00':'#1f7a48'}}>
-                                {rest>0?`Reste à payer : ${Number(rest).toLocaleString('fr-FR')} FCFA (En attente)`:'✓ Soldé'}
-                              </div>
-                            </div>
-                            {payForm.method==='Espèces'&&<div className="hint" style={{marginTop:6}}>💵 Ce paiement en espèces sera comptabilisé dans la caisse.</div>}
-                            {payForm.method==='Chèque'&&<div className="hint" style={{marginTop:6}}>🧾 Ce chèque ira dans l'onglet Chèques — il n'entre pas dans la caisse.</div>}
-                          </td>
-                        </tr>
-                      )}
                       </React.Fragment>
                     );
                   })}
