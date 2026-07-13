@@ -786,6 +786,13 @@ function Ticker({ scores }){
     return ()=>{ alive=false; clearInterval(t); };
   },[]);
 
+  // Editable visitor message(s) shown when the ticker has few matches
+  const [tickerMsg,setTickerMsg]=useState('');
+  useEffect(()=>{
+    sb.from('site_settings').select('value').eq('key','ticker_message').maybeSingle()
+      .then(({data})=>setTickerMsg(data?.value||''));
+  },[]);
+
   // Manual scores kept unless ESPN already covers the same match
   const norm=s=>(s||'').toLowerCase().replace(/[^a-zà-ÿ]/g,'');
   const espnKeys=new Set(espn.flatMap(g=>[norm(g.home)+'|'+norm(g.away), norm(g.away)+'|'+norm(g.home)]));
@@ -793,15 +800,24 @@ function Ticker({ scores }){
     .map(g=>{ const li=liveMinuteInfo(g); return {...g, status:li.status, is_live:li.live}; });
   const all=[...espn.filter(g=>g.is_live), ...manual, ...espn.filter(g=>!g.is_live)];
 
-  if(!all.length) return null;
-  const one = all.map((g,i)=>(
-    <div className="tk" key={g.id||i}>
-      <span style={{fontWeight:700}}>{g.home}</span>
-      <span className="score">{g.score}</span>
-      <span style={{fontWeight:700}}>{g.away}</span>
-      <span className={"tag "+(g.is_live?'live':'ft')}>{g.status}</span>
-    </div>
-  ));
+  const msgs=(tickerMsg||'').split('\n').map(s=>s.trim()).filter(Boolean);
+  const showMsgs=msgs.length>0 && all.length<4;
+  if(!all.length && !msgs.length) return null;
+  const one = [
+    ...all.map((g,i)=>(
+      <div className="tk" key={g.id||i}>
+        <span style={{fontWeight:700}}>{g.home}</span>
+        <span className="score">{g.score}</span>
+        <span style={{fontWeight:700}}>{g.away}</span>
+        <span className={"tag "+(g.is_live?'live':'ft')}>{g.status}</span>
+      </div>
+    )),
+    ...(showMsgs||all.length===0 ? msgs.map((m,i)=>(
+      <div className="tk" key={'msg'+i}>
+        <span style={{fontWeight:600,color:'#ffd9e2'}}>📢 {m}</span>
+      </div>
+    )) : []),
+  ];
   return (
     <div className="ticker"><div className="wrap">
       <div className="badge"><span className="dot"></span>LIVE</div>
@@ -2519,7 +2535,21 @@ function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail })
   const [ns,setNs]=useState({home:'',away:'',score:'0 - 0',status:"0'",is_live:true});
   const [nsKick,setNsKick]=useState('');
   const [nf,setNf]=useState({home:'',away:'',kickoff_time:'',kickoff_day:'',sort_order:0});
+  const [tickerMsg,setTickerMsg]=useState('');
+  const [tmBusy,setTmBusy]=useState(false);
   const [,setClockTick]=useState(0);
+  useEffect(()=>{
+    sb.from('site_settings').select('value').eq('key','ticker_message').maybeSingle()
+      .then(({data})=>setTickerMsg(data?.value||''));
+  },[]);
+  async function saveTickerMsg(){
+    setTmBusy(true);
+    const { error }=await sb.from('site_settings').upsert({key:'ticker_message',value:tickerMsg.trim()},{onConflict:'key'});
+    setTmBusy(false);
+    if(error){ toast('Erreur : '+error.message+' — table site_settings manquante ?'); return; }
+    await logAction(adminEmail,'Message bandeau modifié',tickerMsg.slice(0,80));
+    toast('Message du bandeau enregistré ✓');
+  }
   useEffect(()=>{ const t=setInterval(()=>setClockTick(x=>x+1),30000); return ()=>clearInterval(t); },[]);
 
   async function addScore(){
@@ -2646,6 +2676,17 @@ function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail })
         <div className="hint" style={{marginTop:10,fontSize:12,color:'var(--muted)'}}>
           Remplissez la ligne « Nouveau match » puis « + Ajouter le match » (statut libre), « ⏱ Coup d'envoi » (chrono immédiat) ou choisissez une date/heure et « 🗓 Programmer » : le match affiche son heure dans le bandeau, puis le chrono démarre tout seul au moment prévu — 1' → 45' (MT), « ▶ 2e MT » pour reprendre, FT automatique à 90'. Le score se modifie à la main pendant le match.
         </div>
+      </div>
+
+      <div className="panel">
+        <h3>Message du bandeau</h3>
+        <div className="field" style={{marginBottom:10}}>
+          <label>Message(s) affiché(s) aux visiteurs quand il y a peu de matchs <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(un message par ligne)</span></label>
+          <textarea value={tickerMsg} onChange={e=>setTickerMsg(e.target.value)} style={{minHeight:70}}
+            placeholder={"Ex : SportFM 91.9 — la référence sport au Togo\nRéservez votre spot publicitaire sur sportfmtg.com"} />
+        </div>
+        <button className="btn-primary" disabled={tmBusy} onClick={saveTickerMsg}>{tmBusy?'…':'Enregistrer le message'}</button>
+        <div className="hint" style={{marginTop:8}}>📢 Ces messages défilent dans le bandeau LIVE dès qu'il y a moins de 4 matchs (et remplissent le bandeau s'il est vide). Laissez vide pour ne rien afficher.</div>
       </div>
 
       <div className="panel">
