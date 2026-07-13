@@ -2510,7 +2510,7 @@ function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail })
             <td data-label="Direct"><input type="checkbox" checked={ns.is_live} onChange={e=>setNs({...ns,is_live:e.target.checked})} /></td>
             <td style={{whiteSpace:'nowrap'}}>
               <button className="icon-btn" style={{color:'#1f7a48',fontWeight:700}} onClick={kickoff}>⏱ Coup d'envoi</button>
-              <button className="icon-btn" onClick={addScore}>+ Manuel</button>
+              <button className="icon-btn" style={{fontWeight:700}} onClick={addScore}>+ Ajouter</button>
             </td>
           </tr>
         </tbody></table>
