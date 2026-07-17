@@ -225,6 +225,9 @@ if (location.hostname.endsWith('.vercel.app')) {
   .article .prose p{ font-size:17px; line-height:1.65; color:#2b3142; margin:0 0 18px; }
   .article .prose div{ font-size:17px; line-height:1.65; color:#2b3142; }
   .article .prose img{ width:100%; border-radius:12px; margin:6px 0 20px; display:block; }
+  .article .prose a{ color:var(--red); font-weight:600; text-decoration:underline; text-decoration-color:rgba(239,0,63,.4); }
+  .article .prose a:hover{ text-decoration-color:var(--red); }
+  .rich-editor a{ color:var(--red); font-weight:600; text-decoration:underline; }
   .article .prose blockquote{ margin:24px 0; padding:18px 24px 18px 56px; background:#f6f8fc;
     border-left:4px solid var(--red); border-radius:0 12px 12px 0; font-size:19px; line-height:1.5;
     color:var(--navy); font-style:italic; font-weight:600; position:relative; }
@@ -628,6 +631,16 @@ function Crest({ abbr, idx }){
 }
 function Spinner(){ return <div className="spinner" />; }
 
+// Read a site_settings value (empty string until loaded / if unset)
+function useSetting(key){
+  const [v,setV]=useState('');
+  useEffect(()=>{
+    sb.from('site_settings').select('value').eq('key',key).maybeSingle()
+      .then(({data})=>setV(data?.value||''));
+  },[key]);
+  return v;
+}
+
 function useToast(){
   const [msg,setMsg]=useState(null); const t=useRef();
   const show=useCallback((m)=>{ setMsg(m); clearTimeout(t.current); t.current=setTimeout(()=>setMsg(null),2600); },[]);
@@ -829,10 +842,11 @@ function Ticker({ scores }){
 function Rail({ standings, fixtures, onNav, onTrial, ads }){
   const sidebarAds=(ads||[]).filter(a=>a.position==='sidebar');
   const rows=[...standings].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+  const standingsTitle=useSetting('standings_title')||'Classement D1';
   return (
     <aside>
       <div className="card">
-        <div className="head"><div className="title"><span className="dot"></span>Classement D1</div>
+        <div className="head"><div className="title"><span className="dot"></span>{standingsTitle}</div>
           <span className="more" onClick={()=>onNav('Standings')}>Tout</span></div>
         <div className="tbl-head"><span>#</span><span>CLUB</span><span>J</span><span>PTS</span></div>
         {rows.map((t,i)=>(
@@ -1081,9 +1095,10 @@ function CategoryView({ cat, articles, onOpen, shows }){
 function StandingsView({ standings }){
   const rows=[...standings].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
   const cols="34px 1fr 36px 36px 36px 36px 44px";
+  const standingsTitle=useSetting('standings_title')||'Classement D1';
   return (
     <div className="article" style={{maxWidth:880}}>
-      <div className="sechead" style={{marginTop:0}}><h2 style={{fontSize:22}}>Classement D1</h2><div className="line"></div></div>
+      <div className="sechead" style={{marginTop:0}}><h2 style={{fontSize:22}}>{standingsTitle}</h2><div className="line"></div></div>
       <div className="card">
         <div style={{display:'grid',gridTemplateColumns:cols,padding:'10px 18px',fontSize:11,fontWeight:700,letterSpacing:'.05em',color:'var(--muted-2)',borderBottom:'1px solid #eef0f4'}}>
           <span>#</span><span>CLUB</span><span style={{textAlign:'center'}}>J</span><span style={{textAlign:'center'}}>G</span><span style={{textAlign:'center'}}>N</span><span style={{textAlign:'center'}}>P</span><span style={{textAlign:'right'}}>PTS</span>
@@ -1374,7 +1389,7 @@ function ArticleView({ article, onBack, backLabel }){
         {!article.image_url && <span className="imglabel">[ photo de l'article ]</span>}
       </div>
       {/(<[a-z][^>]*>)/i.test(article.body||'')
-        ? <div className="prose" dangerouslySetInnerHTML={{__html:article.body}} />
+        ? <div className="prose" dangerouslySetInnerHTML={{__html:(article.body||'').replace(/<a\s/gi,'<a target="_blank" rel="noopener noreferrer" ')}} />
         : <div className="prose">{blocks.map((b,i)=>{
             const m=b.trim().match(/^\[img:\s*(\S+?)\s*\]$/);
             return m
@@ -2368,6 +2383,13 @@ function ArticleEditor({ initial, onSave, onCancel, toast }){
           <button type="button" onMouseDown={e=>e.preventDefault()} onClick={()=>exec('underline')} title="Souligné (Ctrl+U)"><u>U</u></button>
           <button type="button" onMouseDown={e=>e.preventDefault()} onClick={toggleQuote} title="Mettre la sélection en citation"
             style={{color:'var(--red)'}}>❝ Citation</button>
+          <button type="button" onMouseDown={e=>e.preventDefault()} onClick={()=>{
+            const sel=window.getSelection();
+            if(!sel||sel.isCollapsed||!bodyEdRef.current?.contains(sel.anchorNode)){ toast('Sélectionnez d\'abord le texte qui deviendra cliquable'); return; }
+            const url=prompt('Adresse du lien (collez l\'URL) :');
+            if(!url||!url.trim()) return;
+            exec('createLink', extUrl(url.trim()));
+          }} title="Transformer la sélection en lien cliquable">🔗 Lien</button>
           <input hidden ref={bodyImgRef} type="file" accept="image/*" onChange={handleBodyImgUpload} />
           <button type="button" onClick={()=>bodyImgRef.current?.click()} disabled={bodyImgBusy}>
             {bodyImgBusy?'Envoi…':'🖼️ Image'}
@@ -2538,10 +2560,22 @@ function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail })
   const [tickerMsg,setTickerMsg]=useState('');
   const [tmBusy,setTmBusy]=useState(false);
   const [,setClockTick]=useState(0);
+  const [stTitle,setStTitle]=useState('');
+  const [stBusy,setStBusy]=useState(false);
   useEffect(()=>{
     sb.from('site_settings').select('value').eq('key','ticker_message').maybeSingle()
       .then(({data})=>setTickerMsg(data?.value||''));
+    sb.from('site_settings').select('value').eq('key','standings_title').maybeSingle()
+      .then(({data})=>setStTitle(data?.value||'Classement D1'));
   },[]);
+  async function saveStandingsTitle(){
+    setStBusy(true);
+    const { error }=await sb.from('site_settings').upsert({key:'standings_title',value:stTitle.trim()||'Classement D1'},{onConflict:'key'});
+    setStBusy(false);
+    if(error){ toast('Erreur : '+error.message+' — table site_settings manquante ?'); return; }
+    await logAction(adminEmail,'Titre classement modifié',stTitle);
+    toast('Titre du classement enregistré ✓');
+  }
   async function saveTickerMsg(){
     setTmBusy(true);
     const { error }=await sb.from('site_settings').upsert({key:'ticker_message',value:tickerMsg.trim()},{onConflict:'key'});
@@ -2700,7 +2734,15 @@ function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail })
               <td data-label="Heure"><input className="inline-edit" defaultValue={f.kickoff_time} onBlur={e=>updFixture(f.id,{kickoff_time:e.target.value})} placeholder="20h30" /></td>
               <td data-label="Jour"><input className="inline-edit wide" defaultValue={f.kickoff_day} onBlur={e=>updFixture(f.id,{kickoff_day:e.target.value})} placeholder="Sam 28 juin" /></td>
               <td data-label="Ordre"><input className="inline-edit" style={{width:46}} type="number" defaultValue={f.sort_order||0} onBlur={e=>updFixture(f.id,{sort_order:+e.target.value})} /></td>
-              <td><button className="icon-btn del" onClick={()=>delFixture(f.id,`${f.home} vs ${f.away}`)}>Retirer</button></td>
+              <td style={{whiteSpace:'nowrap'}}>
+                <button className="icon-btn" style={{color:'var(--navy)',fontWeight:700}} title="Envoyer vers le bandeau Scores en direct"
+                  onClick={()=>{
+                    setNs({home:f.home,away:f.away,score:'0 - 0',status:f.kickoff_time||"0'",is_live:true});
+                    toast(`${f.home} vs ${f.away} copié dans « Nouveau match » — Ajouter, Coup d'envoi ou Programmer`);
+                    window.scrollTo({top:0,behavior:'smooth'});
+                  }}>⬆ Bandeau</button>
+                <button className="icon-btn del" onClick={()=>delFixture(f.id,`${f.home} vs ${f.away}`)}>Retirer</button>
+              </td>
             </tr>
           ))}
           <tr style={{background:'#fafbfc'}}>
@@ -2717,6 +2759,13 @@ function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail })
 
       <div className="panel">
         <h3>Classement du championnat</h3>
+        <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end',marginBottom:16}}>
+          <div className="field" style={{margin:0,minWidth:240,flex:1,maxWidth:380}}>
+            <label>Titre affiché sur le site</label>
+            <input value={stTitle} onChange={e=>setStTitle(e.target.value)} placeholder="Classement D1" />
+          </div>
+          <button className="btn-ghost" disabled={stBusy} onClick={saveStandingsTitle} style={{marginBottom:0}}>{stBusy?'…':'Enregistrer le titre'}</button>
+        </div>
         <table className="admin-table"><thead><tr><th>#</th><th>Équipe</th><th>Abrév.</th><th>J</th><th>G</th><th>N</th><th>P</th><th>PTS</th></tr></thead>
         <tbody>
           {rows.map((t,i)=>(
