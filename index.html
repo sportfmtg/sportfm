@@ -4632,14 +4632,17 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
   const [agForm,setAgForm]=useState({name:'',phone:'',commission_pct:''});
   const [agBusy,setAgBusy]=useState(false);
   const [agOpen,setAgOpen]=useState(null);
+  const [team,setTeam]=useState([]);
+  const creatorName=(email)=>{ if(!email) return null; const t=team.find(u=>u.email===email); return t?.name||email; };
 
   async function load(){
-    const [en,pa,ag]=await Promise.all([
+    const [en,pa,ag,tm]=await Promise.all([
       sb.from('accounting_entries').select('*').order('date',{ascending:false}),
       sb.from('entry_payments').select('*').order('date',{ascending:true}),
       sb.from('commercial_agents').select('*').order('name'),
+      sb.from('user_roles').select('email,name'),
     ]);
-    setEntries(en.data||[]); setPayments(pa.data||[]); setAgents(ag.data||[]);
+    setEntries(en.data||[]); setPayments(pa.data||[]); setAgents(ag.data||[]); setTeam(tm.data||[]);
     setLoading(false);
   }
   useEffect(()=>{ load(); },[]);
@@ -5262,6 +5265,7 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
                   <div><span style={{color:'var(--muted)',fontSize:10.5,fontWeight:700,letterSpacing:'.04em'}}>CATÉGORIE</span><br/>{e.category||'—'}</div>
                   <div><span style={{color:'var(--muted)',fontSize:10.5,fontWeight:700,letterSpacing:'.04em'}}>ÉCHÉANCE</span><br/>{e.due_date||'—'}</div>
                   {e.agent_id&&agentName(e.agent_id)&&<div><span style={{color:'var(--muted)',fontSize:10.5,fontWeight:700,letterSpacing:'.04em'}}>AGENT COMMERCIAL</span><br/>🤝 {agentName(e.agent_id)}</div>}
+                  {e.created_by&&<div><span style={{color:'var(--muted)',fontSize:10.5,fontWeight:700,letterSpacing:'.04em'}}>SAISI PAR</span><br/>✎ {creatorName(e.created_by)}</div>}
                   {e.notes&&<div style={{gridColumn:'1/-1'}}><span style={{color:'var(--muted)',fontSize:10.5,fontWeight:700,letterSpacing:'.04em'}}>NOTES</span><br/>{e.notes}</div>}
                 </div>
                 {/* totals */}
@@ -5406,11 +5410,12 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
                           {e.party_name&&<div style={{fontSize:11,color:'#2a5bd0',fontWeight:600}}>👤 {e.party_name}</div>}
                           {e.agent_id&&agentName(e.agent_id)&&<div style={{fontSize:11,color:'#9a6a00',fontWeight:700}}>🤝 Agent : {agentName(e.agent_id)}</div>}
                           {e.notes&&<div style={{fontSize:11,color:'var(--muted)',fontWeight:400}}>{e.notes}</div>}
+                          {e.created_by&&<div style={{fontSize:10.5,color:'#8a90a2',fontWeight:600,marginTop:2}}>✎ Saisi par {creatorName(e.created_by)}</div>}
                         </td>
                         <td style={{fontSize:11.5,color:'var(--muted)'}}>{e.reference||'—'}</td>
                         <td style={{textAlign:'right',fontWeight:700,fontSize:13.5,color:tab==='ar'?'#1f7a48':'#c0392b'}}>
                           {Number(e.amount).toLocaleString('fr-FR')}
-                          {pays.length>0&&(
+                          {!entryOnly&&pays.length>0&&(
                             <div style={{fontSize:10.5,fontWeight:600,color:rest>0?'#9a6a00':'#1f7a48'}}>
                               payé {Number(paid).toLocaleString('fr-FR')}{rest>0?` · reste ${Number(rest).toLocaleString('fr-FR')}`:' ✓'}
                             </div>
@@ -5418,7 +5423,10 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
                         </td>
                         <td style={{fontSize:12,color:overdue?'#c0392b':'var(--muted)',fontWeight:overdue?700:400}}>{e.due_date||'—'}</td>
                         <td>
-                          {pays.length>0
+                          {entryOnly
+                            ? <span style={{fontSize:11,fontWeight:700,padding:'3px 9px',borderRadius:20,
+                                background:STATUS_BG[e.status]||'#f0f0f0',color:STATUS_COLORS[e.status]||'#888'}}>{e.status}</span>
+                            : pays.length>0
                             ? <span style={{fontSize:11,fontWeight:700,padding:'3px 9px',borderRadius:20,
                                 background:STATUS_BG[st]||'#f0f0f0',color:STATUS_COLORS[st]||'#888'}}>{st}</span>
                             : <select value={e.status}
