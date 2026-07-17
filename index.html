@@ -1336,6 +1336,22 @@ function ArticleComments({ articleId }){
   );
 }
 
+// Make bare URLs typed in article text clickable (skips text already inside <a> tags;
+// stops at & so trailing &nbsp; from the editor doesn't corrupt the link)
+function linkifyHtml(html){
+  let inA=false;
+  return String(html||'').split(/(<[^>]+>)/g).map(part=>{
+    if(part.startsWith('<')){
+      if(/^<a[\s>]/i.test(part)) inA=true;
+      else if(/^<\/a>/i.test(part)) inA=false;
+      return part;
+    }
+    if(inA) return part;
+    return part.replace(/(https?:\/\/[^\s<&]+)/g,
+      m=>`<a href="${m}" target="_blank" rel="noopener noreferrer">${m}</a>`);
+  }).join('');
+}
+
 function ArticleView({ article, onBack, backLabel }){
   const blocks=(article.body||'').split(/\n\s*\n/).filter(Boolean);
   const [copied,setCopied]=useState(false);
@@ -1389,12 +1405,15 @@ function ArticleView({ article, onBack, backLabel }){
         {!article.image_url && <span className="imglabel">[ photo de l'article ]</span>}
       </div>
       {/(<[a-z][^>]*>)/i.test(article.body||'')
-        ? <div className="prose" dangerouslySetInnerHTML={{__html:(article.body||'').replace(/<a\s/gi,'<a target="_blank" rel="noopener noreferrer" ')}} />
+        ? <div className="prose" dangerouslySetInnerHTML={{__html:linkifyHtml((article.body||'').replace(/<a\s/gi,'<a target="_blank" rel="noopener noreferrer" '))}} />
         : <div className="prose">{blocks.map((b,i)=>{
             const m=b.trim().match(/^\[img:\s*(\S+?)\s*\]$/);
             return m
               ? <img key={i} src={m[1]} alt="" style={{width:'100%',borderRadius:12,margin:'6px 0 20px',display:'block'}} />
-              : <p key={i}>{b}</p>;
+              : <p key={i}>{b.split(/(https?:\/\/[^\s]+)/g).map((p,j)=>
+                  /^https?:\/\//.test(p)
+                    ? <a key={j} href={p} target="_blank" rel="noopener noreferrer">{p}</a>
+                    : p)}</p>;
           })}</div>}
       {shareRow}
       <ArticleComments articleId={article.id} />
@@ -4240,6 +4259,7 @@ const MODULES = [
   { key:'can_emissions',  label:'Émissions' },
   { key:'can_finance',    label:'Fiches de paie' },
   { key:'can_accounting', label:'Comptabilité' },
+  { key:'can_accounting_entry', label:'Comptabilité (saisie seule)' },
   { key:'can_team',       label:'Équipe & Accès' },
   { key:'can_logs',       label:'Journal global' },
   { key:'can_announcements', label:'Annonces' },
@@ -4588,13 +4608,15 @@ function MiniBarChart({ data, color }){
   );
 }
 
-function AdminAccounting({ adminEmail, toast }){
+function AdminAccounting({ adminEmail, toast, entryOnly }){
+  // entryOnly (saisie seule): can create invoices and apply payments in AR/AP,
+  // but sees no reports — no dashboard, caisse, chèques, agents, totals or deletion
   const [entries,setEntries]=useState([]);
   const [payments,setPayments]=useState([]);
   const [agents,setAgents]=useState([]);
   const [loading,setLoading]=useState(true);
   const [editing,setEditing]=useState(null);
-  const [tab,setTab]=useState('dashboard'); // dashboard | ar | ap | caisse | cheques | agents
+  const [tab,setTab]=useState(entryOnly?'ar':'dashboard'); // dashboard | ar | ap | caisse | cheques | agents
   const [filterStatus,setFilterStatus]=useState('all');
   const [filterMonth,setFilterMonth]=useState('all');
   const [filterYear,setFilterYear]=useState(String(new Date().getFullYear()));
@@ -4861,7 +4883,8 @@ function AdminAccounting({ adminEmail, toast }){
     <div>
       {/* Sub-tabs */}
       <div style={{display:'flex',gap:0,marginBottom:24,borderBottom:'2px solid var(--line)'}}>
-        {[{k:'dashboard',l:'📊 Tableau de bord'},{k:'ar',l:'💚 Recettes (AR)'},{k:'ap',l:'🔴 Dépenses (AP)'},{k:'caisse',l:'💵 Caisse'},{k:'cheques',l:'🧾 Chèques'},{k:'agents',l:'🤝 Agents'}].map(t=>(
+        {[{k:'dashboard',l:'📊 Tableau de bord'},{k:'ar',l:'💚 Recettes (AR)'},{k:'ap',l:'🔴 Dépenses (AP)'},{k:'caisse',l:'💵 Caisse'},{k:'cheques',l:'🧾 Chèques'},{k:'agents',l:'🤝 Agents'}]
+          .filter(t=>!entryOnly||t.k==='ar'||t.k==='ap').map(t=>(
           <button key={t.k} onClick={()=>{setTab(t.k);setInvoiceId(null);}}
             style={{padding:'10px 20px',border:'none',borderBottom:tab===t.k?'2px solid var(--navy)':'2px solid transparent',
               background:'none',fontWeight:700,fontSize:13.5,color:tab===t.k?'var(--navy)':'var(--muted)',cursor:'pointer',marginBottom:'-2px'}}>
@@ -5267,7 +5290,7 @@ function AdminAccounting({ adminEmail, toast }){
                             <td style={{fontSize:12.5,color:'var(--muted)'}}>{p.date}</td>
                             <td style={{fontSize:12.5}}>{PM_ICONS[p.method]||''} {p.method}{p.check_number&&<span style={{color:'var(--muted)'}}> n°{p.check_number}</span>}</td>
                             <td style={{textAlign:'right',fontWeight:700}}>{Number(p.amount).toLocaleString('fr-FR')}</td>
-                            <td style={{textAlign:'right'}}><button className="icon-btn del" onClick={()=>deletePayment(p,e)}>✕</button></td>
+                            <td style={{textAlign:'right'}}>{!entryOnly&&<button className="icon-btn del" onClick={()=>deletePayment(p,e)}>✕</button>}</td>
                           </tr>
                         ))}
                       </tbody></table>}
@@ -5346,9 +5369,9 @@ function AdminAccounting({ adminEmail, toast }){
             <input value={filterParty} onChange={e=>setFilterParty(e.target.value)}
               placeholder="Rechercher partie liée…"
               style={{padding:'9px 12px',border:'1px solid var(--line)',borderRadius:9,fontSize:13.5,background:'#fff',outline:'none',minWidth:180}} />
-            <div style={{marginLeft:'auto',fontWeight:700,fontSize:13.5,color:tab==='ar'?'#1f7a48':'#c0392b'}}>
+            {!entryOnly && <div style={{marginLeft:'auto',fontWeight:700,fontSize:13.5,color:tab==='ar'?'#1f7a48':'#c0392b'}}>
               Total filtré : {filtered.reduce((s,e)=>s+Number(e.amount||0),0).toLocaleString('fr-FR')} FCFA
-            </div>
+            </div>}
           </div>
 
           {filtered.length===0 ? <div className="panel"><div className="empty">Aucune écriture pour ce filtre.</div></div> : (
@@ -5411,7 +5434,7 @@ function AdminAccounting({ adminEmail, toast }){
                           </button>
                           <button className="icon-btn" title="Générer le reçu" onClick={()=>generateReceiptPDF(e)}>🧾</button>
                           <button className="icon-btn" title="Modifier" onClick={()=>setEditing(e)}>✏️</button>
-                          <button className="icon-btn del" title="Supprimer" onClick={()=>deleteEntry(e.id,e.label)}>✕</button>
+                          {!entryOnly&&<button className="icon-btn del" title="Supprimer" onClick={()=>deleteEntry(e.id,e.label)}>✕</button>}
                         </td>
                       </tr>
                       </React.Fragment>
@@ -6087,8 +6110,8 @@ function Admin({ session, onExit, data, reload, toast, userPerms, showProfile })
   const full = userPerms?.__full;
   const can = (k) => !!(full || userPerms?.[k]);
   const jobTitle = userPerms?.job_title || '';
-  const firstTab = ['can_articles','can_scores','can_partners','can_ads','can_content','can_emissions','can_finance','can_accounting'].find(k=>can(k));
-  const [tab,setTab]=useState(firstTab ? firstTab.replace('can_','') : 'articles');
+  const firstTab = ['can_articles','can_scores','can_partners','can_ads','can_content','can_emissions','can_finance','can_accounting','can_accounting_entry'].find(k=>can(k));
+  const [tab,setTab]=useState(firstTab ? (firstTab==='can_accounting_entry'?'accounting':firstTab.replace('can_','')) : 'articles');
   const adminEmail = session.user.email;
   async function logout(){ await sb.auth.signOut(); onExit(); }
 
@@ -6112,7 +6135,7 @@ function Admin({ session, onExit, data, reload, toast, userPerms, showProfile })
         {can('can_content') && <button className={tab==='content'?'active':''} onClick={()=>setTab('content')}>📋 Contenu</button>}
         {can('can_emissions') && <button className={tab==='emissions'?'active':''} onClick={()=>setTab('emissions')}>📻 Émissions</button>}
         {can('can_finance') && <button className={tab==='finance'?'active':''} onClick={()=>setTab('finance')}>💰 Paie</button>}
-        {can('can_accounting') && <button className={tab==='accounting'?'active':''} onClick={()=>setTab('accounting')}>📊 Comptabilité</button>}
+        {(can('can_accounting')||can('can_accounting_entry')) && <button className={tab==='accounting'?'active':''} onClick={()=>setTab('accounting')}>📊 Comptabilité</button>}
         {can('can_articles') && <button className={tab==='cdm'?'active':''} onClick={()=>setTab('cdm')}>⚽ CDM</button>}
         {can('can_manager') && <button className={tab==='manager'?'active':''} onClick={()=>setTab('manager')}>⭐ Manager</button>}
       </div></div>
@@ -6126,7 +6149,9 @@ function Admin({ session, onExit, data, reload, toast, userPerms, showProfile })
         {tab==='content' && can('can_content') && <><AdminContent adminEmail={adminEmail} userPerms={userPerms} toast={toast} /><PageJournal section="content" /></>}
         {tab==='emissions' && can('can_emissions') && <><AdminEmissions shows={data.shows||[]} reload={reload} toast={toast} adminEmail={adminEmail} /><PageJournal section="emissions" /></>}
         {tab==='finance' && can('can_finance') && <><AdminFinance adminEmail={adminEmail} userPerms={userPerms} toast={toast} /><PageJournal section="finance" /></>}
-        {tab==='accounting' && can('can_accounting') && <><AdminAccounting adminEmail={adminEmail} toast={toast} /><PageJournal section="accounting" /></>}
+        {tab==='accounting' && (can('can_accounting')||can('can_accounting_entry')) &&
+          <><AdminAccounting adminEmail={adminEmail} toast={toast} entryOnly={!can('can_accounting')} />
+          {can('can_accounting')&&<PageJournal section="accounting" />}</>}
         {tab==='cdm' && can('can_articles') && <AdminCDM articles={data.articles} reload={reload} toast={toast} adminEmail={adminEmail} />}
         {tab==='broadcast' && can('can_broadcast') && <AdminBroadcast adminEmail={adminEmail} toast={toast} isAdmin={userPerms?.__full||userPerms?.can_team} />}
         {tab==='manager' && can('can_manager') && <><AdminManager adminEmail={adminEmail} toast={toast} /><PageJournal section="manager" /></>}
