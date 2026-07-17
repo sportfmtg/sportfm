@@ -406,6 +406,10 @@ if (location.hostname.endsWith('.vercel.app')) {
     .admin-tabs button{ padding:13px 14px; font-size:13px; white-space:nowrap; }
     .admin-top .wrap{ gap:12px; }
     span.admin-email-label{ display:none; }
+
+    /* Tablet: any inline 3-column grid (feature boxes, stat rows, KPI cards…)
+       becomes 2 columns instead of overflowing/cramping */
+    [style*="grid-template-columns:1fr 1fr 1fr"]{ grid-template-columns:1fr 1fr !important; }
   }
 
   /* ── MOBILE (≤720px) ── */
@@ -435,13 +439,16 @@ if (location.hostname.endsWith('.vercel.app')) {
     .secitem h3{ font-size:16px; }
     .secitem p{ display:none; }
 
-    /* player */
-    .player .progress,.player .vol{ display:none; }
-    .nowplaying{ flex:1; width:auto; }
-    .player .inner{ gap:10px; padding:10px 14px; }
+    /* player — keep the live listener count, drop only the volume slider (phones use hardware volume) */
+    .player .vol{ display:none; }
+    .player .progress{ flex:0 0 auto; }
+    .player .listeners{ font-size:10.5px; white-space:nowrap; }
+    .nowplaying{ flex:1; width:auto; min-width:0; }
+    .player .inner{ gap:8px; padding:10px 12px; flex-wrap:nowrap; }
     .play-btn{ width:42px; height:42px; }
     .app-pad{ padding-bottom:74px; }
-    .player .listeners{ display:none; }
+    .wave{ display:none; }
+    .live-pill{ display:none; }
 
     /* partner form */
     .partner-form{ padding:18px; margin:0 12px 40px; }
@@ -500,6 +507,15 @@ if (location.hostname.endsWith('.vercel.app')) {
 
     /* paystub form salary section */
     .admin-body .grid2{ grid-template-columns:1fr; }
+
+    /* Phones: any inline fixed multi-column grid (feature boxes, stat rows,
+       details panels, form field pairs…) stacks to a single column */
+    [style*="grid-template-columns:1fr 1fr 1fr"],
+    [style*="grid-template-columns:'1fr 1fr 1fr'"],
+    [style*="grid-template-columns:1fr 1fr"],
+    [style*="grid-template-columns:'1fr 1fr'"]{
+      grid-template-columns:1fr !important;
+    }
   }
 
   /* ── VERY SMALL (≤400px) ── */
@@ -7246,7 +7262,8 @@ function App(){
         <div className="panel-d">
           {NAVS.map(n=><button key={n.key} onClick={()=>navTo(n.key)}>{n.label}</button>)}
           <button onClick={()=>navTo('CDM')} style={{background:'linear-gradient(135deg,#c8102e,#006b3f)',color:'#fff',borderRadius:10,marginTop:4,fontWeight:800}}>⚽ CDM 2026</button>
-          <button onClick={()=>navTo('Partner')} style={{color:'var(--red)'}}>Devenir partenaire</button>
+          <button onClick={()=>navTo('Spot')} style={{color:'var(--red)'}}>📻 Réserver un spot</button>
+          <button onClick={()=>navTo('Partner')} style={{color:'var(--navy)'}}>Devenir partenaire</button>
         </div>
       </div>
 
