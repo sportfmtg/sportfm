@@ -4462,7 +4462,7 @@ function EntryForm({ entry, onSave, onCancel, adminEmail, toast }){
     setBusy(false);
     if(res.error){ toast('Erreur : '+res.error.message); return; }
     await logAction(adminEmail, entry?'Écriture modifiée':'Écriture créée', `${form.type} — ${form.label} — ${fmtFCFA(form.amount)}`);
-    toast(entry?'Mis à jour':'Écriture enregistrée'); onSave();
+    toast(entry?'Mis à jour':'Écriture enregistrée'); onSave(form.label);
   }
 
   return (
@@ -4604,6 +4604,33 @@ function MiniBarChart({ data, color }){
           <div style={{fontSize:9,color:'var(--muted)',whiteSpace:'nowrap'}}>{d.l}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// Secretary data-entry screen: create an écriture, it goes straight to
+// Comptabilité, form resets. No list, no past invoices, no payment info.
+function SecretaryEntryPanel({ adminEmail, toast }){
+  const [type,setType]=useState('AR');
+  const [formKey,setFormKey]=useState(0);
+  const [lastSaved,setLastSaved]=useState(null);
+  return (
+    <div style={{maxWidth:640}}>
+      <div className="panel" style={{marginBottom:0}}>
+        <h3 style={{marginBottom:4}}>📝 Saisie d'écriture</h3>
+        <p style={{fontSize:13,color:'var(--muted)',marginTop:0,marginBottom:18}}>
+          Créez une recette ou une dépense — elle part directement dans la comptabilité. Vous ne voyez pas les autres écritures ni les paiements.
+        </p>
+        {lastSaved && (
+          <div style={{background:'#e3f6ea',border:'1px solid #b8e6c8',borderRadius:10,padding:'10px 14px',marginBottom:16,fontSize:13,fontWeight:600,color:'#1f7a48'}}>
+            ✓ « {lastSaved} » envoyée à la comptabilité.
+          </div>
+        )}
+        <EntryForm key={formKey} entry={{type}}
+          onSave={(label)=>{ setLastSaved(label||'Écriture'); setFormKey(k=>k+1); }}
+          onCancel={()=>setFormKey(k=>k+1)}
+          adminEmail={adminEmail} toast={toast} />
+      </div>
     </div>
   );
 }
@@ -4796,6 +4823,11 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
   if(editing!==null) return <EntryForm entry={editing.id?editing:null}
     onSave={()=>{setEditing(null);load();}} onCancel={()=>setEditing(null)}
     adminEmail={adminEmail} toast={toast} />;
+
+  // Secretary (saisie seule): pure data entry — no list, no past/other invoices,
+  // no payment info. Submitting sends the écriture straight to Comptabilité and
+  // resets to a blank form.
+  if(entryOnly) return <SecretaryEntryPanel adminEmail={adminEmail} toast={toast} />;
 
   // ---- Computed metrics ----
   const now = new Date();
