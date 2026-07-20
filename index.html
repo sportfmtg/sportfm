@@ -527,40 +527,6 @@ if (location.hostname.endsWith('.vercel.app')) {
     .panel{ padding:12px; }
   }
 
-  /* ── CDM NAV BUTTON ── */
-  .cdm-nav-btn {
-    background: linear-gradient(135deg, #c8102e, #006b3f) !important;
-    color: #fff !important;
-    border-radius: 20px !important;
-    padding: 6px 14px !important;
-    font-weight: 800 !important;
-    letter-spacing: .03em !important;
-    border: none !important;
-    cursor: pointer !important;
-    animation: cdm-pulse 2s ease-in-out infinite !important;
-  }
-  .cdm-nav-btn:hover { opacity: .88; }
-  .cdm-nav-btn.active::after { display: none !important; }
-  @keyframes cdm-pulse {
-    0%,100% { box-shadow: 0 0 0 0 rgba(200,16,46,.4); }
-    50% { box-shadow: 0 0 0 8px rgba(200,16,46,0); }
-  }
-
-  /* ── CDM PAGE ── */
-  .cdm-match-card { transition: transform .15s ease, box-shadow .15s ease; }
-  .cdm-match-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,.1); }
-  .cdm-group-card { cursor: pointer; transition: box-shadow .15s ease; }
-  .cdm-group-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.1); }
-  .cdm-poll-bar { transition: width .6s ease; }
-  .cdm-refresh-btn {
-    position: fixed; bottom: 96px; right: 24px; z-index: 50;
-    background: linear-gradient(135deg,#c8102e,#006b3f);
-    color: #fff; border: none; border-radius: 50%; width: 50px; height: 50px;
-    font-size: 20px; cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,.25);
-    display: flex; align-items: center; justify-content: center;
-    transition: transform .2s ease;
-  }
-  .cdm-refresh-btn:hover { transform: rotate(180deg); }
 </style>
 </head>
 <body>
@@ -622,7 +588,7 @@ const crests = ['#0B245E','#10307a','#3a4a6b','#5a3b8a','#1f6b4a','#7a4a1f','#44
 const NAVS = [
   { key:'Home',      label:'Accueil' },
   { key:'Articles',  label:'Articles' },
-  { key:'Standings', label:'Classement' },
+  { key:'Results',   label:'Résultats' },
   { key:'Shows',     label:'Émissions' },
 ];
 const ARTICLE_CATS = ['Tout','Football','Basket','Actu','Émissions','CDM','Autre'];
@@ -855,6 +821,260 @@ function Ticker({ scores }){
   );
 }
 
+// Shared loader for the results archive (recent-results card + full Résultats page)
+function useMatchResults(){
+  const [rows,setRows]=useState(null); // null = loading
+  useEffect(()=>{
+    sb.from('match_results').select('*')
+      .order('journee',{ascending:false}).order('played_on',{ascending:false})
+      .then(({data,error})=>{ if(error){ console.error(error); setRows([]); } else setRows(data||[]); });
+  },[]);
+  return rows;
+}
+
+// Lightweight "new results" indicator: a single cheap query, compared against
+// the last-seen timestamp saved when the visitor actually opens Résultats.
+// Drives the red dot on the nav link — a reason to come back and check.
+function useHasNewResults(){
+  const [hasNew,setHasNew]=useState(false);
+  useEffect(()=>{
+    sb.from('match_results').select('created_at').order('created_at',{ascending:false}).limit(1).maybeSingle()
+      .then(({data})=>{
+        if(!data?.created_at) return;
+        let seen=''; try{ seen=localStorage.getItem('results_seen_at')||''; }catch{}
+        if(data.created_at>seen) setHasNew(true);
+      });
+  },[]);
+  return hasNew;
+}
+
+// Deterministic 2-letter badge + color for a team name (match_results has no
+// crest/abbr field like standings does)
+const TEAM_COLORS=['#0B245E','#10307a','#3a4a6b','#5a3b8a','#1f6b4a','#7a4a1f','#444c5e','#6b1f3a','#0d5f7a','#7a1f5a'];
+function teamInitials(name){
+  const words=(name||'?').trim().split(/\s+/);
+  return words.length>1 ? (words[0][0]+words[1][0]).toUpperCase() : (name||'?').slice(0,2).toUpperCase();
+}
+function teamColor(name){
+  let h=0; for(const c of (name||'')) h=(h*31+c.charCodeAt(0))>>>0;
+  return TEAM_COLORS[h%TEAM_COLORS.length];
+}
+function TeamBadge({ name, size=32 }){
+  return <span style={{width:size,height:size,borderRadius:'50%',background:teamColor(name),color:'#fff',
+    display:'inline-flex',alignItems:'center',justifyContent:'center',fontWeight:800,fontSize:size*0.36,
+    flexShrink:0,letterSpacing:'-.02em'}}>{teamInitials(name)}</span>;
+}
+
+// Compact "Résultats récents" card — shows the latest journée's results while
+// they're fresh (played within the last 2 days); disappears entirely otherwise.
+function RecentResultsCard({ onNav }){
+  const rows=useMatchResults();
+  if(!rows) return null; // don't flash an empty card while loading
+  const latestDate=rows.reduce((max,r)=>r.played_on&&r.played_on>max?r.played_on:max,'');
+  if(!latestDate) return null;
+  const ageMs=Date.now()-new Date(latestDate+'T23:59:59').getTime();
+  if(ageMs > 2*24*3600*1000) return null; // older than 2 days — roll off
+  // Anchor on the most recently played match: its journée + division define
+  // what the card shows, so different sports/divisions never get mixed together.
+  const anchor=rows.filter(r=>r.played_on===latestDate).sort((a,b)=>(b.journee||0)-(a.journee||0))[0];
+  const matches=rows.filter(r=>r.journee===anchor.journee && r.division===anchor.division && r.sport===anchor.sport);
+  if(!matches.length) return null;
+  const division=anchor.division||'';
+  const latestJournee=anchor.journee;
+  return (
+    <div className="card">
+      <div className="head"><div className="title"><span className="dot"></span>Résultats — J{latestJournee}{division?` (${division})`:''}</div>
+        <span className="more" onClick={()=>onNav('Results')}>Tout</span></div>
+      {matches.map(m=>(
+        <div className="fix" key={m.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
+          <div className="teams" style={{display:'flex',alignItems:'center',gap:6,minWidth:0}}>
+            <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.home}</span>
+            <span style={{fontWeight:800,color:'var(--navy)',flexShrink:0}}>{m.home_score}-{m.away_score}</span>
+            <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.away}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Full Résultats page: pick a sport/division/journée, browse the whole archive.
+function ClassementTable({ standings }){
+  const rows=[...(standings||[])].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+  const cols="34px 1fr 36px 36px 36px 36px 44px";
+  const standingsTitle=useSetting('standings_title')||'Classement D1';
+  if(rows.length===0) return (
+    <div style={{textAlign:'center',padding:'40px 20px',color:'var(--muted)'}}>
+      <div style={{fontSize:13.5}}>Classement à venir.</div>
+    </div>
+  );
+  return (
+    <div className="card">
+      <div className="head" style={{padding:'12px 18px'}}><div className="title">{standingsTitle}</div></div>
+      <div style={{display:'grid',gridTemplateColumns:cols,padding:'10px 18px',fontSize:11,fontWeight:700,letterSpacing:'.05em',color:'var(--muted-2)',borderBottom:'1px solid #eef0f4'}}>
+        <span>#</span><span>CLUB</span><span style={{textAlign:'center'}}>J</span><span style={{textAlign:'center'}}>G</span><span style={{textAlign:'center'}}>N</span><span style={{textAlign:'center'}}>P</span><span style={{textAlign:'right'}}>PTS</span>
+      </div>
+      {rows.map((t,i)=>(
+        <div key={t.id} style={{display:'grid',gridTemplateColumns:cols,alignItems:'center',padding:'11px 18px',borderBottom:'1px solid #f2f3f7',background:i===0?'rgba(239,0,63,0.035)':'#fff'}}>
+          <span style={{fontWeight:700,color:i<3?'var(--red)':'var(--muted-2)'}}>{i+1}</span>
+          <span className="club"><Crest abbr={t.abbr} idx={i}/><span className="name">{t.team}</span></span>
+          <span style={{textAlign:'center',color:'#6b7180'}}>{t.played}</span>
+          <span style={{textAlign:'center',color:'#6b7180'}}>{t.won}</span>
+          <span style={{textAlign:'center',color:'#6b7180'}}>{t.drawn}</span>
+          <span style={{textAlign:'center',color:'#6b7180'}}>{t.lost}</span>
+          <span style={{textAlign:'right',fontWeight:800,color:'var(--navy)'}}>{t.points}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ResultsPage({ standings, initialTab }){
+  const [subTab,setSubTab]=useState(initialTab||'results'); // 'results' | 'standings'
+  const rows=useMatchResults();
+  const [sport,setSport]=useState('all');
+  const [division,setDivision]=useState('all');
+  const [journee,setJournee]=useState('');
+
+  // Mark results as "seen" once loaded, so the nav's new-results dot clears
+  // and doesn't nag the visitor again until fresher results are posted.
+  useEffect(()=>{
+    if(!rows||rows.length===0) return;
+    const newest=rows.reduce((max,r)=>r.created_at&&r.created_at>max?r.created_at:max,'');
+    if(newest) try{ localStorage.setItem('results_seen_at',newest); }catch{}
+  },[rows]);
+
+  const tabBtn=(k,label)=>(
+    <button onClick={()=>setSubTab(k)} style={{padding:'10px 20px',border:'none',
+      borderBottom:subTab===k?'3px solid var(--navy)':'3px solid transparent',
+      background:'none',fontWeight:800,fontSize:14.5,color:subTab===k?'var(--navy)':'var(--muted)',
+      cursor:'pointer',marginBottom:'-1px'}}>{label}</button>
+  );
+
+  const tabs=(
+    <div style={{display:'flex',borderBottom:'1px solid var(--line)',marginBottom:22}}>
+      {tabBtn('results','Résultats')}
+      {tabBtn('standings','Classement')}
+    </div>
+  );
+
+  const shell=(inner)=>(
+    <div style={{maxWidth:820,paddingTop:26,paddingBottom:60}}>
+      <div className="sechead" style={{marginTop:0}}><h2 style={{fontSize:22}}>Résultats &amp; Classement</h2><div className="line"></div></div>
+      {tabs}
+      {inner}
+    </div>
+  );
+
+  if(subTab==='standings') return shell(<ClassementTable standings={standings} />);
+  if(rows===null) return shell(<Spinner/>);
+  if(rows.length===0) return shell(
+    <div style={{textAlign:'center',padding:'60px 20px',color:'var(--muted)'}}>
+      <div style={{fontSize:40,marginBottom:10}}>📋</div>
+      <div style={{fontWeight:700}}>Aucun résultat publié pour le moment.</div>
+    </div>
+  );
+
+  const sports=[...new Set(rows.map(r=>r.sport).filter(Boolean))];
+  const scoped1=sport==='all'?rows:rows.filter(r=>r.sport===sport);
+  const divisions=[...new Set(scoped1.map(r=>r.division).filter(Boolean))];
+  const scoped2=division==='all'?scoped1:scoped1.filter(r=>r.division===division);
+  const journees=[...new Set(scoped2.map(r=>r.journee))].filter(j=>j!=null).sort((a,b)=>b-a);
+  const activeJournee = journee!=='' && journees.includes(Number(journee)) ? Number(journee) : journees[0];
+  const shown=scoped2.filter(r=>r.journee===activeJournee)
+    .sort((a,b)=>(a.played_on||'').localeCompare(b.played_on||''));
+  const journeeDate=shown[0]?.played_on;
+  const isLatest=activeJournee===journees[0];
+
+  const pillBtn=(active,label,onClick,key)=>(
+    <button key={key} onClick={onClick} style={{
+      padding:'7px 14px',borderRadius:20,fontSize:13,fontWeight:700,cursor:'pointer',border:'2px solid',
+      borderColor:active?'var(--navy)':'var(--line)',background:active?'var(--navy)':'#fff',
+      color:active?'#fff':'#4a5168',whiteSpace:'nowrap',flexShrink:0,transition:'all .15s'}}>{label}</button>
+  );
+
+  return shell(<>
+      {(sports.length>1 || divisions.length>1) && (
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:14}}>
+          {sports.length>1 && sports.map(s=>pillBtn(sport===s,s,()=>{setSport(s);setJournee('');},'sp'+s))}
+          {sports.length>1 && pillBtn(sport==='all','Tous sports',()=>{setSport('all');setJournee('');},'sp-all')}
+          {divisions.length>1 && divisions.map(d=>pillBtn(division===d,d,()=>{setDivision(d);setJournee('');},'dv'+d))}
+        </div>
+      )}
+
+      {/* Interactive day picker — click a journée to jump straight to its results */}
+      <div style={{display:'flex',gap:8,overflowX:'auto',padding:'4px 2px 14px',marginBottom:6,scrollbarWidth:'thin'}}>
+        {journees.map(j=>{
+          const isNew = j===journees[0] && (()=>{
+            try{
+              const seen=localStorage.getItem('results_seen_at')||'';
+              const jDate=scoped2.filter(r=>r.journee===j).reduce((m,r)=>r.created_at&&r.created_at>m?r.created_at:m,'');
+              return jDate>seen;
+            }catch{ return false; }
+          })();
+          const active=j===activeJournee;
+          return (
+            <button key={j} onClick={()=>setJournee(String(j))} style={{
+              position:'relative',flexShrink:0,minWidth:56,padding:'10px 8px',borderRadius:12,cursor:'pointer',
+              border:active?'2px solid var(--navy)':'2px solid var(--line)',
+              background:active?'var(--navy)':'#fff',
+              boxShadow:active?'0 4px 12px rgba(11,36,94,.25)':'none',
+              transform:active?'translateY(-2px)':'none',
+              transition:'all .18s'}}>
+              <div style={{fontSize:9.5,fontWeight:700,letterSpacing:'.04em',color:active?'#9fb0d8':'var(--muted)'}}>JOURNÉE</div>
+              <div style={{fontSize:17,fontWeight:800,color:active?'#fff':'var(--navy)'}}>{j}</div>
+              {isNew && <span style={{position:'absolute',top:-4,right:-4,width:10,height:10,borderRadius:'50%',background:'var(--red)',border:'2px solid #fff'}} />}
+            </button>
+          );
+        })}
+      </div>
+
+      <div key={activeJournee} style={{animation:'fadein .25s ease'}}>
+        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
+          <h3 style={{margin:0,fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:19,color:'var(--navy)'}}>
+            Journée {activeJournee}
+          </h3>
+          {isLatest && <span style={{fontSize:10.5,fontWeight:800,letterSpacing:'.04em',color:'#1f7a48',background:'#e3f6ea',padding:'3px 9px',borderRadius:20}}>DERNIÈRE</span>}
+          {journeeDate && <span style={{fontSize:12.5,color:'var(--muted)'}}>{new Date(journeeDate+'T00:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'})}</span>}
+        </div>
+
+        {shown.length===0 ? (
+          <div style={{padding:30,textAlign:'center',color:'var(--muted)',fontSize:13.5,background:'#fff',borderRadius:14,border:'1px solid var(--line)'}}>
+            Aucun résultat pour cette journée.
+          </div>
+        ) : (
+          <div style={{display:'grid',gap:10}}>
+            {shown.map(m=>{
+              const homeWin=m.home_score>m.away_score, awayWin=m.away_score>m.home_score;
+              return (
+                <div key={m.id} style={{background:'#fff',border:'1px solid var(--line)',borderRadius:14,
+                  padding:'16px 20px',display:'flex',alignItems:'center',gap:14,boxShadow:'0 1px 3px rgba(8,20,55,.04)'}}>
+                  <div style={{flex:1,display:'flex',alignItems:'center',gap:10,justifyContent:'flex-end',minWidth:0}}>
+                    <span style={{fontWeight:homeWin?800:600,fontSize:14.5,color:homeWin?'var(--navy)':'#5a6178',
+                      textAlign:'right',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.home}</span>
+                    <TeamBadge name={m.home} />
+                  </div>
+                  <div style={{flexShrink:0,display:'flex',alignItems:'center',gap:8,fontWeight:900,fontSize:19,
+                    background:'linear-gradient(135deg,var(--navy),#123a8a)',color:'#fff',borderRadius:10,
+                    padding:'8px 16px',minWidth:76,justifyContent:'center',fontFamily:"'Barlow Semi Condensed',sans-serif"}}>
+                    <span style={{color:homeWin?'#fff':'#9fb0d8'}}>{m.home_score}</span>
+                    <span style={{opacity:.5,fontSize:14}}>-</span>
+                    <span style={{color:awayWin?'#fff':'#9fb0d8'}}>{m.away_score}</span>
+                  </div>
+                  <div style={{flex:1,display:'flex',alignItems:'center',gap:10,minWidth:0}}>
+                    <TeamBadge name={m.away} />
+                    <span style={{fontWeight:awayWin?800:600,fontSize:14.5,color:awayWin?'var(--navy)':'#5a6178',
+                      overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.away}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+  </>);
+}
+
 function Rail({ standings, fixtures, onNav, onTrial, ads }){
   const sidebarAds=(ads||[]).filter(a=>a.position==='sidebar');
   const rows=[...standings].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
@@ -863,7 +1083,7 @@ function Rail({ standings, fixtures, onNav, onTrial, ads }){
     <aside>
       <div className="card">
         <div className="head"><div className="title"><span className="dot"></span>{standingsTitle}</div>
-          <span className="more" onClick={()=>onNav('Standings')}>Tout</span></div>
+          <span className="more" onClick={()=>onNav('Results','standings')}>Tout</span></div>
         <div className="tbl-head"><span>#</span><span>CLUB</span><span>J</span><span>PTS</span></div>
         {rows.map((t,i)=>(
           <div className="trow" key={t.id} style={{background:i===0?'rgba(239,0,63,0.035)':'#fff'}}>
@@ -873,6 +1093,7 @@ function Rail({ standings, fixtures, onNav, onTrial, ads }){
           </div>
         ))}
       </div>
+      <RecentResultsCard onNav={onNav} />
       <div className="card">
         <div className="head"><div className="title">Prochains matchs</div></div>
         {[...fixtures].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0)).map(f=>(
@@ -1103,33 +1324,6 @@ function CategoryView({ cat, articles, onOpen, shows }){
               <div className="meta">{a.author} · {timeAgo(a.created_at)}</div></div>
           </article>
         )) : <p style={{color:'var(--muted)'}}>Aucun article ici pour l'instant. Revenez après la prochaine journée.</p>}
-      </div>
-    </div>
-  );
-}
-
-function StandingsView({ standings }){
-  const rows=[...standings].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
-  const cols="34px 1fr 36px 36px 36px 36px 44px";
-  const standingsTitle=useSetting('standings_title')||'Classement D1';
-  return (
-    <div className="article" style={{maxWidth:880}}>
-      <div className="sechead" style={{marginTop:0}}><h2 style={{fontSize:22}}>{standingsTitle}</h2><div className="line"></div></div>
-      <div className="card">
-        <div style={{display:'grid',gridTemplateColumns:cols,padding:'10px 18px',fontSize:11,fontWeight:700,letterSpacing:'.05em',color:'var(--muted-2)',borderBottom:'1px solid #eef0f4'}}>
-          <span>#</span><span>CLUB</span><span style={{textAlign:'center'}}>J</span><span style={{textAlign:'center'}}>G</span><span style={{textAlign:'center'}}>N</span><span style={{textAlign:'center'}}>P</span><span style={{textAlign:'right'}}>PTS</span>
-        </div>
-        {rows.map((t,i)=>(
-          <div key={t.id} style={{display:'grid',gridTemplateColumns:cols,alignItems:'center',padding:'11px 18px',borderBottom:'1px solid #f2f3f7',background:i===0?'rgba(239,0,63,0.035)':'#fff'}}>
-            <span style={{fontWeight:700,color:i<3?'var(--red)':'var(--muted-2)'}}>{i+1}</span>
-            <span className="club"><Crest abbr={t.abbr} idx={i}/><span className="name">{t.team}</span></span>
-            <span style={{textAlign:'center',color:'#6b7180'}}>{t.played}</span>
-            <span style={{textAlign:'center',color:'#6b7180'}}>{t.won}</span>
-            <span style={{textAlign:'center',color:'#6b7180'}}>{t.drawn}</span>
-            <span style={{textAlign:'center',color:'#6b7180'}}>{t.lost}</span>
-            <span style={{textAlign:'right',fontWeight:800,color:'var(--navy)'}}>{t.points}</span>
-          </div>
-        ))}
       </div>
     </div>
   );
@@ -2588,6 +2782,173 @@ function AdminArticles({ articles, reload, toast, adminEmail }){
 // ============================================================
 //  ADMIN — SCORES & STANDINGS
 // ============================================================
+// ============================================================
+//  ADMIN — MATCH RESULTS ARCHIVE (Journées)
+// ============================================================
+const RESULT_SPORTS = ['Football','Basketball','Handball','Volley-ball'];
+const RESULT_DIVISIONS = ['D1','D2','Coupe du Togo'];
+const EMPTY_RESULT = { sport:'Football', division:'D1', journee:1, home:'', away:'', home_score:0, away_score:0, played_on:new Date().toISOString().slice(0,10) };
+
+function AdminMatchResults({ adminEmail, toast }){
+  const [rows,setRows]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [form,setForm]=useState(EMPTY_RESULT);
+  const [busy,setBusy]=useState(false);
+  const [editingId,setEditingId]=useState(null);
+  const [filterSport,setFilterSport]=useState('all');
+  const [filterDivision,setFilterDivision]=useState('all');
+  const [filterJournee,setFilterJournee]=useState('all');
+
+  async function load(){
+    setLoading(true);
+    const { data,error }=await sb.from('match_results').select('*')
+      .order('journee',{ascending:false}).order('played_on',{ascending:false});
+    if(error) toast('Erreur : '+error.message+' — table match_results manquante ?');
+    setRows(data||[]); setLoading(false);
+  }
+  useEffect(()=>{ load(); },[]);
+
+  const set=(k,v)=>setForm(p=>({...p,[k]:v}));
+
+  async function saveResult(){
+    if(!form.home.trim()||!form.away.trim()){ toast('Renseignez les deux équipes'); return; }
+    if(!form.journee||Number(form.journee)<1){ toast('Numéro de journée invalide'); return; }
+    setBusy(true);
+    const payload={
+      sport:form.sport.trim()||'Football', division:form.division.trim()||'D1',
+      journee:Number(form.journee), home:form.home.trim(), away:form.away.trim(),
+      home_score:Number(form.home_score)||0, away_score:Number(form.away_score)||0,
+      played_on:form.played_on||new Date().toISOString().slice(0,10),
+    };
+    const res = editingId
+      ? await sb.from('match_results').update(payload).eq('id',editingId)
+      : await sb.from('match_results').insert([{...payload, created_by:adminEmail}]);
+    setBusy(false);
+    if(res.error){ toast('Erreur : '+res.error.message); return; }
+    await logAction(adminEmail, editingId?'Résultat modifié':'Résultat ajouté',
+      `${payload.sport} ${payload.division} J${payload.journee} — ${payload.home} ${payload.home_score}-${payload.away_score} ${payload.away}`);
+    toast(editingId?'Résultat mis à jour ✓':'Résultat ajouté ✓');
+    setForm({...EMPTY_RESULT, sport:payload.sport, division:payload.division, journee:payload.journee, played_on:payload.played_on});
+    setEditingId(null);
+    load();
+  }
+  function editRow(r){
+    setForm({sport:r.sport,division:r.division,journee:r.journee,home:r.home,away:r.away,
+      home_score:r.home_score,away_score:r.away_score,played_on:r.played_on});
+    setEditingId(r.id);
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+  async function deleteResult(r){
+    if(!confirm(`Supprimer ${r.home} ${r.home_score}-${r.away_score} ${r.away} (J${r.journee}) ?`)) return;
+    await sb.from('match_results').delete().eq('id',r.id);
+    await logAction(adminEmail,'Résultat supprimé',`${r.home} vs ${r.away} — J${r.journee}`);
+    toast('Résultat supprimé'); load();
+  }
+
+  const sports=[...new Set(rows.map(r=>r.sport))];
+  const divisions=[...new Set(rows.map(r=>r.division))];
+  const journees=[...new Set(rows.map(r=>r.journee))].sort((a,b)=>b-a);
+  const filtered=rows.filter(r=>
+    (filterSport==='all'||r.sport===filterSport) &&
+    (filterDivision==='all'||r.division===filterDivision) &&
+    (filterJournee==='all'||r.journee===Number(filterJournee)));
+
+  return (
+    <div className="panel">
+      <h3>{editingId?'Modifier un résultat':'Ajouter un résultat'}</h3>
+      <div className="hint" style={{marginBottom:14}}>
+        📋 Chaque résultat est archivé par journée. Les visiteurs peuvent choisir n'importe quelle journée passée dans l'onglet « Résultats » du site — rien n'est jamais supprimé automatiquement.
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:12}}>
+        <div className="field" style={{margin:0}}>
+          <label>Sport</label>
+          <input list="sport-list" value={form.sport} onChange={e=>set('sport',e.target.value)} placeholder="Football" />
+          <datalist id="sport-list">{RESULT_SPORTS.map(s=><option key={s} value={s} />)}</datalist>
+        </div>
+        <div className="field" style={{margin:0}}>
+          <label>Division / Compétition</label>
+          <input list="division-list" value={form.division} onChange={e=>set('division',e.target.value)} placeholder="D1" />
+          <datalist id="division-list">{RESULT_DIVISIONS.map(d=><option key={d} value={d} />)}</datalist>
+        </div>
+        <div className="field" style={{margin:0}}>
+          <label>Journée (jour)</label>
+          <input type="number" min="1" value={form.journee} onChange={e=>set('journee',e.target.value)} />
+        </div>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 90px 1fr',gap:12,marginBottom:12,alignItems:'end'}}>
+        <div className="field" style={{margin:0}}>
+          <label>Équipe domicile</label>
+          <input value={form.home} onChange={e=>set('home',e.target.value)} placeholder="ASKO FC" />
+        </div>
+        <div style={{display:'flex',gap:4,alignItems:'center',justifyContent:'center',paddingBottom:11}}>
+          <input type="number" min="0" value={form.home_score} onChange={e=>set('home_score',e.target.value)}
+            style={{width:38,padding:'8px 4px',textAlign:'center',border:'1px solid var(--line)',borderRadius:7,fontWeight:800}} />
+          <span style={{fontWeight:800,color:'var(--muted)'}}>-</span>
+          <input type="number" min="0" value={form.away_score} onChange={e=>set('away_score',e.target.value)}
+            style={{width:38,padding:'8px 4px',textAlign:'center',border:'1px solid var(--line)',borderRadius:7,fontWeight:800}} />
+        </div>
+        <div className="field" style={{margin:0}}>
+          <label>Équipe extérieur</label>
+          <input value={form.away} onChange={e=>set('away',e.target.value)} placeholder="ASCK" />
+        </div>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:16}}>
+        <div className="field" style={{margin:0}}>
+          <label>Date du match</label>
+          <input type="date" value={form.played_on} onChange={e=>set('played_on',e.target.value)} />
+        </div>
+      </div>
+      <div style={{display:'flex',gap:10}}>
+        <button className="btn-primary" disabled={busy} onClick={saveResult}>{busy?'…':(editingId?'Enregistrer':'+ Ajouter le résultat')}</button>
+        {editingId && <button className="btn-ghost" onClick={()=>{setEditingId(null);setForm(EMPTY_RESULT);}}>Annuler</button>}
+      </div>
+
+      <div style={{marginTop:28,paddingTop:20,borderTop:'2px solid var(--line)'}}>
+        <div style={{display:'flex',gap:10,flexWrap:'wrap',marginBottom:14,alignItems:'center'}}>
+          <h3 style={{margin:0,marginRight:'auto'}}>Résultats archivés ({filtered.length})</h3>
+          <select value={filterSport} onChange={e=>setFilterSport(e.target.value)}
+            style={{padding:'8px 12px',border:'1px solid var(--line)',borderRadius:8,fontSize:13,background:'#fff'}}>
+            <option value="all">Tous sports</option>
+            {sports.map(s=><option key={s} value={s}>{s}</option>)}
+          </select>
+          <select value={filterDivision} onChange={e=>setFilterDivision(e.target.value)}
+            style={{padding:'8px 12px',border:'1px solid var(--line)',borderRadius:8,fontSize:13,background:'#fff'}}>
+            <option value="all">Toutes divisions</option>
+            {divisions.map(d=><option key={d} value={d}>{d}</option>)}
+          </select>
+          <select value={filterJournee} onChange={e=>setFilterJournee(e.target.value)}
+            style={{padding:'8px 12px',border:'1px solid var(--line)',borderRadius:8,fontSize:13,background:'#fff'}}>
+            <option value="all">Toutes journées</option>
+            {journees.map(j=><option key={j} value={j}>Journée {j}</option>)}
+          </select>
+        </div>
+        {loading ? <Spinner/> : filtered.length===0 ? (
+          <div className="empty">Aucun résultat enregistré{filterJournee!=='all'?' pour cette journée':''}.</div>
+        ) : (
+          <table className="admin-table"><thead><tr>
+            <th>J</th><th>Sport / Div.</th><th>Domicile</th><th style={{textAlign:'center'}}>Score</th><th>Extérieur</th><th>Date</th><th></th>
+          </tr></thead><tbody>
+            {filtered.map(r=>(
+              <tr key={r.id}>
+                <td data-label="Journée" style={{fontWeight:800,color:'var(--navy)'}}>J{r.journee}</td>
+                <td data-label="Sport" style={{fontSize:12,color:'var(--muted)'}}>{r.sport} · {r.division}</td>
+                <td data-label="Domicile" style={{fontWeight:600}}>{r.home}</td>
+                <td data-label="Score" style={{textAlign:'center',fontWeight:800}}>{r.home_score} - {r.away_score}</td>
+                <td data-label="Extérieur" style={{fontWeight:600}}>{r.away}</td>
+                <td data-label="Date" style={{fontSize:12,color:'var(--muted)'}}>{r.played_on}</td>
+                <td style={{textAlign:'right',whiteSpace:'nowrap'}}>
+                  <button className="icon-btn" onClick={()=>editRow(r)}>✏️</button>
+                  <button className="icon-btn del" onClick={()=>deleteResult(r)}>✕</button>
+                </td>
+              </tr>
+            ))}
+          </tbody></table>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail }){
   const [ns,setNs]=useState({home:'',away:'',score:'0 - 0',status:"0'",is_live:true});
   const [nsKick,setNsKick]=useState('');
@@ -2818,6 +3179,8 @@ function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail })
         </tbody></table>
         <div className="hint" style={{marginTop:10,fontSize:12,color:'var(--muted)'}}>L'ordre suit la colonne sort_order. Modifiez les points et le classement public se met à jour au prochain chargement.</div>
       </div>
+
+      <AdminMatchResults adminEmail={adminEmail} toast={toast} />
     </>
   );
 }
@@ -3825,189 +4188,6 @@ function AdminFinance({ adminEmail, userRole, toast }){
   );
 }
 
-// ============================================================
-//  CDM — Coupe du Monde tab
-// ============================================================
-function AdminCDM({ articles, reload, toast, adminEmail }){
-  const [subTab,setSubTab]=useState('live'); // 'live' | 'articles'
-  const [liveData,setLiveData]=useState(null);
-  const [standings,setStandings]=useState(null);
-  const [leaders,setLeaders]=useState(null);
-  const [loadingLive,setLoadingLive]=useState(false);
-  const [liveErr,setLiveErr]=useState('');
-
-  const cdmArticles = (articles||[]).filter(a=>a.category==='CDM');
-
-  function fetchLive(){
-    setLoadingLive(true); setLiveErr('');
-    Promise.all([
-      fetch('https://site.api.espn.com/apis/site/v2/sports/soccer/FIFA.WORLD/scoreboard').then(r=>r.json()).catch(()=>null),
-      fetch('https://site.api.espn.com/apis/v2/sports/soccer/FIFA.WORLD/standings').then(r=>r.json()).catch(()=>null),
-      fetch('https://site.api.espn.com/apis/v2/sports/soccer/FIFA.WORLD/leaders').then(r=>r.json()).catch(()=>null),
-    ]).then(([score,stand,lead])=>{
-      setLiveData(score); setStandings(stand); setLeaders(lead);
-      setLoadingLive(false);
-      if(!score) setLiveErr('Impossible de charger les données ESPN. Vérifiez votre connexion.');
-    });
-  }
-
-  useEffect(()=>{ if(subTab==='live') fetchLive(); },[subTab]);
-
-  // Parse scoreboard events
-  function parseEvents(data){
-    if(!data?.events) return [];
-    return data.events.map(ev=>{
-      const comp = ev.competitions?.[0]||{};
-      const teams = (comp.competitors||[]).map(c=>({
-        name: c.team?.displayName||'?',
-        score: c.score||'0',
-        homeAway: c.homeAway,
-      }));
-      const home = teams.find(t=>t.homeAway==='home')||teams[0]||{};
-      const away = teams.find(t=>t.homeAway==='away')||teams[1]||{};
-      const status = comp.status?.type?.description||'';
-      const clock = comp.status?.displayClock||'';
-      const isLive = comp.status?.type?.state==='in';
-      const isFt = comp.status?.type?.completed===true;
-      return { home:home.name, away:away.name, homeScore:home.score, awayScore:away.score, status, clock, isLive, isFt };
-    });
-  }
-
-  const [editingCdm,setEditingCdm]=useState(null);
-  const EMPTY_CDM = { title:'',tag:'CDM',category:'CDM',dek:'',body:'',author:'Rédaction SportFM',read_time:'3 min de lecture',image_url:'',is_hero:false,published:true };
-
-  async function deleteCdmArticle(a){
-    if(!confirm(`Supprimer « ${a.title} » ?`)) return;
-    await sb.from('articles').delete().eq('id',a.id);
-    await logAction(adminEmail,'Suppression article CDM',a.title);
-    toast('Article supprimé'); reload();
-  }
-
-  const subStyle=(k)=>({padding:'10px 18px',border:'none',borderBottom:subTab===k?'2px solid var(--navy)':'2px solid transparent',
-    background:'none',fontWeight:700,fontSize:13.5,color:subTab===k?'var(--navy)':'var(--muted)',cursor:'pointer',marginBottom:'-1px'});
-
-  if(editingCdm!==null) return <ArticleEditor initial={editingCdm}
-    onSave={async(msg)=>{ await logAction(adminEmail,editingCdm.id?'Modification article CDM':'Nouvel article CDM',editingCdm.title||msg); setEditingCdm(null); reload(); }}
-    onCancel={()=>setEditingCdm(null)} toast={toast} />;
-
-  const events = parseEvents(liveData);
-
-  return (
-    <div>
-      <div style={{display:'flex',gap:0,marginBottom:24,borderBottom:'2px solid var(--line)'}}>
-        <button onClick={()=>setSubTab('live')} style={subStyle('live')}>📡 Données live</button>
-        <button onClick={()=>setSubTab('articles')} style={subStyle('articles')}>📝 Articles CDM ({cdmArticles.length})</button>
-      </div>
-
-      {subTab==='live' && (
-        <div>
-          <div style={{display:'flex',gap:10,marginBottom:18,alignItems:'center'}}>
-            <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:20,color:'var(--navy)'}}>⚽ Coupe du Monde 2026 — Données ESPN</div>
-            <button className="btn-ghost" onClick={fetchLive} disabled={loadingLive} style={{marginLeft:'auto'}}>🔄 Rafraîchir</button>
-          </div>
-
-          {loadingLive ? <Spinner/> : liveErr ? (
-            <div className="panel"><div className="empty">{liveErr}</div></div>
-          ) : (
-            <>
-              {/* Matches */}
-              <div className="panel" style={{marginBottom:20}}>
-                <h3>Matchs du jour</h3>
-                {events.length===0
-                  ? <div className="empty">Aucun match disponible pour l'instant.</div>
-                  : events.map((ev,i)=>(
-                    <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'12px 0',borderBottom:'1px solid var(--line)',gap:12,flexWrap:'wrap'}}>
-                      <div style={{display:'flex',alignItems:'center',gap:10,flex:1,justifyContent:'flex-end'}}>
-                        <span style={{fontWeight:700,fontSize:14,color:'var(--navy)'}}>{ev.home}</span>
-                      </div>
-                      <div style={{textAlign:'center',minWidth:100}}>
-                        <div style={{fontWeight:800,fontSize:20,color:ev.isLive?'var(--red)':'var(--navy)'}}>{ev.homeScore} — {ev.awayScore}</div>
-                        <div style={{fontSize:11,fontWeight:700,marginTop:3,
-                          color:ev.isLive?'var(--red)':ev.isFt?'#1f7a48':'var(--muted)'}}>
-                          {ev.isLive?`🔴 ${ev.clock}`:ev.isFt?'FT':ev.status}
-                        </div>
-                      </div>
-                      <div style={{display:'flex',alignItems:'center',gap:10,flex:1}}>
-                        <span style={{fontWeight:700,fontSize:14,color:'var(--navy)'}}>{ev.away}</span>
-                      </div>
-                    </div>
-                  ))
-                }
-              </div>
-
-              {/* Top scorers */}
-              {leaders?.leaders?.length>0 && (
-                <div className="panel" style={{marginBottom:20}}>
-                  <h3>Meilleurs buteurs</h3>
-                  {(leaders.leaders[0]?.leaders||[]).slice(0,10).map((l,i)=>(
-                    <div key={i} style={{display:'flex',alignItems:'center',gap:12,padding:'8px 0',borderBottom:'1px solid var(--line)'}}>
-                      <span style={{fontWeight:800,fontSize:14,color:'var(--navy)',width:24,textAlign:'center'}}>{i+1}</span>
-                      <div style={{flex:1}}>
-                        <div style={{fontWeight:700,fontSize:13.5,color:'var(--navy)'}}>{l.athlete?.displayName||'—'}</div>
-                        <div style={{fontSize:11.5,color:'var(--muted)'}}>{l.athlete?.flag?.alt||l.team?.displayName||''}</div>
-                      </div>
-                      <span style={{fontWeight:800,fontSize:18,color:'var(--red)'}}>{l.value}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Standings groups */}
-              {standings?.standings?.entries?.length>0 && (
-                <div className="panel">
-                  <h3>Classement des groupes</h3>
-                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:16}}>
-                    {(standings.standings.entries||[]).slice(0,8).map((entry,gi)=>(
-                      <div key={gi} style={{border:'1px solid var(--line)',borderRadius:10,overflow:'hidden'}}>
-                        <div style={{background:'var(--navy)',color:'#fff',padding:'8px 14px',fontWeight:800,fontSize:13}}>
-                          {entry.team?.displayName||`Équipe ${gi+1}`}
-                        </div>
-                        <div style={{padding:'8px 14px',display:'flex',justifyContent:'space-between',fontSize:12.5}}>
-                          {(entry.stats||[]).slice(0,4).map((s,si)=>(
-                            <div key={si} style={{textAlign:'center'}}>
-                              <div style={{fontSize:10,color:'var(--muted)',fontWeight:700}}>{s.shortDisplayName||s.name}</div>
-                              <div style={{fontWeight:800,color:'var(--navy)'}}>{s.displayValue||s.value}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {subTab==='articles' && (
-        <div className="panel">
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:18}}>
-            <h3 style={{margin:0}}>Articles CDM ({cdmArticles.length})</h3>
-            <button className="btn-primary" onClick={()=>setEditingCdm({...EMPTY_CDM})}>+ Nouvel article CDM</button>
-          </div>
-          {cdmArticles.length===0
-            ? <div className="empty">Aucun article CDM. Publiez votre premier article sur la Coupe du Monde.</div>
-            : <table className="admin-table"><thead><tr>
-                <th>Titre</th><th>Statut</th><th>Modifié</th><th></th>
-              </tr></thead><tbody>
-              {cdmArticles.map(a=>(
-                <tr key={a.id}>
-                  <td style={{fontWeight:600,maxWidth:380}}>{a.is_hero&&<span style={{color:'var(--red)',marginRight:6}}>★</span>}{a.title}</td>
-                  <td><span className={"pill "+(a.published?'pub':'draft')}>{a.published?'Publié':'Brouillon'}</span></td>
-                  <td style={{color:'var(--muted)'}}>{timeAgo(a.updated_at||a.created_at)}</td>
-                  <td style={{textAlign:'right',whiteSpace:'nowrap'}}>
-                    <button className="icon-btn" onClick={async()=>setEditingCdm(a.body!==undefined?a:{...a, body:await fetchArticleBody(a.id)})}>Modifier</button>
-                    <button className="icon-btn del" onClick={()=>deleteCdmArticle(a)}>Supprimer</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody></table>}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ============================================================
 //  MON ESPACE — Employee Profile Portal
@@ -6192,7 +6372,6 @@ function Admin({ session, onExit, data, reload, toast, userPerms, showProfile })
         {can('can_emissions') && <button className={tab==='emissions'?'active':''} onClick={()=>setTab('emissions')}>📻 Émissions</button>}
         {can('can_finance') && <button className={tab==='finance'?'active':''} onClick={()=>setTab('finance')}>💰 Paie</button>}
         {(can('can_accounting')||can('can_accounting_entry')) && <button className={tab==='accounting'?'active':''} onClick={()=>setTab('accounting')}>📊 Comptabilité</button>}
-        {can('can_articles') && <button className={tab==='cdm'?'active':''} onClick={()=>setTab('cdm')}>⚽ CDM</button>}
         {can('can_manager') && <button className={tab==='manager'?'active':''} onClick={()=>setTab('manager')}>⭐ Manager</button>}
       </div></div>
       <div className="admin-body"><div className="wrap">
@@ -6208,7 +6387,6 @@ function Admin({ session, onExit, data, reload, toast, userPerms, showProfile })
         {tab==='accounting' && (can('can_accounting')||can('can_accounting_entry')) &&
           <><AdminAccounting adminEmail={adminEmail} toast={toast} entryOnly={!can('can_accounting')} />
           {can('can_accounting')&&<PageJournal section="accounting" />}</>}
-        {tab==='cdm' && can('can_articles') && <AdminCDM articles={data.articles} reload={reload} toast={toast} adminEmail={adminEmail} />}
         {tab==='broadcast' && can('can_broadcast') && <AdminBroadcast adminEmail={adminEmail} toast={toast} isAdmin={userPerms?.__full||userPerms?.can_team} />}
         {tab==='manager' && can('can_manager') && <><AdminManager adminEmail={adminEmail} toast={toast} /><PageJournal section="manager" /></>}
       </div></div>
@@ -6305,7 +6483,6 @@ const AD_PAGES = [
   { value:'all',       label:'Toutes les pages' },
   { value:'home',      label:'Accueil' },
   { value:'articles',  label:'Articles' },
-  { value:'cdm',       label:'CDM 2026' },
   { value:'standings', label:'Classement' },
   { value:'shows',     label:'Émissions' },
   { value:'partner',   label:'Partenaires' },
@@ -6507,521 +6684,13 @@ function timeAgo(ts){
 }
 
 // ============================================================
-//  CDM PUBLIC PAGE
-// ============================================================
-function CDMPage({ articles, toast, session }){
-  const [espnScores, setEspnScores] = useState([]);
-  const [espnLoading, setEspnLoading] = useState(true);
-  const [groups, setGroups] = useState([]);
-  const [allLeaders, setAllLeaders] = useState([]);
-  const [statTab, setStatTab] = useState('goals');
-  const [openGroups, setOpenGroups] = useState({});
-  const [polls, setPolls] = useState({});
-  const [votedMap, setVotedMap] = useState(()=> JSON.parse(localStorage.getItem('cdm_votes')||'{}'));
-  const [refreshing, setRefreshing] = useState(false);
-
-  function loadESPN(){
-    setEspnLoading(true);
-    // Fetch full tournament range June 11 → final (July 19) so upcoming
-    // knockout fixtures appear in the bracket
-    const base = 'https://site.api.espn.com/apis/site/v2/sports/soccer/FIFA.WORLD';
-    fetch(`${base}/scoreboard?dates=20260611-20260719&limit=250`)
-      .then(r=>r.json())
-      .then(d=>{
-        const evs = d.events||[];
-        if(evs.length>0){ setEspnScores(evs); setEspnLoading(false); return; }
-        // Fallback: try today only
-        return fetch(`${base}/scoreboard`).then(r=>r.json()).then(d2=>{setEspnScores(d2.events||[]); setEspnLoading(false);});
-      })
-      .catch(()=>setEspnLoading(false));
-    // Standings
-    fetch('https://site.api.espn.com/apis/v2/sports/soccer/FIFA.WORLD/standings')
-      .then(r=>r.json())
-      .then(d=>setGroups(d.standings?.groups||[]))
-      .catch(()=>{});
-    // Leaders — ESPN core API has live goals/assists/yellow/red card leaders;
-    // athlete names/photos hydrated from their individual resources
-    (async()=>{
-      try{
-        const r=await fetch('https://sports.core.api.espn.com/v2/sports/soccer/leagues/FIFA.WORLD/seasons/2026/types/1/leaders?limit=10');
-        const d=await r.json();
-        const cats=d.categories||[];
-        const wanted=[['goals','Goals'],['assists','Assists'],['yellowCards','Yellow Cards'],['redCards','Red Cards']];
-        const sel=wanted.map(([n,dn])=>({displayName:dn, raw:(cats.find(c=>c.name===n)?.leaders||[]).slice(0,10)}));
-        const refs={};
-        sel.forEach(c=>c.raw.forEach(l=>{ const u=(l.athlete?.['$ref']||'').replace('http://','https://'); if(u) refs[u]=null; }));
-        await Promise.all(Object.keys(refs).map(async u=>{
-          try{
-            const a=await (await fetch(u)).json();
-            refs[u]={ displayName:a.displayName||a.fullName||'—',
-              team:{displayName:a.citizenship||''},
-              headshot:{href:a.headshot?.href||a.flag?.href||''} };
-          }catch{}
-        }));
-        const built=sel.map(c=>({ displayName:c.displayName, leaders:c.raw.map((l,i)=>({
-          rank:i+1, value:l.value,
-          athlete:refs[(l.athlete?.['$ref']||'').replace('http://','https://')]||{displayName:'—',team:{displayName:''},headshot:{href:''}},
-        })) }));
-        if(built.some(c=>c.leaders.length)) setAllLeaders(built);
-      }catch{}
-    })();
-  }
-
-  async function loadPolls(){
-    const { data } = await sb.from('polls').select('*');
-    const map = {};
-    (data||[]).forEach(p=>{ map[p.match_id]=p; });
-    setPolls(map);
-  }
-
-  useEffect(()=>{ loadESPN(); loadPolls(); },[]);
-
-  async function votePoll(matchId, homeTeam, awayTeam, choice){
-    const voted = JSON.parse(localStorage.getItem('cdm_votes')||'{}');
-    if(voted[matchId]){ toast('Vous avez déjà voté pour ce match !'); return; }
-    const { data: existing } = await sb.from('polls').select('*').eq('match_id', matchId).maybeSingle();
-    if(existing){
-      const update = { votes_home: existing.votes_home||0, votes_draw: existing.votes_draw||0, votes_away: existing.votes_away||0 };
-      update[`votes_${choice}`] = (update[`votes_${choice}`]||0) + 1;
-      await sb.from('polls').update(update).eq('id', existing.id);
-    } else {
-      await sb.from('polls').insert([{
-        match_id: matchId, home_team: homeTeam, away_team: awayTeam,
-        votes_home: choice==='home'?1:0, votes_draw: choice==='draw'?1:0, votes_away: choice==='away'?1:0,
-      }]);
-    }
-    voted[matchId] = choice;
-    localStorage.setItem('cdm_votes', JSON.stringify(voted));
-    setVotedMap({...voted});
-    toast('Vote enregistré ! 🗳️');
-    loadPolls();
-  }
-
-  async function handleRefresh(){
-    setRefreshing(true);
-    loadESPN(); loadPolls();
-    setTimeout(()=>setRefreshing(false), 1000);
-  }
-
-  const cdmArticles = (articles||[]).filter(a=>{
-    const cat = (a.category||'').toLowerCase();
-    return cat==='cdm' || cat==='coupe du monde' || cat==='world cup';
-  });
-
-  // Upcoming list only shows the next 3 days (full schedule stays in the bracket)
-  const preMatches = espnScores.filter(ev=>ev.status?.type?.state==='pre'
-    && new Date(ev.date).getTime()-Date.now() < 3*24*3600*1000);
-  const activeMatches = espnScores.filter(ev=>ev.status?.type?.state==='in');
-  // Results list only keeps games from the last 2 days (full history stays in the bracket)
-  const doneMatches = espnScores.filter(ev=>ev.status?.type?.state==='post'
-    && Date.now()-new Date(ev.date).getTime() < 2*24*3600*1000);
-
-  // Static fallback stats (CDM 2026 — updated June 25)
-  const STATIC_GOALS = [
-    {rank:1,athlete:{displayName:'Lionel Messi',   team:{displayName:'Argentine'},  headshot:{href:'https://a.espncdn.com/i/headshots/soccer/players/full/45843.png'}},  value:5},
-    {rank:2,athlete:{displayName:'Erling Haaland', team:{displayName:'Norvège'},    headshot:{href:'https://a.espncdn.com/i/headshots/soccer/players/full/271698.png'}}, value:4},
-    {rank:2,athlete:{displayName:'Kylian Mbappé',  team:{displayName:'France'},     headshot:{href:'https://a.espncdn.com/i/headshots/soccer/players/full/278022.png'}}, value:4},
-    {rank:2,athlete:{displayName:'Vinicius Júnior',team:{displayName:'Brésil'},     headshot:{href:'https://a.espncdn.com/i/headshots/soccer/players/full/382532.png'}}, value:4},
-    {rank:5,athlete:{displayName:'Deniz Undav',    team:{displayName:'Allemagne'},  headshot:{href:''}}, value:3},
-    {rank:5,athlete:{displayName:'Ismael Saibari', team:{displayName:'Maroc'},      headshot:{href:''}}, value:3},
-    {rank:5,athlete:{displayName:'Johan Manzambi', team:{displayName:'Suisse'},     headshot:{href:''}}, value:3},
-    {rank:5,athlete:{displayName:'Jonathan David', team:{displayName:'Canada'},     headshot:{href:'https://a.espncdn.com/i/headshots/soccer/players/full/382599.png'}}, value:3},
-    {rank:5,athlete:{displayName:'Matheus Cunha',  team:{displayName:'Brésil'},     headshot:{href:''}}, value:3},
-  ];
-  const STATIC_ASSISTS = [
-    {rank:1,athlete:{displayName:'Alexander Isak',   team:{displayName:'Suède'},          headshot:{href:'https://a.espncdn.com/i/headshots/soccer/players/full/320073.png'}}, value:3},
-    {rank:1,athlete:{displayName:'Bruno Guimarães',  team:{displayName:'Brésil'},         headshot:{href:'https://a.espncdn.com/i/headshots/soccer/players/full/394208.png'}}, value:3},
-    {rank:1,athlete:{displayName:'Michael Olise',    team:{displayName:'France'},         headshot:{href:'https://a.espncdn.com/i/headshots/soccer/players/full/468018.png'}}, value:3},
-    {rank:4,athlete:{displayName:'Brahim Díaz',      team:{displayName:'Maroc'},          headshot:{href:''}}, value:2},
-    {rank:4,athlete:{displayName:'Breel Embolo',     team:{displayName:'Suisse'},         headshot:{href:''}}, value:2},
-    {rank:4,athlete:{displayName:'Chris Wood',       team:{displayName:'Nouvelle-Zélande'},headshot:{href:''}}, value:2},
-    {rank:4,athlete:{displayName:'Deniz Undav',      team:{displayName:'Allemagne'},      headshot:{href:''}}, value:2},
-    {rank:4,athlete:{displayName:'Denzel Dumfries',  team:{displayName:'Pays-Bas'},       headshot:{href:''}}, value:2},
-    {rank:4,athlete:{displayName:'Joshua Kimmich',   team:{displayName:'Allemagne'},      headshot:{href:''}}, value:2},
-  ];
-  const STATIC_YELLOW = [
-    {rank:1,athlete:{displayName:'Ahmed Fatehi',    team:{displayName:'Qatar'},        headshot:{href:''}}, value:2},
-    {rank:1,athlete:{displayName:'Sidny Cabral',    team:{displayName:'Cap-Vert'},     headshot:{href:''}}, value:2},
-    {rank:1,athlete:{displayName:'Teboho Mokoena',  team:{displayName:'Afrique du Sud'},headshot:{href:''}}, value:2},
-    {rank:4,athlete:{displayName:'Antonee Robinson',team:{displayName:'États-Unis'},   headshot:{href:''}}, value:1},
-    {rank:4,athlete:{displayName:'Aubrey Modiba',   team:{displayName:'Afrique du Sud'},headshot:{href:''}}, value:1},
-  ];
-  const STATIC_RED = [
-    {rank:1,athlete:{displayName:'Assim Madibo',         team:{displayName:'Qatar'},              headshot:{href:''}}, value:1},
-    {rank:1,athlete:{displayName:'César Montes',         team:{displayName:'Mexique'},            headshot:{href:''}}, value:1},
-    {rank:1,athlete:{displayName:'Homam El-Amin',        team:{displayName:'Qatar'},              headshot:{href:''}}, value:1},
-    {rank:1,athlete:{displayName:'Miguel Almirón',       team:{displayName:'Paraguay'},           headshot:{href:''}}, value:1},
-    {rank:1,athlete:{displayName:'Nathan Ngoy',          team:{displayName:'Belgique'},           headshot:{href:''}}, value:1},
-    {rank:1,athlete:{displayName:'Sphephelo Sithole',    team:{displayName:'Afrique du Sud'},     headshot:{href:''}}, value:1},
-    {rank:1,athlete:{displayName:'Tarik Muharemović',    team:{displayName:'Bosnie-Herzégovine'}, headshot:{href:''}}, value:1},
-    {rank:1,athlete:{displayName:'Themba Zwane',         team:{displayName:'Afrique du Sud'},     headshot:{href:''}}, value:1},
-  ];
-
-  const getLeaders = (keyword, fallback) => {
-    const cat = allLeaders.find(l=>(l.displayName||l.name||'').toLowerCase().includes(keyword));
-    const apiData = cat?.leaders||[];
-    return apiData.length > 0 ? apiData : fallback;
-  };
-  const topScorers = getLeaders('goal',   STATIC_GOALS);
-  const topAssists = getLeaders('assist', STATIC_ASSISTS);
-  const topYellow  = getLeaders('yellow', STATIC_YELLOW);
-  const topRed     = getLeaders('red',    STATIC_RED);
-  const statCategories = [
-    { id:'goals',   label:'⚽ Buteurs',      data: topScorers, unit:'buts',    color:'#c8102e' },
-    { id:'assists', label:'🎯 Passeurs',     data: topAssists, unit:'passes',  color:'#006b3f' },
-    { id:'yellow',  label:'🟨 Cartons J',   data: topYellow,  unit:'cartons', color:'#c8a000' },
-    { id:'red',     label:'🟥 Cartons R',   data: topRed,     unit:'cartons', color:'#c0392b' },
-  ];
-
-  const imgStyle=(a)=>a.image_url?{'--img':`url(${a.image_url})`}:null;
-  const imgCls=(a)=>"img shot"+(a.image_url?" has-img":"");
-
-  return (
-    <div style={{paddingBottom:80}}>
-      {/* ─── HERO BANNER ─── */}
-      <div style={{
-        background:'linear-gradient(135deg, #0a1628 0%, #1a3a2a 50%, #0a1628 100%)',
-        padding:'48px 0 32px', textAlign:'center', position:'relative', overflow:'hidden',
-        borderBottom:'4px solid #c8102e'
-      }}>
-        <div style={{position:'absolute',top:-60,left:-60,width:200,height:200,borderRadius:'50%',background:'rgba(0,107,63,.15)',pointerEvents:'none'}}/>
-        <div style={{position:'absolute',bottom:-40,right:-40,width:160,height:160,borderRadius:'50%',background:'rgba(200,16,46,.12)',pointerEvents:'none'}}/>
-        <div style={{position:'absolute',top:20,right:80,width:80,height:80,borderRadius:'50%',background:'rgba(244,196,48,.08)',pointerEvents:'none'}}/>
-        <div style={{position:'absolute',bottom:20,left:80,width:60,height:60,borderRadius:'50%',background:'rgba(0,107,63,.1)',pointerEvents:'none'}}/>
-        <div style={{position:'relative',zIndex:1}}>
-          <div style={{fontSize:48,marginBottom:8}}>🏆</div>
-          <h1 style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontSize:'clamp(28px,5vw,52px)',fontWeight:900,color:'#fff',textTransform:'uppercase',letterSpacing:'.05em',margin:'0 0 8px'}}>
-            Coupe du Monde FIFA 2026
-          </h1>
-          <p style={{color:'#a0b8a8',fontSize:16,margin:'0 0 16px',letterSpacing:'.1em'}}>🇺🇸 USA · 🇨🇦 Canada · 🇲🇽 Mexique</p>
-          <span style={{display:'inline-block',background:'#c8102e',color:'#fff',fontWeight:800,fontSize:13,padding:'6px 20px',borderRadius:20,letterSpacing:'.08em',animation:'cdm-pulse 1.5s ease-in-out infinite'}}>
-            ● EN COURS
-          </span>
-          <div style={{marginTop:24,display:'flex',justifyContent:'center',gap:40,flexWrap:'wrap'}}>
-            {[['48','Équipes'],['104','Matchs'],['16','Villes'],['32','Jours']].map(([n,l])=>(
-              <div key={l} style={{textAlign:'center'}}>
-                <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:900,fontSize:32,color:'#f4c430'}}>{n}</div>
-                <div style={{fontSize:11,fontWeight:700,letterSpacing:'.08em',color:'#a0b8a8',textTransform:'uppercase'}}>{l}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="wrap" style={{paddingTop:28}}>
-
-        {/* ─── LIVE / IN PROGRESS ─── */}
-        {activeMatches.length>0 && (
-          <div style={{marginBottom:28}}>
-            <div className="sechead" style={{marginTop:0}}>
-              <h2 style={{fontSize:16,color:'#c8102e'}}>🔴 EN DIRECT</h2><div className="line"></div>
-            </div>
-            {activeMatches.map(ev=>{
-              const comp=ev.competitions?.[0];
-              const home=comp?.competitors?.find(c=>c.homeAway==='home');
-              const away=comp?.competitors?.find(c=>c.homeAway==='away');
-              const status=ev.status?.type;
-              return (
-                <div key={ev.id} className="cdm-match-card" style={{background:'rgba(200,16,46,.06)',border:'2px solid #c8102e',borderRadius:14,padding:'18px 22px',display:'flex',alignItems:'center',gap:14,marginBottom:10,flexWrap:'wrap'}}>
-                  <span style={{width:10,height:10,borderRadius:'50%',background:'#c8102e',flexShrink:0,animation:'cdm-pulse 1s infinite'}}/>
-                  <div style={{flex:1,minWidth:100}}>
-                    {home?.team?.flag?.href ? <img src={home.team.flag.href} alt="" style={{width:24,height:16,objectFit:'cover',borderRadius:2,marginRight:6,verticalAlign:'middle'}} /> : null}
-                    <span style={{fontWeight:800,fontSize:16,color:'var(--navy)'}}>{home?.team?.displayName||home?.team?.name||'—'}</span>
-                  </div>
-                  <div style={{fontWeight:900,fontSize:24,color:'#c8102e',minWidth:80,textAlign:'center',letterSpacing:'.05em'}}>
-                    {home?.score||0} – {away?.score||0}
-                  </div>
-                  <div style={{flex:1,minWidth:100,textAlign:'right'}}>
-                    <span style={{fontWeight:800,fontSize:16,color:'var(--navy)'}}>{away?.team?.displayName||away?.team?.name||'—'}</span>
-                    {away?.team?.flag?.href ? <img src={away.team.flag.href} alt="" style={{width:24,height:16,objectFit:'cover',borderRadius:2,marginLeft:6,verticalAlign:'middle'}} /> : null}
-                  </div>
-                  <span style={{fontSize:12,fontWeight:800,padding:'4px 12px',borderRadius:20,background:'#c8102e',color:'#fff',letterSpacing:'.04em',flexShrink:0}}>
-                    {status?.shortDetail||status?.description||'LIVE'}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* ─── 2-COL LAYOUT ─── */}
-        <div style={{display:'grid',gridTemplateColumns:'1fr 340px',gap:28,alignItems:'start'}}>
-          {/* LEFT: All Matches */}
-          <div>
-            <div className="sechead" style={{marginTop:0}}>
-              <h2 style={{fontSize:16}}>📅 Résultats &amp; Matchs</h2><div className="line"></div>
-            </div>
-            {espnLoading ? <Spinner/> : espnScores.length===0 ? (
-              <div style={{background:'#fff',border:'1px solid var(--line)',borderRadius:12,padding:32,textAlign:'center',color:'var(--muted)'}}>
-                <div style={{fontSize:32,marginBottom:8}}>⚽</div>
-                <div style={{fontWeight:700}}>Aucun match programmé aujourd'hui</div>
-                <div style={{fontSize:13,marginTop:4}}>Les données ESPN seront disponibles dès le prochain match.</div>
-              </div>
-            ) : (
-              [...doneMatches,...preMatches].map(ev=>{
-                const comp=ev.competitions?.[0];
-                const home=comp?.competitors?.find(c=>c.homeAway==='home');
-                const away=comp?.competitors?.find(c=>c.homeAway==='away');
-                const status=ev.status?.type;
-                const isDone=status?.state==='post';
-                return (
-                  <div key={ev.id} className="cdm-match-card" style={{background:'#fff',border:'1px solid var(--line)',borderRadius:12,padding:'14px 18px',display:'flex',alignItems:'center',gap:12,marginBottom:10,flexWrap:'wrap'}}>
-                    <div style={{flex:1,minWidth:80}}>
-                      {home?.team?.flag?.href ? <img src={home.team.flag.href} alt="" style={{width:20,height:14,objectFit:'cover',borderRadius:2,marginRight:6,verticalAlign:'middle'}} /> : null}
-                      <span style={{fontWeight:700,fontSize:14,color:'var(--navy)'}}>{home?.team?.displayName||home?.team?.name||'—'}</span>
-                    </div>
-                    <div style={{fontWeight:900,fontSize:18,color:isDone?'var(--navy)':'#2a5bd0',minWidth:70,textAlign:'center'}}>
-                      {isDone ? `${home?.score||0} – ${away?.score||0}` : (status?.shortDetail||'–')}
-                    </div>
-                    <div style={{flex:1,minWidth:80,textAlign:'right'}}>
-                      <span style={{fontWeight:700,fontSize:14,color:'var(--navy)'}}>{away?.team?.displayName||away?.team?.name||'—'}</span>
-                      {away?.team?.flag?.href ? <img src={away.team.flag.href} alt="" style={{width:20,height:14,objectFit:'cover',borderRadius:2,marginLeft:6,verticalAlign:'middle'}} /> : null}
-                    </div>
-                    <span style={{fontSize:11,fontWeight:800,padding:'3px 10px',borderRadius:20,background:isDone?'#e8eaf0':'#f0f7ff',color:isDone?'#666':'#2a5bd0',letterSpacing:'.04em',flexShrink:0}}>
-                      {status?.shortDetail||status?.description||'—'}
-                    </span>
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          {/* RIGHT: Tabbed Stats */}
-          <div>
-            {/* Tab pills */}
-            <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:14}}>
-              {statCategories.map(sc=>(
-                <button key={sc.id} onClick={()=>setStatTab(sc.id)}
-                  style={{fontSize:11.5,fontWeight:700,padding:'6px 12px',borderRadius:20,border:'none',cursor:'pointer',
-                    background:statTab===sc.id?sc.color:'#f1f2f6',
-                    color:statTab===sc.id?'#fff':'var(--navy)',
-                    letterSpacing:'.03em',transition:'background .15s'}}>
-                  {sc.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Leaderboard card */}
-            {statCategories.map(sc=> statTab!==sc.id ? null : (
-              <div key={sc.id} style={{background:'#fff',border:'1px solid var(--line)',borderRadius:14,overflow:'hidden',marginBottom:16}}>
-                {sc.data.length===0 ? (
-                  <div style={{padding:28,textAlign:'center',color:'var(--muted)',fontSize:13}}>
-                    <div style={{fontSize:28,marginBottom:8}}>{sc.label.split(' ')[0]}</div>
-                    Classement disponible dès le début du tournoi
-                  </div>
-                ) : sc.data.slice(0,10).map((p,i)=>{
-                  const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':null;
-                  const headshotUrl = p.athlete?.headshot?.href||'';
-                  const initials = (p.athlete?.displayName||p.displayName||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-                  return (
-                    <div key={i} style={{display:'flex',alignItems:'center',gap:10,padding:'11px 16px',
-                      borderBottom:i<Math.min(sc.data.length,10)-1?'1px solid #f2f3f7':'none',
-                      background:i===0?'rgba(244,196,48,.05)':'#fff'}}>
-                      <span style={{width:24,textAlign:'center',fontSize:i<3?17:12,fontWeight:700,color:i>=3?'var(--muted-2)':'',flexShrink:0}}>
-                        {medal||i+1}
-                      </span>
-                      {headshotUrl
-                        ? <img src={headshotUrl} alt="" style={{width:32,height:32,objectFit:'cover',borderRadius:'50%',flexShrink:0,border:'2px solid #e8eaf0'}}
-                            onError={e=>{ e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }} />
-                        : null}
-                      <div style={{width:32,height:32,borderRadius:'50%',background:sc.color,flexShrink:0,
-                        display:headshotUrl?'none':'flex',alignItems:'center',justifyContent:'center',
-                        fontSize:11,fontWeight:800,color:'#fff',letterSpacing:'-.02em',border:'2px solid #e8eaf0'}}>
-                        {initials}
-                      </div>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontWeight:700,fontSize:13.5,color:'var(--navy)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
-                          {p.athlete?.displayName||p.displayName||'—'}
-                        </div>
-                        <div style={{fontSize:11,color:'var(--muted)',marginTop:1}}>
-                          {p.athlete?.team?.displayName||p.team?.displayName||''}
-                        </div>
-                      </div>
-                      <div style={{display:'flex',flexDirection:'column',alignItems:'center',flexShrink:0}}>
-                        <span style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:900,fontSize:22,
-                          color:i===0?'#f4c430':i===1?'#9ea7b2':i===2?'#cd7f32':sc.color,lineHeight:1}}>
-                          {p.value||p.displayValue||0}
-                        </span>
-                        <span style={{fontSize:9.5,fontWeight:700,color:'var(--muted)',letterSpacing:'.04em',textTransform:'uppercase'}}>{sc.unit}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-
-            {/* Mini Stats */}
-            <div style={{background:'linear-gradient(135deg,#0a1628,#1a3a2a)',borderRadius:14,padding:20,color:'#fff'}}>
-              <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:12,letterSpacing:'.08em',color:'#a0b8a8',marginBottom:12}}>STATISTIQUES CDM 2026</div>
-              {[
-                ['⚽','Matchs joués', doneMatches.length||'—'],
-                ['📅','À venir',     preMatches.length||'—'],
-                ['🏆','Équipes',     48],
-              ].map(([icon,label,val])=>(
-                <div key={label} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'7px 0',borderBottom:'1px solid rgba(255,255,255,.08)'}}>
-                  <span style={{fontSize:13,color:'#a0b8a8'}}>{icon} {label}</span>
-                  <span style={{fontWeight:800,fontSize:16,color:'#f4c430'}}>{val}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* ─── TOURNAMENT BRACKET ─── */}
-        <div style={{marginTop:32}}>
-          <div className="sechead">
-            <h2 style={{fontSize:16}}>🏆 Tableau Final</h2><div className="line"></div>
-          </div>
-          {(()=>{
-            // Rounds come from ESPN's own round identifier (season.slug) — exact, no date guessing
-            const ROUNDS=[
-              {slug:'round-of-32',     label:'16es de finale'},
-              {slug:'round-of-16',     label:'8es de finale'},
-              {slug:'quarterfinals',   label:'Quarts de finale'},
-              {slug:'semifinals',      label:'Demi-finales'},
-              {slug:'3rd-place-match', label:'Match 3e place'},
-              {slug:'final',           label:'FINALE'},
-            ];
-            const rounds=ROUNDS.map(r=>({...r, matches:espnScores
-              .filter(ev=>ev.season?.slug===r.slug)
-              .sort((a,b)=>(a.date||'').localeCompare(b.date||''))}));
-            if(rounds.every(r=>r.matches.length===0)) return (
-              <div style={{background:'#fff',border:'1px solid var(--line)',borderRadius:12,padding:'20px 24px',color:'var(--muted)',fontSize:13,textAlign:'center'}}>
-                Le tableau final sera disponible dès la fin de la phase de groupes.
-              </div>
-            );
-            return (
-              <div style={{overflowX:'auto',paddingBottom:8}}>
-                <div style={{display:'flex',gap:16,minWidth:'max-content',alignItems:'stretch'}}>
-                  {rounds.map(r=>(
-                    <div key={r.label} style={{width:215,display:'flex',flexDirection:'column'}}>
-                      <div style={{textAlign:'center',fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:900,fontSize:12.5,letterSpacing:'.07em',color:r.label==='FINALE'?'var(--red)':'var(--navy)',textTransform:'uppercase',padding:'6px 0 10px'}}>{r.label}</div>
-                      <div style={{flex:1,display:'flex',flexDirection:'column',justifyContent:'space-around',gap:10}}>
-                        {r.matches.length===0
-                          ? <div style={{border:'1px dashed var(--line)',borderRadius:10,padding:'14px 10px',textAlign:'center',fontSize:11.5,color:'var(--muted)'}}>À déterminer</div>
-                          : r.matches.map(ev=>{
-                              const comps=ev.competitions?.[0]?.competitors||[];
-                              const st=ev.status?.type; const live=st?.state==='in';
-                              return (
-                                <div key={ev.id} style={{background:'#fff',border:live?'2px solid var(--red)':'1px solid var(--line)',borderRadius:10,padding:'8px 10px',boxShadow:'0 1px 4px rgba(8,20,55,.05)'}}>
-                                  {comps.map((t,ti)=>{
-                                    const flag=t.team?.logo||t.team?.logos?.[0]?.href||t.team?.flag?.href;
-                                    return (
-                                      <div key={ti} style={{display:'flex',alignItems:'center',gap:6,padding:'3px 0'}}>
-                                        {flag ? <img src={flag} alt="" style={{width:18,height:13,objectFit:'cover',borderRadius:2,flexShrink:0}} />
-                                              : <div style={{width:18,height:13,background:'#e0e3ec',borderRadius:2,flexShrink:0}} />}
-                                        <span style={{flex:1,fontWeight:t.winner?800:500,fontSize:12.5,color:'var(--navy)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
-                                          {t.team?.shortDisplayName||t.team?.displayName||'—'}
-                                        </span>
-                                        {t.shootoutScore!=null && <span style={{fontSize:10,color:'var(--muted)'}}>({t.shootoutScore})</span>}
-                                        <span style={{fontWeight:800,fontSize:13.5,color:t.winner?'var(--red)':'#4a5168',minWidth:14,textAlign:'right'}}>
-                                          {st?.state==='pre'?'':(t.score??'')}
-                                        </span>
-                                      </div>
-                                    );
-                                  })}
-                                  <div style={{fontSize:10.5,marginTop:4,fontWeight:700,color:live?'var(--red)':'var(--muted)'}}>
-                                    {live ? '● '+(st.shortDetail||'EN DIRECT')
-                                      : st?.state==='post' ? 'Terminé'
-                                      : new Date(ev.date).toLocaleDateString('fr-FR',{day:'numeric',month:'short'})+' · '+new Date(ev.date).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}
-                                  </div>
-                                  {/* Inline pronostic for upcoming matches */}
-                                  {st?.state==='pre' && comps.length===2 && (()=>{
-                                    const h=comps.find(t=>t.homeAway==='home')||comps[0];
-                                    const a2=comps.find(t=>t.homeAway==='away')||comps[1];
-                                    const hn=h.team?.displayName||'Équipe 1', an=a2.team?.displayName||'Équipe 2';
-                                    const hs=h.team?.shortDisplayName||hn, as2=a2.team?.shortDisplayName||an;
-                                    const myVote=votedMap[ev.id], pd=polls[ev.id];
-                                    const tot=(pd?.votes_home||0)+(pd?.votes_draw||0)+(pd?.votes_away||0)||1;
-                                    const pct=n=>Math.round(((n||0)/tot)*100);
-                                    if(!myVote) return (
-                                      <div style={{marginTop:6,borderTop:'1px solid #f0f1f5',paddingTop:6}}>
-                                        <div style={{fontSize:9.5,fontWeight:800,letterSpacing:'.05em',color:'var(--muted)',marginBottom:4,textTransform:'uppercase'}}>🗳️ Qui va gagner ?</div>
-                                        <div style={{display:'flex',gap:4}}>
-                                          <button onClick={()=>votePoll(ev.id,hn,an,'home')} title={hn}
-                                            style={{flex:1,background:'var(--navy)',color:'#fff',border:'none',borderRadius:6,padding:'5px 3px',fontSize:10,fontWeight:700,cursor:'pointer',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{hs}</button>
-                                          <button onClick={()=>votePoll(ev.id,hn,an,'draw')}
-                                            style={{background:'#f1f2f6',color:'var(--navy)',border:'none',borderRadius:6,padding:'5px 7px',fontSize:10,fontWeight:700,cursor:'pointer'}}>Nul</button>
-                                          <button onClick={()=>votePoll(ev.id,hn,an,'away')} title={an}
-                                            style={{flex:1,background:'#c8102e',color:'#fff',border:'none',borderRadius:6,padding:'5px 3px',fontSize:10,fontWeight:700,cursor:'pointer',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{as2}</button>
-                                        </div>
-                                      </div>
-                                    );
-                                    return (
-                                      <div style={{marginTop:6,borderTop:'1px solid #f0f1f5',paddingTop:5}}>
-                                        {[[hs,pct(pd?.votes_home),'#0B245E'],['Nul',pct(pd?.votes_draw),'#8a90a2'],[as2,pct(pd?.votes_away),'#c8102e']].map(([l,p,c])=>(
-                                          <div key={l} style={{display:'flex',alignItems:'center',gap:5,marginBottom:2}}>
-                                            <span style={{fontSize:9.5,fontWeight:700,color:'var(--navy)',width:52,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{l}</span>
-                                            <div style={{flex:1,height:5,background:'#f1f2f6',borderRadius:3,overflow:'hidden'}}>
-                                              <div style={{width:`${p}%`,height:'100%',background:c,borderRadius:3}}/>
-                                            </div>
-                                            <span style={{fontSize:9.5,fontWeight:800,color:'var(--muted)',width:26,textAlign:'right'}}>{p}%</span>
-                                          </div>
-                                        ))}
-                                        <div style={{fontSize:9,color:'#1f7a48',fontWeight:700,marginTop:3}}>✅ Voté : {myVote==='home'?hs:myVote==='draw'?'Nul':as2}</div>
-                                      </div>
-                                    );
-                                  })()}
-                                </div>
-                              );
-                            })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
-        </div>
-
-        {/* ─── CDM ARTICLES ─── */}
-        {cdmArticles.length>0 && (
-          <div style={{marginTop:32}}>
-            <div className="sechead">
-              <h2 style={{fontSize:16}}>📰 Actualités CDM</h2><div className="line"></div>
-            </div>
-            <div className="grid3">
-              {cdmArticles.slice(0,12).map(a=>(
-                <article key={a.id} className="gcard" style={{cursor:'pointer'}}>
-                  <div className={imgCls(a)} style={{...imgStyle(a), position:'relative'}}>
-                    <span style={{position:'absolute',top:10,left:10,background:'#c8102e',color:'#fff',fontWeight:800,fontSize:10,letterSpacing:'.07em',padding:'4px 9px',borderRadius:5}}>CDM 2026</span>
-                  </div>
-                  <div className="eyebrow" style={{marginTop:10,color:'#c8102e'}}>{a.tag}</div>
-                  <h4 style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:700,fontSize:17,lineHeight:1.15,letterSpacing:'-.005em',margin:0,color:'var(--navy)'}}>{a.title}</h4>
-                  <div className="meta" style={{fontSize:12,color:'var(--muted-2)',marginTop:7}}>{timeAgo(a.created_at)}</div>
-                </article>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Empty state if no ESPN data and no articles */}
-        {!espnLoading && espnScores.length===0 && cdmArticles.length===0 && (
-          <div style={{textAlign:'center',padding:'60px 20px',color:'var(--muted)'}}>
-            <div style={{fontSize:56,marginBottom:12}}>🏆</div>
-            <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:24,color:'var(--navy)',marginBottom:8}}>Coupe du Monde 2026</div>
-            <p style={{fontSize:15,maxWidth:'42ch',margin:'0 auto',lineHeight:1.6}}>
-              Les données en direct seront disponibles dès le coup d'envoi. Revenez pour suivre les scores, classements et pronostics !
-            </p>
-          </div>
-        )}
-
-      </div>
-
-      {/* Refresh FAB */}
-      <button className="cdm-refresh-btn" onClick={handleRefresh} title="Actualiser les données ESPN" style={{transform:refreshing?'rotate(360deg)':'none',transition:'transform .6s ease'}}>
-        ↻
-      </button>
-    </div>
-  );
-}
-
-// ============================================================
 //  ROOT APP
 // ============================================================
 function App(){
   const [route,setRoute]=useState(()=> location.hash==='#admin' ? 'admin' : 'site');
   const [nav,setNav]=useState('Home');
+  const [resultsTab,setResultsTab]=useState('results'); // which sub-tab the Résultats page opens on
+  const hasNewResults=useHasNewResults(); // red dot on "Résultats" nav — a reason to come back
   const [openArticle,setOpenArticle]=useState(null);
   const [drawer,setDrawer]=useState(false);
   const [loading,setLoading]=useState(true);
@@ -7139,8 +6808,8 @@ function App(){
   const goAdmin=()=>{ location.hash='admin'; setRoute('admin'); };
   const goSite=()=>{ location.hash=''; setRoute('site'); };
 
-  function navTo(n){
-    setNav(n); setOpenArticle(null); setDrawer(false);
+  function navTo(n, resultsSubTab){
+    setNav(n); setResultsTab(resultsSubTab||'results'); setOpenArticle(null); setDrawer(false);
     if(location.hash.startsWith('#article=')) history.replaceState(null,'',location.pathname);
     window.scrollTo({top:0,behavior:'smooth'});
   }
@@ -7208,8 +6877,10 @@ function App(){
         <button className="menu-btn" onClick={()=>setDrawer(true)} aria-label="Open menu"><i></i><i></i><i></i></button>
         <Logo onClick={()=>navTo('Home')} />
         <nav className="main">
-          {NAVS.map(n=><button key={n.key} className={(nav===n.key&&!isPartner)?'active':''} onClick={()=>navTo(n.key)}>{n.label}</button>)}
-          <button className={`nav-link cdm-nav-btn${nav==='CDM'?' active':''}`} onClick={()=>navTo('CDM')}>⚽ <span>CDM 2026</span></button>
+          {NAVS.map(n=><button key={n.key} className={(nav===n.key&&!isPartner)?'active':''} onClick={()=>navTo(n.key)} style={n.key==='Results'?{position:'relative'}:null}>
+            {n.label}
+            {n.key==='Results' && hasNewResults && <span style={{position:'absolute',top:2,right:-2,width:8,height:8,borderRadius:'50%',background:'var(--red)',border:'2px solid #fff'}} />}
+          </button>)}
         </nav>
         <div className="grow"></div>
         <button className="btn-partner" onClick={()=>navTo('Spot')} style={{background:'var(--red)',marginRight:6}}>📻 Réserver un spot</button>
@@ -7219,19 +6890,17 @@ function App(){
 
       {!isPartner && <Ticker scores={data.scores} />}
 
-      {nav==='CDM' && !openArticle && <CDMPage articles={data.articles} toast={toast} session={session} />}
-      {nav!=='CDM' && (loading ? <Spinner/> :
+      {loading ? <Spinner/> :
         isSpot ? <SpotRequestForm onBack={()=>navTo('Home')} toast={toast} /> :
         isPartner ? <PartnerView onBack={()=>navTo('Home')} toast={toast} /> :
         openArticle ? <div className="wrap"><ArticleView article={openArticle} onBack={()=>{setOpenArticle(null); if(location.hash.startsWith('#article=')) history.replaceState(null,'',location.pathname);}} backLabel={navLabel(nav)} /></div> :
         <div className="wrap">
           {nav==='Home' && <Home articles={data.articles} standings={data.standings} fixtures={data.fixtures}
             ads={data.ads} onOpen={open} onNav={navTo} onTrial={()=>navTo('Partner')} />}
-          {nav==='Standings' && <StandingsView standings={data.standings} />}
+          {nav==='Results' && <ResultsPage standings={data.standings} initialTab={resultsTab} key={resultsTab} />}
           {nav==='Articles' && <ArticlesPage articles={data.articles} onOpen={open} />}
           {nav==='Shows' && <CategoryView cat="Shows" articles={data.articles} onOpen={open} shows={data.shows||[]} />}
         </div>
-      )}
       }
 
       <footer><div className="wrap">
@@ -7260,8 +6929,9 @@ function App(){
 
       <div className={"drawer"+(drawer?" open":"")} onClick={e=>{if(e.target.className.includes('drawer'))setDrawer(false);}}>
         <div className="panel-d">
-          {NAVS.map(n=><button key={n.key} onClick={()=>navTo(n.key)}>{n.label}</button>)}
-          <button onClick={()=>navTo('CDM')} style={{background:'linear-gradient(135deg,#c8102e,#006b3f)',color:'#fff',borderRadius:10,marginTop:4,fontWeight:800}}>⚽ CDM 2026</button>
+          {NAVS.map(n=><button key={n.key} onClick={()=>navTo(n.key)}>
+            {n.label}{n.key==='Results' && hasNewResults && <span style={{marginLeft:6,color:'var(--red)'}}>●</span>}
+          </button>)}
           <button onClick={()=>navTo('Spot')} style={{color:'var(--red)'}}>📻 Réserver un spot</button>
           <button onClick={()=>navTo('Partner')} style={{color:'var(--navy)'}}>Devenir partenaire</button>
         </div>
