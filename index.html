@@ -6166,6 +6166,10 @@ function AdminManager({ adminEmail, toast }){
   const [scripts,setScripts]=useState([]);
   const [scriptForm,setScriptForm]=useState({title:'',script:'',assigned_to:'',content_type:'Article web',platform:'Site web',due_date:''});
   const [scriptBusy,setScriptBusy]=useState(false);
+  // ticks every minute so pending scripts' duration keeps counting live
+  // (24h -> 1j, 1j 1h, 1j 2h...) without needing a manual refresh
+  const [,setClockTick]=useState(0);
+  useEffect(()=>{ const t=setInterval(()=>setClockTick(x=>x+1),60000); return ()=>clearInterval(t); },[]);
 
   async function load(){
     setLoading(true);
