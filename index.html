@@ -2126,15 +2126,34 @@ function AdminContent({ adminEmail, userRole, toast }){
   const [assigneeFilter,setAssigneeFilter]=useState('all');
   const [view,setView]=useState('table'); // 'table' | 'board'
   const [teamList,setTeamList]=useState([]);
+  const [inbox,setInbox]=useState([]);
+  const [acceptingId,setAcceptingId]=useState(null);
 
   async function load(){
-    const [{ data:taskData },{ data:teamData }]=await Promise.all([
+    const [{ data:taskData },{ data:teamData },{ data:inboxData }]=await Promise.all([
       sb.from('content_tasks').select('*').order('due_date',{ascending:true,nullsFirst:false}),
       sb.from('user_roles').select('email,name,job_title').order('name'),
+      sb.from('content_scripts').select('*').eq('assigned_to',adminEmail).eq('status','sent').order('created_at',{ascending:true}),
     ]);
-    setTasks(taskData||[]); setTeamList(teamData||[]); setLoading(false);
+    setTasks(taskData||[]); setTeamList(teamData||[]); setInbox(inboxData||[]); setLoading(false);
   }
   useEffect(()=>{ load(); },[]);
+
+  // Accepting a script creates its content_task and links the two — from
+  // here it flows through the normal Contenu pipeline like any other task.
+  async function acceptScript(s){
+    setAcceptingId(s.id);
+    const payload={
+      title:s.title, description:s.script||'', content_type:s.content_type||'Article web',
+      platform:s.platform||'Site web', assigned_to:JSON.stringify([adminEmail]),
+      priority:s.priority||'normal', status:'todo', due_date:s.due_date||null,
+    };
+    const { data:newTask, error }=await sb.from('content_tasks').insert([{...payload, created_by:s.sent_by}]).select().single();
+    if(error){ setAcceptingId(null); toast('Erreur : '+error.message); return; }
+    await sb.from('content_scripts').update({status:'accepted', accepted_at:new Date().toISOString(), content_task_id:newTask.id}).eq('id',s.id);
+    await logAction(adminEmail,'Script accepté',s.title);
+    setAcceptingId(null); toast('Script accepté — tâche créée ✓'); load();
+  }
 
   async function quickStatus(id,status,title){
     await sb.from('content_tasks').update({status,updated_at:new Date().toISOString()}).eq('id',id);
@@ -2171,6 +2190,30 @@ function AdminContent({ adminEmail, userRole, toast }){
 
   return (
     <div>
+      {/* Scripts reçus — briefs sent from Manager awaiting acceptance */}
+      {inbox.length>0 && (
+        <div className="panel" style={{marginBottom:22,background:'#fff8e6',border:'1px solid #e8c85a'}}>
+          <h3 style={{marginBottom:4,color:'#7a5c00'}}>📨 Scripts reçus ({inbox.length})</h3>
+          <p style={{fontSize:12.5,color:'#7a5c00',marginTop:0,marginBottom:14}}>On vous a envoyé du travail à faire — acceptez pour le faire apparaître dans votre planning ci-dessous.</p>
+          {inbox.map(s=>(
+            <div key={s.id} style={{background:'#fff',border:'1px solid #e8c85a',borderRadius:10,padding:14,marginBottom:10}}>
+              <div style={{display:'flex',alignItems:'flex-start',gap:12,flexWrap:'wrap'}}>
+                <div style={{flex:1,minWidth:220}}>
+                  <div style={{fontWeight:700,fontSize:14.5,color:'var(--navy)'}}>{s.title}</div>
+                  <div style={{fontSize:11.5,color:'var(--muted)',marginTop:2}}>
+                    {s.content_type||'Article web'} · {s.platform||'Site web'} · envoyé {timeAgo(s.created_at)}
+                  </div>
+                  {s.script && <p style={{fontSize:13,color:'#2b3142',marginTop:8,marginBottom:0,whiteSpace:'pre-wrap'}}>{s.script}</p>}
+                </div>
+                <button className="btn-primary" style={{flexShrink:0}} disabled={acceptingId===s.id} onClick={()=>acceptScript(s)}>
+                  {acceptingId===s.id?'…':'✓ Accepter'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* KPI row */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',gap:12,marginBottom:22}}>
         {[
@@ -6119,17 +6162,47 @@ function AdminManager({ adminEmail, toast }){
 
   const [statusFilter,setStatusFilter]=useState('all');
 
+  // scripts sent to the media team
+  const [scripts,setScripts]=useState([]);
+  const [scriptForm,setScriptForm]=useState({title:'',script:'',assigned_to:'',content_type:'Article web',platform:'Site web',due_date:''});
+  const [scriptBusy,setScriptBusy]=useState(false);
+
   async function load(){
     setLoading(true);
-    const [t,e,u]=await Promise.all([
+    const [t,e,u,s]=await Promise.all([
       sb.from('content_tasks').select('*').order('updated_at',{ascending:false}),
       sb.from('task_evaluations').select('*').order('created_at',{ascending:false}),
       sb.from('user_roles').select('email,name'),
+      sb.from('content_scripts').select('*').order('created_at',{ascending:false}),
     ]);
     if(e.error) toast('Table task_evaluations manquante — exécutez le SQL fourni');
-    setTasks(t.data||[]); setEvals(e.data||[]); setTeam(u.data||[]); setLoading(false);
+    if(s.error) toast('Table content_scripts manquante — exécutez le SQL fourni');
+    setTasks(t.data||[]); setEvals(e.data||[]); setTeam(u.data||[]); setScripts(s.data||[]); setLoading(false);
   }
   useEffect(()=>{ load(); },[]);
+
+  async function sendScript(){
+    if(!scriptForm.title.trim()){ toast('Titre requis'); return; }
+    if(!scriptForm.assigned_to){ toast('Choisissez à qui envoyer ce script'); return; }
+    setScriptBusy(true);
+    const { error }=await sb.from('content_scripts').insert([{
+      title:scriptForm.title.trim(), script:scriptForm.script.trim()||null,
+      assigned_to:scriptForm.assigned_to, content_type:scriptForm.content_type,
+      platform:scriptForm.platform, due_date:scriptForm.due_date||null,
+      status:'sent', sent_by:adminEmail,
+    }]);
+    setScriptBusy(false);
+    if(error){ toast('Erreur : '+error.message); return; }
+    await logAction(adminEmail,'Script envoyé',`${scriptForm.title} → ${scriptForm.assigned_to}`);
+    toast('Script envoyé ✓');
+    setScriptForm({title:'',script:'',assigned_to:'',content_type:'Article web',platform:'Site web',due_date:''});
+    load();
+  }
+  async function cancelScript(s){
+    if(!confirm(`Annuler l'envoi de "${s.title}" ?`)) return;
+    await sb.from('content_scripts').delete().eq('id',s.id);
+    toast('Script annulé'); load();
+  }
 
   const nameOf=(em)=>team.find(u=>u.email===em)?.name||em;
   const evaluatedIds=new Set(evals.map(e=>e.task_id));
@@ -6191,10 +6264,34 @@ function AdminManager({ adminEmail, toast }){
     background:'none',fontWeight:700,fontSize:14,color:tab===k?'var(--navy)':'var(--muted)',cursor:'pointer',marginBottom:'-1px'});
   const starRow=n=>'⭐'.repeat(n)+'☆'.repeat(5-n);
 
+  // Aging: how long a script has stayed undone. "Undone" = not yet accepted,
+  // or accepted but its linked task hasn't reached "done" yet.
+  const taskById={}; tasks.forEach(t=>{ taskById[t.id]=t; });
+  const scriptInfo=(s)=>{
+    const linked = s.content_task_id ? taskById[s.content_task_id] : null;
+    if(s.status==='sent') return { label:'En attente d\'acceptation', color:'#c0392b', bg:'#fce8e8', done:false, sinceISO:s.created_at };
+    if(linked?.status==='done') return { label:'Terminé ✓', color:'#1f7a48', bg:'#e3f6ea', done:true, sinceISO:s.created_at, untilISO:linked.updated_at };
+    if(linked) return { label:'En cours — '+(TASK_STATUSES.find(x=>x.key===linked.status)?.label||linked.status), color:'#2a5bd0', bg:'#e7eefc', done:false, sinceISO:s.created_at };
+    return { label:'Accepté', color:'#2a5bd0', bg:'#e7eefc', done:false, sinceISO:s.created_at };
+  };
+  const durationLabel=(fromISO,toISO)=>{
+    const ms=new Date(toISO||new Date()).getTime()-new Date(fromISO).getTime();
+    const h=Math.floor(ms/3600000);
+    if(h<1) return 'moins d\'1h';
+    if(h<24) return h+'h';
+    return Math.floor(h/24)+' j'+(h%24>=1?' '+(h%24)+'h':'');
+  };
+  const pendingScripts=scripts.filter(s=>s.status==='sent');
+  const scriptsOverdue=pendingScripts.filter(s=>(Date.now()-new Date(s.created_at).getTime())>24*3600*1000).length;
+
   return (
     <div>
       <div style={{display:'flex',borderBottom:'1px solid var(--line)',marginBottom:20,overflowX:'auto'}}>
         <button style={tabStyle('pending')} onClick={()=>setTab('pending')}>📋 À évaluer ({notEvaluated.length})</button>
+        <button style={tabStyle('scripts')} onClick={()=>setTab('scripts')}>
+          📨 Scripts {pendingScripts.length>0?`(${pendingScripts.length})`:''}
+          {scriptsOverdue>0 && <span style={{marginLeft:5,color:'var(--red)'}}>●</span>}
+        </button>
         <button style={tabStyle('board')} onClick={()=>setTab('board')}>🏆 Classement</button>
         <button style={tabStyle('history')} onClick={()=>setTab('history')}>🗂 Historique ({evals.length})</button>
       </div>
@@ -6266,6 +6363,68 @@ function AdminManager({ adminEmail, toast }){
                 </div>
               );
             })}
+        </div>
+      ) : tab==='scripts' ? (
+        <div>
+          <div className="panel" style={{marginBottom:20}}>
+            <h3 style={{marginBottom:14}}>📨 Envoyer un script</h3>
+            <div className="grid2">
+              <div className="field"><label>Titre *</label>
+                <input value={scriptForm.title} onChange={e=>setScriptForm(f=>({...f,title:e.target.value}))} placeholder="Ex : Reportage derby ASKO vs ASCK" /></div>
+              <div className="field"><label>Assigné à *</label>
+                <select value={scriptForm.assigned_to} onChange={e=>setScriptForm(f=>({...f,assigned_to:e.target.value}))}>
+                  <option value="">— Choisir un membre —</option>
+                  {team.map(u=><option key={u.email} value={u.email}>{u.name||u.email}</option>)}
+                </select></div>
+            </div>
+            <div className="field"><label>Script / Brief <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label>
+              <textarea value={scriptForm.script} onChange={e=>setScriptForm(f=>({...f,script:e.target.value}))}
+                style={{minHeight:120}} placeholder="Collez ici le script ou les instructions à suivre…" /></div>
+            <div className="grid2">
+              <div className="field"><label>Type de contenu</label>
+                <select value={scriptForm.content_type} onChange={e=>setScriptForm(f=>({...f,content_type:e.target.value}))}>
+                  {CONTENT_TYPES.map(x=><option key={x}>{x}</option>)}
+                </select></div>
+              <div className="field"><label>Plateforme</label>
+                <select value={scriptForm.platform} onChange={e=>setScriptForm(f=>({...f,platform:e.target.value}))}>
+                  {CONTENT_PLATFORMS.map(x=><option key={x}>{x}</option>)}
+                </select></div>
+            </div>
+            <div className="field"><label>Échéance <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label>
+              <input type="date" value={scriptForm.due_date} onChange={e=>setScriptForm(f=>({...f,due_date:e.target.value}))} style={{maxWidth:200}} /></div>
+            <button className="btn-primary" disabled={scriptBusy} onClick={sendScript}>{scriptBusy?'…':'Envoyer le script'}</button>
+          </div>
+
+          <h3 style={{margin:'0 0 14px'}}>Suivi des scripts envoyés ({scripts.length})</h3>
+          {scripts.length===0 ? (
+            <div className="panel"><div className="empty">Aucun script envoyé pour l'instant.</div></div>
+          ) : scripts.map(s=>{
+            const info=scriptInfo(s);
+            const duration=durationLabel(s.created_at, info.untilISO);
+            const stale=!info.done && (Date.now()-new Date(s.created_at).getTime())>24*3600*1000;
+            return (
+              <div key={s.id} className="panel" style={{marginBottom:10,borderLeft:stale?'4px solid var(--red)':undefined}}>
+                <div style={{display:'flex',alignItems:'flex-start',gap:12,flexWrap:'wrap'}}>
+                  <div style={{flex:1,minWidth:220}}>
+                    <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                      <span style={{fontWeight:700,fontSize:14.5,color:'var(--navy)'}}>{s.title}</span>
+                      <span style={{fontSize:11,fontWeight:700,padding:'2px 9px',borderRadius:20,background:info.bg,color:info.color}}>{info.label}</span>
+                    </div>
+                    <div style={{fontSize:12,color:'var(--muted)',marginTop:3}}>
+                      👤 {nameOf(s.assigned_to)} · {s.content_type||'Article web'} · envoyé {timeAgo(s.created_at)}
+                    </div>
+                  </div>
+                  <div style={{textAlign:'right',flexShrink:0}}>
+                    <div style={{fontSize:10.5,fontWeight:700,color:stale?'var(--red)':'var(--muted)',letterSpacing:'.04em'}}>
+                      {info.done?'DURÉE TOTALE':'EN ATTENTE DEPUIS'}
+                    </div>
+                    <div style={{fontWeight:800,fontSize:16,color:stale?'var(--red)':'var(--navy)'}}>{duration}</div>
+                  </div>
+                  {s.status==='sent' && <button className="icon-btn del" onClick={()=>cancelScript(s)}>✕ Annuler</button>}
+                </div>
+              </div>
+            );
+          })}
         </div>
       ) : tab==='board' ? (
         <div>
