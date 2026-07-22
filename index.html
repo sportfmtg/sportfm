@@ -6203,6 +6203,10 @@ function AdminManager({ adminEmail, toast }){
     await sb.from('content_scripts').delete().eq('id',s.id);
     toast('Script annulé'); load();
   }
+  async function saveDelayReason(s,reason){
+    await sb.from('content_scripts').update({delay_reason:reason.trim()||null}).eq('id',s.id);
+    load();
+  }
 
   const nameOf=(em)=>team.find(u=>u.email===em)?.name||em;
   const evaluatedIds=new Set(evals.map(e=>e.task_id));
@@ -6401,7 +6405,10 @@ function AdminManager({ adminEmail, toast }){
           ) : scripts.map(s=>{
             const info=scriptInfo(s);
             const duration=durationLabel(s.created_at, info.untilISO);
-            const stale=!info.done && (Date.now()-new Date(s.created_at).getTime())>24*3600*1000;
+            const hoursElapsed=(new Date(info.untilISO||new Date()).getTime()-new Date(s.created_at).getTime())/3600000;
+            const stale=!info.done && hoursElapsed>24;
+            // Past 24h — whether still stuck or finally done late — surface a reason field
+            const longRunning=hoursElapsed>24;
             return (
               <div key={s.id} className="panel" style={{marginBottom:10,borderLeft:stale?'4px solid var(--red)':undefined}}>
                 <div style={{display:'flex',alignItems:'flex-start',gap:12,flexWrap:'wrap'}}>
@@ -6422,6 +6429,17 @@ function AdminManager({ adminEmail, toast }){
                   </div>
                   {s.status==='sent' && <button className="icon-btn del" onClick={()=>cancelScript(s)}>✕ Annuler</button>}
                 </div>
+                {longRunning && (
+                  <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid var(--line)'}}>
+                    <label style={{fontSize:11,fontWeight:700,letterSpacing:'.04em',color:'var(--muted)'}}>
+                      ⚠ {info.done?'RAISON DU RETARD (complété en plus de 24h)':'RAISON DU RETARD / BLOCAGE'}
+                    </label>
+                    <textarea defaultValue={s.delay_reason||''} onBlur={e=>saveDelayReason(s,e.target.value)}
+                      placeholder="Ex : en attente de visuels, indisponibilité du journaliste, tournage reporté…"
+                      style={{width:'100%',marginTop:4,minHeight:50,padding:'8px 10px',border:'1px solid var(--line)',
+                        borderRadius:8,fontSize:12.5,outline:'none',resize:'vertical'}} />
+                  </div>
+                )}
               </div>
             );
           })}
