@@ -639,17 +639,17 @@ function Player({ liveScores }){
   const [err,setErr]=useState(false);
   const audioRef=useRef(null);
 
-  // Simulated live listener count: drifts naturally between 390 and 849
-  const [listeners,setListeners]=useState(()=>390+Math.floor(Math.random()*460));
+  // Simulated live listener count: a small base "seed" x100 (e.g. 4-8 -> 400-800),
+  // then drifts gently up/down by ~10-20 listeners per tick — no drastic jumps.
+  const [listeners,setListeners]=useState(()=>(4+Math.floor(Math.random()*5))*100);
   useEffect(()=>{
     let alive=true, timer;
     function tick(){
       if(!alive) return;
       setListeners(n=>{
-        // small random drift, occasionally a bigger jump (show start/end effect)
-        const big=Math.random()<0.08;
-        const delta=big ? Math.round((Math.random()-0.5)*60) : Math.round((Math.random()-0.48)*14);
-        return Math.max(390, Math.min(849, n+delta));
+        const step=10+Math.floor(Math.random()*11); // 10-20
+        const delta=Math.random()<0.5 ? -step : step;
+        return Math.max(300, Math.min(900, n+delta));
       });
       timer=setTimeout(tick, 4000+Math.random()*9000);
     }
