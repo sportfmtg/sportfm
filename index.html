@@ -4034,6 +4034,100 @@ function PayrollReports({ stubs, employees, empMap }){
   );
 }
 
+// Compute the fixed payroll figures for one employee, same rules as
+// PaystubForm's onEmployeeChange — kept in one place so batch and single
+// creation never drift apart.
+function computeStubFigures(emp){
+  const brut = Number(emp.salaire_brut) || 0;
+  const cnss = Number(emp.cnss_taux) || 0;
+  const tcs  = Number(emp.tcs_taux)  || 0;
+  const ts   = Number(emp.ts_taux)   || 0;
+  const net  = brut ? brut - cnss - tcs - ts : 0;
+  return { gross:brut||null, cotisations:String(cnss), impot:String(tcs), deduction:String(ts), net:brut?String(net):null };
+}
+
+function BatchPaystubForm({ employees, stubs, onSave, onCancel, adminEmail, toast }){
+  const [month,setMonth]=useState('');
+  const [year,setYear]=useState(String(CURRENT_YEAR));
+  const [selected,setSelected]=useState(()=>new Set(employees.map(e=>e.id)));
+  const [busy,setBusy]=useState(false);
+
+  const alreadyDone = (empId)=> month && stubs.some(s=>s.employee_id===empId && s.period_month===month && String(s.period_year)===String(year));
+  const toggle=(id)=>setSelected(prev=>{ const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n; });
+  const eligible = employees.filter(e=>!alreadyDone(e.id));
+  const selectedCount = employees.filter(e=>selected.has(e.id)&&!alreadyDone(e.id)).length;
+
+  async function createBatch(){
+    if(!month){ toast('Sélectionnez le mois'); return; }
+    const targets = employees.filter(e=>selected.has(e.id)&&!alreadyDone(e.id));
+    if(targets.length===0){ toast('Aucun employé sélectionné'); return; }
+    setBusy(true);
+    const rows = targets.map(emp=>{
+      const fig = computeStubFigures(emp);
+      return { employee_id:emp.id, period_month:month, period_year:Number(year),
+        gross:fig.gross, cotisations:fig.cotisations, impot:fig.impot, deduction:fig.deduction,
+        prime:null, net:fig.net, note:null, file_url:null, created_by:adminEmail };
+    });
+    const { error } = await sb.from('paystubs').insert(rows);
+    setBusy(false);
+    if(error){ toast('Erreur : '+error.message); return; }
+    await logAction(adminEmail,'Fiches créées en lot',`${targets.length} fiches — ${month} ${year}`);
+    toast(`${targets.length} fiche${targets.length>1?'s':''} créée${targets.length>1?'s':''} ✓`);
+    onSave();
+  }
+
+  return (
+    <div className="panel">
+      <h3 style={{marginBottom:6}}>📦 Créer les fiches en lot</h3>
+      <p style={{fontSize:13,color:'var(--muted)',marginTop:0,marginBottom:20}}>
+        Génère une fiche de paie pour chaque employé sélectionné, pour un mois donné, à partir de leur salaire et taux enregistrés.
+      </p>
+
+      <div className="grid2">
+        <div className="field"><label>Mois *</label>
+          <select value={month} onChange={e=>setMonth(e.target.value)}>
+            <option value="">— Mois —</option>
+            {PAY_PERIODS.map(m=><option key={m}>{m}</option>)}
+          </select></div>
+        <div className="field"><label>Année *</label>
+          <input type="number" value={year} onChange={e=>setYear(e.target.value)} min="2020" max="2099" /></div>
+      </div>
+
+      <div style={{borderTop:'1px solid var(--line)',margin:'10px 0 14px',paddingTop:14}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+          <div style={{fontSize:12,fontWeight:700,letterSpacing:'.05em',color:'var(--muted)'}}>EMPLOYÉS ({selectedCount} sélectionné{selectedCount>1?'s':''})</div>
+          <div style={{display:'flex',gap:10}}>
+            <button className="icon-btn" onClick={()=>setSelected(new Set(eligible.map(e=>e.id)))}>Tout sélectionner</button>
+            <button className="icon-btn" onClick={()=>setSelected(new Set())}>Aucun</button>
+          </div>
+        </div>
+        {employees.length===0 ? <div className="empty">Aucun employé enregistré.</div> : (
+          <div style={{display:'flex',flexDirection:'column',gap:6}}>
+            {employees.map(e=>{
+              const done=alreadyDone(e.id);
+              return (
+                <label key={e.id} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 12px',
+                  border:'1px solid var(--line)',borderRadius:8,cursor:done?'default':'pointer',
+                  background:done?'#f4f5f8':(selected.has(e.id)?'rgba(11,36,94,.04)':'#fff'),opacity:done?.6:1}}>
+                  <input type="checkbox" disabled={done} checked={selected.has(e.id)&&!done} onChange={()=>toggle(e.id)} />
+                  <span style={{flex:1,fontWeight:600,fontSize:13.5,color:'var(--navy)'}}>{e.name||e.email}</span>
+                  <span style={{fontSize:12,color:'var(--muted)'}}>{e.salaire_brut?Number(e.salaire_brut).toLocaleString('fr-FR')+' FCFA':'salaire non renseigné'}</span>
+                  {done && <span style={{fontSize:11,fontWeight:700,color:'#1f7a48',background:'#e3f6ea',padding:'2px 8px',borderRadius:20}}>Déjà créée</span>}
+                </label>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div style={{display:'flex',gap:10,marginTop:4}}>
+        <button className="btn-primary" disabled={busy} onClick={createBatch}>{busy?'…':`Créer ${selectedCount} fiche${selectedCount>1?'s':''}`}</button>
+        <button className="btn-ghost" onClick={onCancel}>Annuler</button>
+      </div>
+    </div>
+  );
+}
+
 function AdminFinance({ adminEmail, userRole, toast }){
   const [tab,setTab]=useState('stubs'); // 'stubs' | 'employees'
   const [employees,setEmployees]=useState([]);
@@ -4041,6 +4135,7 @@ function AdminFinance({ adminEmail, userRole, toast }){
   const [loading,setLoading]=useState(true);
   const [editingEmp,setEditingEmp]=useState(null);   // null=list, {}=new, obj=edit
   const [editingStub,setEditingStub]=useState(null);
+  const [batchOpen,setBatchOpen]=useState(false);
   const [filterEmp,setFilterEmp]=useState('all');
   const [filterYear,setFilterYear]=useState(String(CURRENT_YEAR));
   const [sending,setSending]=useState(null);
@@ -4079,6 +4174,9 @@ function AdminFinance({ adminEmail, userRole, toast }){
     adminEmail={adminEmail} toast={toast} />;
   if(editingEmp!==null) return <EmployeeForm emp={editingEmp.id?editingEmp:null}
     onSave={()=>{setEditingEmp(null);load();}} onCancel={()=>setEditingEmp(null)}
+    adminEmail={adminEmail} toast={toast} />;
+  if(batchOpen) return <BatchPaystubForm employees={employees} stubs={stubs}
+    onSave={()=>{setBatchOpen(false);load();}} onCancel={()=>setBatchOpen(false)}
     adminEmail={adminEmail} toast={toast} />;
 
   // KPI
@@ -4160,6 +4258,7 @@ function AdminFinance({ adminEmail, userRole, toast }){
         <div>
           <div style={{display:'flex',gap:10,marginBottom:16,flexWrap:'wrap',alignItems:'center'}}>
             <button className="btn-primary" onClick={()=>setEditingStub({})}>+ Nouvelle fiche</button>
+            <button className="btn-ghost" onClick={()=>setBatchOpen(true)}>📦 Créer en lot</button>
             <select value={filterEmp} onChange={e=>setFilterEmp(e.target.value)}
               style={{padding:'9px 12px',border:'1px solid var(--line)',borderRadius:9,fontSize:13.5,background:'#fff',outline:'none'}}>
               <option value="all">Tous les employés</option>
