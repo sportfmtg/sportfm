@@ -7072,9 +7072,16 @@ function App(){
     return ()=>sub.subscription.unsubscribe();
   },[]);
 
+  // SECURITY: a Supabase Auth account with no row in user_roles must NOT get
+  // free full access — that would let anyone who obtains a session (e.g. via
+  // a misconfigured "allow signups" setting) grant themselves total admin
+  // control. Only the verified site owner is bootstrapped this way; every
+  // other unrecognized account gets zero permissions.
+  const OWNER_EMAIL='weareaurumgroup@gmail.com';
   async function fetchPerms(email){
     const { data }=await sb.from('user_roles').select('*').eq('email',email).maybeSingle();
-    setUserPerms(data || { __full:true }); // no record = full access
+    if(data){ setUserPerms(data); return; }
+    setUserPerms(email===OWNER_EMAIL ? { __full:true } : {});
   }
 
   useEffect(()=>{ loadPublic(); },[loadPublic]);
@@ -7138,6 +7145,20 @@ function App(){
     if(!authChecked) return <div className="login-wrap"><div className="spinner" style={{borderTopColor:'#fff'}}/></div>;
     if(!session) return <><AdminLogin onAuthed={s=>{setSession(s);loadAdmin();}} onExit={goSite} />{toastNode}</>;
     if(userPerms===null) return <div className="login-wrap"><div className="spinner" style={{borderTopColor:'#fff'}}/></div>;
+    const hasAnyAccess = userPerms.__full || Object.keys(userPerms).some(k=>k.startsWith('can_')&&userPerms[k]);
+    if(!hasAnyAccess) return (
+      <div className="login-wrap">
+        <div className="login-card" style={{textAlign:'center'}}>
+          <Logo onClick={()=>{}} />
+          <div style={{fontSize:40,margin:'16px 0 8px'}}>🔒</div>
+          <h3 style={{margin:'0 0 8px'}}>Accès non autorisé</h3>
+          <p style={{fontSize:13.5,color:'var(--muted)',margin:'0 0 20px'}}>
+            Votre compte ({session.user.email}) n'a aucun accès configuré. Contactez un administrateur pour qu'il vous attribue des permissions dans Équipe.
+          </p>
+          <button className="btn-ghost" style={{width:'100%'}} onClick={async()=>{ await sb.auth.signOut(); goSite(); }}>Déconnexion</button>
+        </div>
+      </div>
+    );
     return <>
       <Admin session={session} onExit={goSite} data={data} reload={loadAdmin} toast={toast} userPerms={userPerms} showProfile={()=>setShowProfile(true)} />
       {showProfile && <MonEspace session={session} userPerms={userPerms} onClose={()=>setShowProfile(false)} toast={toast} />}
