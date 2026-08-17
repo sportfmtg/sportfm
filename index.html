@@ -900,17 +900,38 @@ function RecentResultsCard({ onNav }){
 
 // Full Résultats page: pick a sport/division/journée, browse the whole archive.
 function ClassementTable({ standings }){
-  const rows=[...(standings||[])].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+  const all=standings||[];
+  const divisions=[...new Set(all.map(t=>t.division||'D1'))];
+  const [division,setDivision]=useState(divisions.includes('D1')?'D1':(divisions[0]||'D1'));
+  const activeDivision = divisions.includes(division) ? division : (divisions[0]||'D1');
+  const rows=all.filter(t=>(t.division||'D1')===activeDivision).sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
   const cols="34px 1fr 36px 36px 36px 36px 44px";
   const standingsTitle=useSetting('standings_title')||'Classement D1';
+  const divPicker = divisions.length>1 && (
+    <div style={{display:'flex',gap:8,marginBottom:14}}>
+      {divisions.map(d=>(
+        <button key={d} onClick={()=>setDivision(d)} style={{
+          padding:'7px 16px',borderRadius:20,fontSize:13,fontWeight:700,cursor:'pointer',border:'2px solid',
+          borderColor:activeDivision===d?'var(--navy)':'var(--line)',
+          background:activeDivision===d?'var(--navy)':'#fff',color:activeDivision===d?'#fff':'#4a5168'}}>
+          {d}
+        </button>
+      ))}
+    </div>
+  );
   if(rows.length===0) return (
-    <div style={{textAlign:'center',padding:'40px 20px',color:'var(--muted)'}}>
-      <div style={{fontSize:13.5}}>Classement à venir.</div>
+    <div>
+      {divPicker}
+      <div style={{textAlign:'center',padding:'40px 20px',color:'var(--muted)'}}>
+        <div style={{fontSize:13.5}}>Classement à venir.</div>
+      </div>
     </div>
   );
   return (
-    <div className="card">
-      <div className="head" style={{padding:'12px 18px'}}><div className="title">{standingsTitle}</div></div>
+    <div>
+      {divPicker}
+      <div className="card">
+      <div className="head" style={{padding:'12px 18px'}}><div className="title">{activeDivision==='D1'?standingsTitle:'Classement '+activeDivision}</div></div>
       <div style={{display:'grid',gridTemplateColumns:cols,padding:'10px 18px',fontSize:11,fontWeight:700,letterSpacing:'.05em',color:'var(--muted-2)',borderBottom:'1px solid #eef0f4'}}>
         <span>#</span><span>CLUB</span><span style={{textAlign:'center'}}>J</span><span style={{textAlign:'center'}}>G</span><span style={{textAlign:'center'}}>N</span><span style={{textAlign:'center'}}>P</span><span style={{textAlign:'right'}}>PTS</span>
       </div>
@@ -925,6 +946,7 @@ function ClassementTable({ standings }){
           <span style={{textAlign:'right',fontWeight:800,color:'var(--navy)'}}>{t.points}</span>
         </div>
       ))}
+      </div>
     </div>
   );
 }
@@ -1077,7 +1099,8 @@ function ResultsPage({ standings, initialTab }){
 
 function Rail({ standings, fixtures, onNav, onTrial, ads }){
   const sidebarAds=(ads||[]).filter(a=>a.position==='sidebar');
-  const rows=[...standings].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+  // D1 only here — D2 (and any other division) is browsable via Résultats > Classement
+  const rows=[...standings].filter(t=>(t.division||'D1')==='D1').sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
   const standingsTitle=useSetting('standings_title')||'Classement D1';
   return (
     <aside>
@@ -3011,6 +3034,8 @@ function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail })
   const [,setClockTick]=useState(0);
   const [stTitle,setStTitle]=useState('');
   const [stBusy,setStBusy]=useState(false);
+  const [stDivision,setStDivision]=useState('D1');
+  const [ns2,setNs2]=useState({team:'',abbr:''});
   useEffect(()=>{
     sb.from('site_settings').select('value').eq('key','ticker_message').maybeSingle()
       .then(({data})=>setTickerMsg(data?.value||''));
@@ -3084,6 +3109,22 @@ function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail })
     if(error) toast('Échec de la mise à jour');
     else { await logAction(adminEmail,'Classement modifié',team+' — '+JSON.stringify(patch)); reload(); }
   }
+  async function addStanding(){
+    if(!ns2.team.trim()){ toast('Nom de l\'équipe requis'); return; }
+    const { error }=await sb.from('standings').insert([{
+      team:ns2.team.trim(), abbr:ns2.abbr.trim()||ns2.team.trim().slice(0,3).toUpperCase(),
+      division:stDivision, played:0, won:0, drawn:0, lost:0, points:0, sort_order:standings.length,
+    }]);
+    if(error){ toast('Échec : '+error.message+' — colonne division manquante ?'); return; }
+    await logAction(adminEmail,'Équipe ajoutée au classement',`${ns2.team} (${stDivision})`);
+    setNs2({team:'',abbr:''}); toast('Équipe ajoutée ✓'); reload();
+  }
+  async function deleteStanding(id,team){
+    if(!confirm(`Retirer ${team} du classement ?`)) return;
+    await sb.from('standings').delete().eq('id',id);
+    await logAction(adminEmail,'Équipe retirée du classement',team);
+    toast('Retirée'); reload();
+  }
 
   async function addFixture(){
     if(!nf.home||!nf.away){ toast('Renseignez les deux équipes'); return; }
@@ -3102,7 +3143,10 @@ function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail })
     else { await logAction(adminEmail,'Match supprimé',label); toast('Supprimé'); reload(); }
   }
 
-  const rows=[...standings].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+  const divisions=[...new Set(standings.map(t=>t.division||'D1'))];
+  if(!divisions.includes('D1')) divisions.unshift('D1');
+  if(!divisions.includes('D2')) divisions.push('D2');
+  const rows=[...standings].filter(t=>(t.division||'D1')===stDivision).sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
   const fixRows=[...fixtures].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
 
   return (
@@ -3208,14 +3252,24 @@ function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail })
 
       <div className="panel">
         <h3>Classement du championnat</h3>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:14}}>
+          {divisions.map(d=>(
+            <button key={d} onClick={()=>setStDivision(d)}
+              style={{padding:'7px 16px',borderRadius:20,fontSize:13,fontWeight:700,cursor:'pointer',border:'2px solid',
+                borderColor:stDivision===d?'var(--navy)':'var(--line)',
+                background:stDivision===d?'var(--navy)':'#fff',color:stDivision===d?'#fff':'#4a5168'}}>
+              {d} <span style={{opacity:.7}}>({standings.filter(t=>(t.division||'D1')===d).length})</span>
+            </button>
+          ))}
+        </div>
         <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end',marginBottom:16}}>
           <div className="field" style={{margin:0,minWidth:240,flex:1,maxWidth:380}}>
-            <label>Titre affiché sur le site</label>
-            <input value={stTitle} onChange={e=>setStTitle(e.target.value)} placeholder="Classement D1" />
+            <label>Titre affiché sur le site {stDivision!=='D1' && <span style={{fontWeight:400,color:'var(--muted)',fontSize:11}}>(D1 uniquement — {stDivision} s'affiche via l'onglet Résultats)</span>}</label>
+            <input value={stTitle} onChange={e=>setStTitle(e.target.value)} placeholder="Classement D1" disabled={stDivision!=='D1'} />
           </div>
-          <button className="btn-ghost" disabled={stBusy} onClick={saveStandingsTitle} style={{marginBottom:0}}>{stBusy?'…':'Enregistrer le titre'}</button>
+          {stDivision==='D1' && <button className="btn-ghost" disabled={stBusy} onClick={saveStandingsTitle} style={{marginBottom:0}}>{stBusy?'…':'Enregistrer le titre'}</button>}
         </div>
-        <table className="admin-table"><thead><tr><th>#</th><th>Équipe</th><th>Abrév.</th><th>J</th><th>G</th><th>N</th><th>P</th><th>PTS</th></tr></thead>
+        <table className="admin-table"><thead><tr><th>#</th><th>Équipe</th><th>Abrév.</th><th>J</th><th>G</th><th>N</th><th>P</th><th>PTS</th><th></th></tr></thead>
         <tbody>
           {rows.map((t,i)=>(
             <tr key={t.id}>
@@ -3227,8 +3281,16 @@ function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail })
               <td data-label="Nuls"><input className="inline-edit" style={{width:46}} type="number" defaultValue={t.drawn} onBlur={e=>updStanding(t.id,{drawn:+e.target.value},t.team)} /></td>
               <td data-label="Perdus"><input className="inline-edit" style={{width:46}} type="number" defaultValue={t.lost} onBlur={e=>updStanding(t.id,{lost:+e.target.value},t.team)} /></td>
               <td data-label="Points"><input className="inline-edit" style={{width:50}} type="number" defaultValue={t.points} onBlur={e=>updStanding(t.id,{points:+e.target.value},t.team)} /></td>
+              <td><button className="icon-btn del" onClick={()=>deleteStanding(t.id,t.team)}>✕</button></td>
             </tr>
           ))}
+          <tr style={{background:'#fafbfc'}}>
+            <td></td>
+            <td data-label="Équipe"><input className="inline-edit wide" placeholder="Nom de l'équipe" value={ns2.team} onChange={e=>setNs2(p=>({...p,team:e.target.value}))} /></td>
+            <td data-label="Abrév."><input className="inline-edit" style={{width:50}} placeholder="ABC" value={ns2.abbr} onChange={e=>setNs2(p=>({...p,abbr:e.target.value}))} /></td>
+            <td colSpan={5}></td>
+            <td><button className="icon-btn" onClick={addStanding}>+ Ajouter à {stDivision}</button></td>
+          </tr>
         </tbody></table>
         <div className="hint" style={{marginTop:10,fontSize:12,color:'var(--muted)'}}>L'ordre suit la colonne sort_order. Modifiez les points et le classement public se met à jour au prochain chargement.</div>
       </div>
