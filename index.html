@@ -6320,6 +6320,33 @@ function StarPicker({ label, value, onChange }){
   );
 }
 
+// Monthly social/content goals — targets set at the start of the month,
+// results filled in as it progresses, graded automatically.
+const EMPTY_GOAL = {
+  video_target:'', tiktok_target:'', tiktok_actual:'',
+  youtube_sub_target:'', youtube_sub_actual:'', instagram_target:'', instagram_actual:'',
+  youtube_views_target:'', youtube_views_actual:'',
+  emphasis:'', retro_notes:'', next_actions:'',
+};
+// Content types counted as "short video content" for automatic progress tracking
+const SHORT_VIDEO_TYPES = ['Vidéo TikTok','Vidéo YouTube'];
+const GOAL_METRICS = [
+  { key:'video',        label:'Vidéos courtes créées', auto:true,  icon:'🎬' },
+  { key:'tiktok',       label:'Abonnés TikTok',        auto:false, icon:'🎵' },
+  { key:'youtube_sub',  label:'Abonnés YouTube',       auto:false, icon:'▶️' },
+  { key:'instagram',    label:'Abonnés Instagram',     auto:false, icon:'📸' },
+  { key:'youtube_views',label:'Vues YouTube',          auto:false, icon:'👁️' },
+];
+function goalGrade(pct){
+  if(pct>=100) return {letter:'A+',color:'#1f7a48'};
+  if(pct>=90)  return {letter:'A', color:'#1f7a48'};
+  if(pct>=75)  return {letter:'B', color:'#2a5bd0'};
+  if(pct>=60)  return {letter:'C', color:'#9a6a00'};
+  if(pct>=40)  return {letter:'D', color:'#c0392b'};
+  return {letter:'F',color:'#c0392b'};
+}
+const MONTH_NAMES_FR=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+
 function AdminManager({ adminEmail, toast }){
   const [tab,setTab]=useState('pending');
   const [tasks,setTasks]=useState([]);
@@ -6342,17 +6369,27 @@ function AdminManager({ adminEmail, toast }){
   const [,setClockTick]=useState(0);
   useEffect(()=>{ const t=setInterval(()=>setClockTick(x=>x+1),60000); return ()=>clearInterval(t); },[]);
 
+  // monthly goals
+  const now0=new Date();
+  const [goals,setGoals]=useState([]);
+  const [goalYear,setGoalYear]=useState(now0.getFullYear());
+  const [goalMonth,setGoalMonth]=useState(now0.getMonth()+1); // 1-12
+  const [goalForm,setGoalForm]=useState(EMPTY_GOAL);
+  const [goalBusy,setGoalBusy]=useState(false);
+
   async function load(){
     setLoading(true);
-    const [t,e,u,s]=await Promise.all([
+    const [t,e,u,s,g]=await Promise.all([
       sb.from('content_tasks').select('*').order('updated_at',{ascending:false}),
       sb.from('task_evaluations').select('*').order('created_at',{ascending:false}),
       sb.from('user_roles').select('email,name'),
       sb.from('content_scripts').select('*').order('created_at',{ascending:false}),
+      sb.from('monthly_goals').select('*').order('year',{ascending:false}).order('month',{ascending:false}),
     ]);
     if(e.error) toast('Table task_evaluations manquante — exécutez le SQL fourni');
     if(s.error) toast('Table content_scripts manquante — exécutez le SQL fourni');
-    setTasks(t.data||[]); setEvals(e.data||[]); setTeam(u.data||[]); setScripts(s.data||[]); setLoading(false);
+    if(g.error) toast('Table monthly_goals manquante — exécutez le SQL fourni');
+    setTasks(t.data||[]); setEvals(e.data||[]); setTeam(u.data||[]); setScripts(s.data||[]); setGoals(g.data||[]); setLoading(false);
   }
   useEffect(()=>{ load(); },[]);
 
@@ -6381,6 +6418,57 @@ function AdminManager({ adminEmail, toast }){
   async function saveDelayReason(s,reason){
     await sb.from('content_scripts').update({delay_reason:reason.trim()||null}).eq('id',s.id);
     load();
+  }
+
+  // ---- monthly goals ----
+  const existingGoal = goals.find(g=>g.year===goalYear && g.month===goalMonth) || null;
+  useEffect(()=>{ setGoalForm(existingGoal ? {...EMPTY_GOAL,...existingGoal} : EMPTY_GOAL); },[goalYear,goalMonth,goals.length]);
+
+  // Every short-video content task completed (done) during a given month
+  // counts automatically — no manual entry needed for this metric.
+  function videoActualFor(year,month){
+    return tasks.filter(t=>{
+      if(t.status!=='done') return false;
+      if(!SHORT_VIDEO_TYPES.includes(t.content_type)) return false;
+      const d=new Date(t.updated_at||t.created_at);
+      return d.getFullYear()===year && (d.getMonth()+1)===month;
+    }).length;
+  }
+  const videoActual = videoActualFor(goalYear,goalMonth);
+
+  async function saveGoal(){
+    setGoalBusy(true);
+    const payload={
+      year:goalYear, month:goalMonth,
+      video_target:Number(goalForm.video_target)||0,
+      tiktok_target:Number(goalForm.tiktok_target)||0, tiktok_actual:Number(goalForm.tiktok_actual)||0,
+      youtube_sub_target:Number(goalForm.youtube_sub_target)||0, youtube_sub_actual:Number(goalForm.youtube_sub_actual)||0,
+      instagram_target:Number(goalForm.instagram_target)||0, instagram_actual:Number(goalForm.instagram_actual)||0,
+      youtube_views_target:Number(goalForm.youtube_views_target)||0, youtube_views_actual:Number(goalForm.youtube_views_actual)||0,
+      emphasis:goalForm.emphasis.trim()||null, retro_notes:goalForm.retro_notes.trim()||null,
+      next_actions:goalForm.next_actions.trim()||null, updated_by:adminEmail,
+    };
+    const { error } = await sb.from('monthly_goals').upsert([payload],{onConflict:'year,month'});
+    setGoalBusy(false);
+    if(error){ toast('Erreur : '+error.message+' — table monthly_goals manquante ?'); return; }
+    await logAction(adminEmail,'Objectifs du mois enregistrés',`${MONTH_NAMES_FR[goalMonth-1]} ${goalYear}`);
+    toast('Objectifs enregistrés ✓'); load();
+  }
+
+  // Per-metric % achieved + overall grade for a given goal row (goalForm live,
+  // or any archived row when browsing history)
+  function goalScores(g, videoActualForMonth){
+    const pct=(target,actual)=>{ const t=Number(target)||0; return t>0 ? Math.round((Number(actual)||0)/t*100) : null; };
+    const items=[
+      { ...GOAL_METRICS[0], target:g.video_target, actual:videoActualForMonth, pct:pct(g.video_target,videoActualForMonth) },
+      { ...GOAL_METRICS[1], target:g.tiktok_target, actual:g.tiktok_actual, pct:pct(g.tiktok_target,g.tiktok_actual) },
+      { ...GOAL_METRICS[2], target:g.youtube_sub_target, actual:g.youtube_sub_actual, pct:pct(g.youtube_sub_target,g.youtube_sub_actual) },
+      { ...GOAL_METRICS[3], target:g.instagram_target, actual:g.instagram_actual, pct:pct(g.instagram_target,g.instagram_actual) },
+      { ...GOAL_METRICS[4], target:g.youtube_views_target, actual:g.youtube_views_actual, pct:pct(g.youtube_views_target,g.youtube_views_actual) },
+    ];
+    const scored=items.filter(i=>i.pct!==null);
+    const overall = scored.length ? Math.round(scored.reduce((s,i)=>s+Math.min(i.pct,150),0)/scored.length) : null;
+    return { items, overall, grade: overall!==null ? goalGrade(overall) : null };
   }
 
   const nameOf=(em)=>team.find(u=>u.email===em)?.name||em;
@@ -6471,6 +6559,7 @@ function AdminManager({ adminEmail, toast }){
           📨 Scripts {pendingScripts.length>0?`(${pendingScripts.length})`:''}
           {scriptsOverdue>0 && <span style={{marginLeft:5,color:'var(--red)'}}>●</span>}
         </button>
+        <button style={tabStyle('goals')} onClick={()=>setTab('goals')}>🎯 Objectifs</button>
         <button style={tabStyle('board')} onClick={()=>setTab('board')}>🏆 Classement</button>
         <button style={tabStyle('history')} onClick={()=>setTab('history')}>🗂 Historique ({evals.length})</button>
       </div>
@@ -6539,6 +6628,100 @@ function AdminManager({ adminEmail, toast }){
                       <div><button className="btn-primary" disabled={busy} onClick={saveEval}>{busy?'…':'Enregistrer l\'évaluation'}</button></div>
                     </div>
                   )}
+                </div>
+              );
+            })}
+        </div>
+      ) : tab==='goals' ? (
+        <div>
+          <div className="panel" style={{marginBottom:20}}>
+            <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap',marginBottom:16}}>
+              <h3 style={{margin:0,marginRight:'auto'}}>🎯 Objectifs — {MONTH_NAMES_FR[goalMonth-1]} {goalYear}</h3>
+              <select value={goalMonth} onChange={e=>setGoalMonth(Number(e.target.value))}
+                style={{padding:'8px 12px',border:'1px solid var(--line)',borderRadius:8,fontSize:13,background:'#fff'}}>
+                {MONTH_NAMES_FR.map((m,i)=><option key={m} value={i+1}>{m}</option>)}
+              </select>
+              <select value={goalYear} onChange={e=>setGoalYear(Number(e.target.value))}
+                style={{padding:'8px 12px',border:'1px solid var(--line)',borderRadius:8,fontSize:13,background:'#fff'}}>
+                {[goalYear-1,goalYear,goalYear+1].filter((y,i,a)=>a.indexOf(y)===i).map(y=><option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+
+            <div className="field"><label>🌟 Emphase du mois <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(le thème / la priorité principale)</span></label>
+              <input value={goalForm.emphasis} onChange={e=>setGoalForm(f=>({...f,emphasis:e.target.value}))}
+                placeholder="Ex : Pousser le contenu TikTok pendant la CAN" /></div>
+
+            <div style={{overflowX:'auto',marginTop:6}}>
+              <table className="admin-table" style={{minWidth:640}}><thead><tr>
+                <th>Catégorie</th><th style={{textAlign:'right'}}>Objectif</th><th style={{textAlign:'right'}}>Réel</th><th style={{textAlign:'right'}}>%</th>
+              </tr></thead><tbody>
+                {GOAL_METRICS.map(m=>{
+                  const targetKey=m.key+'_target', actualKey=m.key+'_actual';
+                  const actualVal = m.auto ? videoActual : goalForm[actualKey];
+                  const t=Number(goalForm[targetKey])||0;
+                  const pct = t>0 ? Math.round((Number(actualVal)||0)/t*100) : null;
+                  return (
+                    <tr key={m.key}>
+                      <td style={{fontWeight:700,color:'var(--navy)'}}>{m.icon} {m.label}{m.auto&&<div style={{fontSize:10.5,color:'var(--muted)',fontWeight:400}}>automatique — depuis Contenu</div>}</td>
+                      <td style={{textAlign:'right'}}>
+                        <input type="number" min="0" value={goalForm[targetKey]} onChange={e=>setGoalForm(f=>({...f,[targetKey]:e.target.value}))}
+                          style={{width:90,padding:'6px 8px',textAlign:'right',border:'1px solid var(--line)',borderRadius:7}} />
+                      </td>
+                      <td style={{textAlign:'right'}}>
+                        {m.auto
+                          ? <span style={{fontWeight:800,color:'var(--navy)',fontSize:15}}>{videoActual}</span>
+                          : <input type="number" min="0" value={goalForm[actualKey]} onChange={e=>setGoalForm(f=>({...f,[actualKey]:e.target.value}))}
+                              style={{width:90,padding:'6px 8px',textAlign:'right',border:'1px solid var(--line)',borderRadius:7}} />}
+                      </td>
+                      <td style={{textAlign:'right',fontWeight:800,color:pct===null?'var(--muted)':goalGrade(pct).color}}>{pct===null?'—':pct+'%'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody></table>
+            </div>
+
+            {(()=>{ const s=goalScores(goalForm,videoActual); return s.overall!==null && (
+              <div style={{display:'flex',alignItems:'center',gap:14,marginTop:16,padding:'14px 18px',background:'#f8f9fc',borderRadius:12}}>
+                <div style={{width:56,height:56,borderRadius:'50%',background:s.grade.color,color:'#fff',display:'flex',
+                  alignItems:'center',justifyContent:'center',fontWeight:900,fontSize:20,fontFamily:"'Barlow Semi Condensed',sans-serif",flexShrink:0}}>{s.grade.letter}</div>
+                <div>
+                  <div style={{fontWeight:800,fontSize:16,color:'var(--navy)'}}>Score global : {s.overall}%</div>
+                  <div style={{fontSize:12,color:'var(--muted)'}}>Moyenne des objectifs renseignés ce mois-ci</div>
+                </div>
+              </div>
+            );})()}
+
+            <div className="grid2" style={{marginTop:18}}>
+              <div className="field"><label>❌ Ce qui n'a pas fonctionné</label>
+                <textarea value={goalForm.retro_notes} onChange={e=>setGoalForm(f=>({...f,retro_notes:e.target.value}))}
+                  style={{minHeight:80}} placeholder="Ex : pas assez de vidéos publiées la 2e semaine, manque de relance sur Instagram…" /></div>
+              <div className="field"><label>✅ À corriger le mois prochain</label>
+                <textarea value={goalForm.next_actions} onChange={e=>setGoalForm(f=>({...f,next_actions:e.target.value}))}
+                  style={{minHeight:80}} placeholder="Ex : planifier 3 tournages/semaine, publier plus tôt dans la journée…" /></div>
+            </div>
+
+            <button className="btn-primary" disabled={goalBusy} onClick={saveGoal} style={{marginTop:10}}>
+              {goalBusy?'…':existingGoal?'Enregistrer les modifications':'Enregistrer les objectifs'}
+            </button>
+          </div>
+
+          <h3 style={{margin:'0 0 14px'}}>Historique des mois ({goals.length})</h3>
+          {goals.length===0 ? <div className="panel"><div className="empty">Aucun mois enregistré pour l'instant.</div></div> :
+            goals.map(g=>{
+              const s=goalScores(g, videoActualFor(g.year,g.month));
+              const isActive=g.year===goalYear&&g.month===goalMonth;
+              return (
+                <div key={g.id} className="panel" style={{marginBottom:10,cursor:'pointer',border:isActive?'2px solid var(--navy)':undefined}}
+                  onClick={()=>{setGoalYear(g.year);setGoalMonth(g.month);}}>
+                  <div style={{display:'flex',alignItems:'center',gap:14,flexWrap:'wrap'}}>
+                    {s.grade && <div style={{width:38,height:38,borderRadius:'50%',background:s.grade.color,color:'#fff',display:'flex',
+                      alignItems:'center',justifyContent:'center',fontWeight:900,fontSize:14,fontFamily:"'Barlow Semi Condensed',sans-serif",flexShrink:0}}>{s.grade.letter}</div>}
+                    <div style={{flex:1,minWidth:160}}>
+                      <div style={{fontWeight:700,fontSize:14.5,color:'var(--navy)'}}>{MONTH_NAMES_FR[g.month-1]} {g.year}</div>
+                      {g.emphasis && <div style={{fontSize:12,color:'var(--muted)',marginTop:2}}>🌟 {g.emphasis}</div>}
+                    </div>
+                    {s.overall!==null && <div style={{fontWeight:800,fontSize:15,color:s.grade.color}}>{s.overall}%</div>}
+                  </div>
                 </div>
               );
             })}
