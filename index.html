@@ -568,14 +568,25 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 // Articles are numerous (3000+ imported from the old site): load metadata only,
 // paged past Supabase's 1000-row cap; bodies are fetched on demand.
 const ART_META_COLS = 'id,title,tag,category,dek,author,read_time,image_url,is_hero,published,created_at,updated_at';
+
+// Single source of truth for "one page of article metadata" — both the
+// blocking full-archive fetch (fetchArticlesMeta, used by the admin panel)
+// and the progressive/streaming fetch (loadPublic, used by the public site
+// so the homepage paints before the whole archive has arrived) page through
+// the exact same query via this helper, instead of each hand-writing the
+// same .select/.order/.range/.eq chain.
+async function fetchArticlesPage(publishedOnly, offset){
+  let q = sb.from('articles').select(ART_META_COLS).order('created_at',{ascending:false}).range(offset, offset+999);
+  if(publishedOnly) q = q.eq('published', true);
+  const { data } = await q;
+  return data||[];
+}
 async function fetchArticlesMeta(publishedOnly){
   let all=[], off=0;
   for(;;){
-    let q = sb.from('articles').select(ART_META_COLS).order('created_at',{ascending:false}).range(off, off+999);
-    if(publishedOnly) q = q.eq('published', true);
-    const { data } = await q;
-    all = all.concat(data||[]);
-    if(!data || data.length<1000) break;
+    const page = await fetchArticlesPage(publishedOnly, off);
+    all = all.concat(page);
+    if(page.length<1000) break;
     off += 1000;
   }
   return all;
@@ -621,6 +632,35 @@ function useSetting(key){
       .then(({data})=>setV(data?.value||''));
   },[key]);
   return v;
+}
+
+// Forces a re-render every `intervalMs` with no state payload — used by any
+// display that needs to recompute a value derived from Date.now() (live
+// countdown/duration labels) without a matching database write.
+function useTicker(intervalMs){
+  const [,forceTick]=useState(0);
+  useEffect(()=>{
+    const t=setInterval(()=>forceTick(x=>x+1),intervalMs);
+    return ()=>clearInterval(t);
+  },[intervalMs]);
+}
+
+// Shared "confirm -> delete one row by id -> log the action -> toast -> reload"
+// factory. Covers the ~8 admin delete handlers that were previously
+// hand-written as identical copies of this exact five-step shape (see
+// deleteResult/deleteStanding/deleteStub/removeUser/delAgent/deleteEntry/
+// deleteShow/delAd). Deliberately NOT used for delete handlers that do
+// something extra (cascading deletes, recomputing a linked row, custom
+// error branches, or that skip the toast/log step) — those keep their own
+// hand-written function so this refactor changes zero behavior anywhere.
+function useDeleteAction(table, { adminEmail, toast, reload, logLabel }){
+  return useCallback(async (id, confirmMsg, logDetail, successMsg)=>{
+    if(!confirm(confirmMsg)) return;
+    await sb.from(table).delete().eq('id', id);
+    await logAction(adminEmail, logLabel, logDetail);
+    toast(successMsg);
+    reload();
+  },[table, adminEmail, toast, reload, logLabel]);
 }
 
 function useToast(){
@@ -744,11 +784,7 @@ function liveMinuteInfo(g){
 
 function Ticker({ scores }){
   // Re-render every 30s so the auto match clock ticks
-  const [,setClockTick]=useState(0);
-  useEffect(()=>{
-    const t=setInterval(()=>setClockTick(x=>x+1),30000);
-    return ()=>clearInterval(t);
-  },[]);
+  useTicker(30000);
 
   // Live matches auto-updated from ESPN (score + minute), refreshed every 45s.
   const [espn,setEspn]=useState([]);
@@ -2914,12 +2950,10 @@ function AdminMatchResults({ adminEmail, toast }){
     setEditingId(r.id);
     window.scrollTo({top:0,behavior:'smooth'});
   }
-  async function deleteResult(r){
-    if(!confirm(`Supprimer ${r.home} ${r.home_score}-${r.away_score} ${r.away} (J${r.journee}) ?`)) return;
-    await sb.from('match_results').delete().eq('id',r.id);
-    await logAction(adminEmail,'Résultat supprimé',`${r.home} vs ${r.away} — J${r.journee}`);
-    toast('Résultat supprimé'); load();
-  }
+  const deleteResultRow=useDeleteAction('match_results',{adminEmail,toast,reload:load,logLabel:'Résultat supprimé'});
+  const deleteResult=(r)=>deleteResultRow(r.id,
+    `Supprimer ${r.home} ${r.home_score}-${r.away_score} ${r.away} (J${r.journee}) ?`,
+    `${r.home} vs ${r.away} — J${r.journee}`, 'Résultat supprimé');
 
   const sports=[...new Set(rows.map(r=>r.sport))];
   const divisions=[...new Set(rows.map(r=>r.division))];
@@ -3031,7 +3065,6 @@ function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail })
   const [nf,setNf]=useState({home:'',away:'',kickoff_time:'',kickoff_day:'',sort_order:0});
   const [tickerMsg,setTickerMsg]=useState('');
   const [tmBusy,setTmBusy]=useState(false);
-  const [,setClockTick]=useState(0);
   const [stTitle,setStTitle]=useState('');
   const [stBusy,setStBusy]=useState(false);
   const [stDivision,setStDivision]=useState('D1');
@@ -3058,7 +3091,8 @@ function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail })
     await logAction(adminEmail,'Message bandeau modifié',tickerMsg.slice(0,80));
     toast('Message du bandeau enregistré ✓');
   }
-  useEffect(()=>{ const t=setInterval(()=>setClockTick(x=>x+1),30000); return ()=>clearInterval(t); },[]);
+  // Re-render every 30s so match-day clocks (kickoff -> 45' -> MT -> 90' -> FT) keep counting live
+  useTicker(30000);
 
   async function addScore(){
     if(!ns.home||!ns.away){ toast('Renseignez les deux équipes'); return; }
@@ -3119,12 +3153,8 @@ function AdminScores({ scores, standings, fixtures, reload, toast, adminEmail })
     await logAction(adminEmail,'Équipe ajoutée au classement',`${ns2.team} (${stDivision})`);
     setNs2({team:'',abbr:''}); toast('Équipe ajoutée ✓'); reload();
   }
-  async function deleteStanding(id,team){
-    if(!confirm(`Retirer ${team} du classement ?`)) return;
-    await sb.from('standings').delete().eq('id',id);
-    await logAction(adminEmail,'Équipe retirée du classement',team);
-    toast('Retirée'); reload();
-  }
+  const deleteStandingRow=useDeleteAction('standings',{adminEmail,toast,reload,logLabel:'Équipe retirée du classement'});
+  const deleteStanding=(id,team)=>deleteStandingRow(id,`Retirer ${team} du classement ?`,team,'Retirée');
 
   async function addFixture(){
     if(!nf.home||!nf.away){ toast('Renseignez les deux équipes'); return; }
@@ -4211,11 +4241,8 @@ function AdminFinance({ adminEmail, userRole, toast }){
   }
   useEffect(()=>{ load(); },[]);
 
-  async function deleteStub(id,label){
-    if(!confirm('Supprimer cette fiche de paie ?')) return;
-    await sb.from('paystubs').delete().eq('id',id);
-    await logAction(adminEmail,'Fiche supprimée',label); toast('Supprimé'); load();
-  }
+  const deleteStubRow=useDeleteAction('paystubs',{adminEmail,toast,reload:load,logLabel:'Fiche supprimée'});
+  const deleteStub=(id,label)=>deleteStubRow(id,'Supprimer cette fiche de paie ?',label,'Supprimé');
   async function deleteEmp(id,name){
     if(!confirm(`Supprimer ${name} ? Ses fiches de paie seront également supprimées.`)) return;
     await sb.from('paystubs').delete().eq('employee_id',id);
@@ -4733,12 +4760,8 @@ function AdminUsers({ adminEmail, toast }){
     toast('Mis à jour'); load();
   }
 
-  async function removeUser(id, email){
-    if(!confirm(`Retirer ${email} de l'équipe ?`)) return;
-    await sb.from('user_roles').delete().eq('id',id);
-    await logAction(adminEmail,'Utilisateur retiré', email);
-    toast('Retiré'); load();
-  }
+  const removeUserRow=useDeleteAction('user_roles',{adminEmail,toast,reload:load,logLabel:'Utilisateur retiré'});
+  const removeUser=(id,email)=>removeUserRow(id,`Retirer ${email} de l'équipe ?`,email,'Retiré');
 
   return (
     <div>
@@ -5085,7 +5108,17 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
   useEffect(()=>{ load(); },[]);
 
   // ---- payments helpers ----
-  const paysFor=(id)=>payments.filter(p=>p.entry_id===id);
+  // paysFor(id) used to re-scan the entire `payments` array on every single
+  // call (once per entry row, on every render, across every tab in this
+  // component). Indexing once per `payments` change turns that into an O(1)
+  // lookup — paysFor's signature/return value is unchanged, so every
+  // existing call site behaves identically.
+  const paymentsByEntry = useMemo(()=>{
+    const m={};
+    payments.forEach(p=>{ if(!m[p.entry_id]) m[p.entry_id]=[]; m[p.entry_id].push(p); });
+    return m;
+  },[payments]);
+  const paysFor=(id)=>paymentsByEntry[id]||[];
   const paidOf=(e)=>paysFor(e.id).reduce((s,p)=>s+Number(p.amount||0),0);
   const restOf=(e)=>Math.max(0,Number(e.amount||0)-paidOf(e));
   // Derived status once payments exist; legacy manual status otherwise
@@ -5199,12 +5232,8 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
   async function updAgent(id,patch){
     await sb.from('commercial_agents').update(patch).eq('id',id); load();
   }
-  async function delAgent(a){
-    if(!confirm(`Supprimer l'agent ${a.name} ? Ses commandes resteront mais sans agent.`)) return;
-    await sb.from('commercial_agents').delete().eq('id',a.id);
-    await logAction(adminEmail,'Agent supprimé',a.name);
-    toast('Agent supprimé'); load();
-  }
+  const delAgentRow=useDeleteAction('commercial_agents',{adminEmail,toast,reload:load,logLabel:'Agent supprimé'});
+  const delAgent=(a)=>delAgentRow(a.id,`Supprimer l'agent ${a.name} ? Ses commandes resteront mais sans agent.`,a.name,'Agent supprimé');
 
   async function saveTransfer(){
     if(!tf.amount||isNaN(Number(tf.amount))||Number(tf.amount)<=0){ toast('Montant invalide'); return; }
@@ -5223,12 +5252,8 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
     load();
   }
 
-  async function deleteEntry(id,label){
-    if(!confirm(`Supprimer "${label}" ?`)) return;
-    await sb.from('accounting_entries').delete().eq('id',id);
-    await logAction(adminEmail,'Écriture supprimée',label);
-    toast('Supprimé'); load();
-  }
+  const deleteEntryRow=useDeleteAction('accounting_entries',{adminEmail,toast,reload:load,logLabel:'Écriture supprimée'});
+  const deleteEntry=(id,label)=>deleteEntryRow(id,`Supprimer "${label}" ?`,label,'Supprimé');
 
   if(editing!==null) return <EntryForm entry={editing.id?editing:null}
     onSave={()=>{setEditing(null);load();}} onCancel={()=>setEditing(null)}
@@ -5255,30 +5280,42 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
   //  · écritures entièrement en espèces marquées Payé (sans paiements attachés)
   //  · paiements partiels/attachés réglés en espèces
   //  · transferts manuels banque <-> caisse
-  const entryById={}; entries.forEach(e=>{ entryById[e.id]=e; });
-  const caisseMovs=[
-    ...entries.filter(e=>e.type==='TRANSFER').map(e=>({
-      key:'t'+e.id, id:e.id, type:'TRANSFER', date:e.date, created_at:e.created_at,
-      label:e.label, category:e.category, amount:e.amount, _in:e.category==='Transfert vers caisse' })),
-    ...entries.filter(e=>(e.type==='AR'||e.type==='AP')&&e.payment_method==='Espèces'&&e.status==='Payé'&&paysFor(e.id).length===0)
-      .map(e=>({ key:'e'+e.id, type:e.type, date:e.date, created_at:e.created_at,
-        label:e.label, category:e.category, amount:e.amount, _in:e.type==='AR' })),
-    ...payments.filter(p=>p.method==='Espèces'&&entryById[p.entry_id]).map(p=>{
-      const e=entryById[p.entry_id];
-      return { key:'p'+p.id, type:e.type, date:p.date, created_at:p.created_at,
-        label:e.label+' — paiement', category:e.category, amount:p.amount, _in:e.type==='AR' };
-    }),
-  ].sort((a,b)=> a.date===b.date ? String(a.created_at||'').localeCompare(String(b.created_at||'')) : (a.date<b.date?-1:1));
-  let _run=0;
-  const caisseLedger = caisseMovs.map(m=>{ _run += (m._in?1:-1)*Number(m.amount||0); return {...m, _bal:_run}; });
-  const caisseBalance = _run;
-  const cashIn  = caisseLedger.filter(e=>e.type==='AR').reduce((s,e)=>s+Number(e.amount||0),0);
-  const cashOut = caisseLedger.filter(e=>e.type==='AP').reduce((s,e)=>s+Number(e.amount||0),0);
-  const tfIn  = caisseLedger.filter(e=>e.type==='TRANSFER'&&e._in).reduce((s,e)=>s+Number(e.amount||0),0);
-  const tfOut = caisseLedger.filter(e=>e.type==='TRANSFER'&&!e._in).reduce((s,e)=>s+Number(e.amount||0),0);
+  const entryById=useMemo(()=>{
+    const m={}; entries.forEach(e=>{ m[e.id]=e; }); return m;
+  },[entries]);
+
+  // Caisse ledger + chèques list both scan entries/payments and previously
+  // recomputed on every render of this component (864 lines, every keystroke
+  // in any filter/form on any tab). They only actually need to change when
+  // the underlying data is reloaded, so they're memoized on [entries,payments]
+  // — same computation, same output, just not redone on unrelated re-renders.
+  const {caisseMovs, caisseLedger, caisseBalance, cashIn, cashOut, tfIn, tfOut} = useMemo(()=>{
+    const movs=[
+      ...entries.filter(e=>e.type==='TRANSFER').map(e=>({
+        key:'t'+e.id, id:e.id, type:'TRANSFER', date:e.date, created_at:e.created_at,
+        label:e.label, category:e.category, amount:e.amount, _in:e.category==='Transfert vers caisse' })),
+      ...entries.filter(e=>(e.type==='AR'||e.type==='AP')&&e.payment_method==='Espèces'&&e.status==='Payé'&&paysFor(e.id).length===0)
+        .map(e=>({ key:'e'+e.id, type:e.type, date:e.date, created_at:e.created_at,
+          label:e.label, category:e.category, amount:e.amount, _in:e.type==='AR' })),
+      ...payments.filter(p=>p.method==='Espèces'&&entryById[p.entry_id]).map(p=>{
+        const e=entryById[p.entry_id];
+        return { key:'p'+p.id, type:e.type, date:p.date, created_at:p.created_at,
+          label:e.label+' — paiement', category:e.category, amount:p.amount, _in:e.type==='AR' };
+      }),
+    ].sort((a,b)=> a.date===b.date ? String(a.created_at||'').localeCompare(String(b.created_at||'')) : (a.date<b.date?-1:1));
+    let _run=0;
+    const ledger = movs.map(m=>{ _run += (m._in?1:-1)*Number(m.amount||0); return {...m, _bal:_run}; });
+    return {
+      caisseMovs:movs, caisseLedger:ledger, caisseBalance:_run,
+      cashIn:  ledger.filter(e=>e.type==='AR').reduce((s,e)=>s+Number(e.amount||0),0),
+      cashOut: ledger.filter(e=>e.type==='AP').reduce((s,e)=>s+Number(e.amount||0),0),
+      tfIn:    ledger.filter(e=>e.type==='TRANSFER'&&e._in).reduce((s,e)=>s+Number(e.amount||0),0),
+      tfOut:   ledger.filter(e=>e.type==='TRANSFER'&&!e._in).reduce((s,e)=>s+Number(e.amount||0),0),
+    };
+  },[entries, payments, entryById, paymentsByEntry]);
 
   // ---- Chèques: every check payment (attached payments + legacy full-check entries) ----
-  const checkRows=[
+  const checkRows=useMemo(()=>[
     ...payments.filter(p=>p.method==='Chèque'&&entryById[p.entry_id]).map(p=>{
       const e=entryById[p.entry_id];
       return { key:'p'+p.id, src:'payment', pid:p.id, date:p.date, amount:p.amount,
@@ -5289,7 +5326,7 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
       key:'e'+e.id, src:'entry', pid:e.id, date:e.date, amount:e.amount,
       dir:e.type==='AR'?'in':'out', label:e.label, party:e.party_name,
       number:e.check_number, status:e.check_status||'À traiter', direction:e.check_direction||'' })),
-  ].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  ].sort((a,b)=>(b.date||'').localeCompare(a.date||'')),[entries, payments, entryById, paymentsByEntry]);
   async function updCheck(row, patch){
     const table=row.src==='payment'?'entry_payments':'accounting_entries';
     await sb.from(table).update(patch).eq('id',row.pid);
@@ -5977,12 +6014,8 @@ function AdminEmissions({ adminEmail, toast, shows, reload }){
   const [editing,setEditing]=useState(null);
   const [search,setSearch]=useState('');
 
-  async function deleteShow(id,name){
-    if(!confirm(`Supprimer "${name}" ?`)) return;
-    await sb.from('shows').delete().eq('id',id);
-    await logAction(adminEmail,'Émission supprimée',name);
-    toast('Supprimée'); reload();
-  }
+  const deleteShowRow=useDeleteAction('shows',{adminEmail,toast,reload,logLabel:'Émission supprimée'});
+  const deleteShow=(id,name)=>deleteShowRow(id,`Supprimer "${name}" ?`,name,'Supprimée');
 
   if(editing!==null) return <ShowForm show={editing.id?editing:null}
     onSave={()=>{setEditing(null);reload();}} onCancel={()=>setEditing(null)}
@@ -6366,8 +6399,7 @@ function AdminManager({ adminEmail, toast }){
   const [scriptBusy,setScriptBusy]=useState(false);
   // ticks every minute so pending scripts' duration keeps counting live
   // (24h -> 1j, 1j 1h, 1j 2h...) without needing a manual refresh
-  const [,setClockTick]=useState(0);
-  useEffect(()=>{ const t=setInterval(()=>setClockTick(x=>x+1),60000); return ()=>clearInterval(t); },[]);
+  useTicker(60000);
 
   // monthly goals
   const now0=new Date();
@@ -7064,12 +7096,8 @@ function AdminAds({ ads, reload, toast, adminEmail }){
     reload();
   }
 
-  async function delAd(ad){
-    if(!confirm(`Supprimer "${ad.title}" ?`)) return;
-    await sb.from('ads').delete().eq('id',ad.id);
-    await logAction(adminEmail,'Pub supprimée',ad.title);
-    toast('Supprimée'); reload();
-  }
+  const delAdRow=useDeleteAction('ads',{adminEmail,toast,reload,logLabel:'Pub supprimée'});
+  const delAd=(ad)=>delAdRow(ad.id,`Supprimer "${ad.title}" ?`,ad.title,'Supprimée');
 
   if(editing!==null) return (
     <div className="panel">
@@ -7249,16 +7277,17 @@ function App(){
     }catch{}
 
     // 2) Fresh first screen: newest 1000 articles + the small tables, in parallel
+    //    (article page fetched via the same fetchArticlesPage() helper the
+    //    admin panel's full-archive load uses — one query definition, not two)
     const [art1,st,sc,fx,ads,sh]=await Promise.all([
-      sb.from('articles').select(ART_META_COLS).eq('published',true)
-        .order('created_at',{ascending:false}).range(0,999),
+      fetchArticlesPage(true, 0),
       sb.from('standings').select('*'),
       sb.from('scores').select('*').order('created_at',{ascending:false}),
       sb.from('fixtures').select('*'),
       sb.from('ads').select('*').eq('active',true).order('sort_order',{ascending:true}),
       sb.from('shows').select('*').order('sort_order',{ascending:true}),
     ]);
-    const fresh={ articles:art1.data||[], standings:st.data||[], scores:sc.data||[],
+    const fresh={ articles:art1, standings:st.data||[], scores:sc.data||[],
       fixtures:fx.data||[], ads:ads.data||[], shows:sh.data||[] };
     setData(d=>({...d,...fresh}));
     setLoading(false);
@@ -7269,12 +7298,14 @@ function App(){
         ...fresh, articles:fresh.articles.slice(0,300) }));
     }catch{}
 
-    // 4) Remaining archive pages stream in the background (tabs/counts fill up)
+    // 4) Remaining archive pages stream in the background (tabs/counts fill up).
+    //    Deliberately not fetchArticlesMeta(): that awaits the *entire*
+    //    archive before returning anything, whereas the public site wants
+    //    each page painted into view as it arrives.
     let all=fresh.articles;
     for(let off=1000; all.length>=off; off+=1000){
-      const { data:page }=await sb.from('articles').select(ART_META_COLS).eq('published',true)
-        .order('created_at',{ascending:false}).range(off,off+999);
-      if(!page||!page.length) break;
+      const page = await fetchArticlesPage(true, off);
+      if(!page.length) break;
       all=all.concat(page);
       const snapshot=all;
       setData(d=>({...d, articles:snapshot}));
