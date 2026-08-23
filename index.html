@@ -5129,6 +5129,66 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
   };
   const agentName=(id)=>agents.find(a=>a.id===id)?.name||null;
 
+  // ---- Caisse (petty cash) — ESPÈCES uniquement (les chèques et virements n'y entrent jamais) :
+  //  · écritures entièrement en espèces marquées Payé (sans paiements attachés)
+  //  · paiements partiels/attachés réglés en espèces
+  //  · transferts manuels banque <-> caisse
+  //
+  // NOTE: these useMemo calls must stay before the `if(editing) return` /
+  // `if(entryOnly) return` early returns below — React requires every render
+  // of this component to call the exact same hooks in the exact same order,
+  // and putting them after a conditional return means they'd be skipped on
+  // some renders and not others, which crashes the component. (This is
+  // exactly the bug that broke Comptabilité after the memoization refactor —
+  // fixed by moving them up here, above both early returns.)
+  const entryById=useMemo(()=>{
+    const m={}; entries.forEach(e=>{ m[e.id]=e; }); return m;
+  },[entries]);
+
+  // Caisse ledger + chèques list both scan entries/payments and previously
+  // recomputed on every render of this component (864 lines, every keystroke
+  // in any filter/form on any tab). They only actually need to change when
+  // the underlying data is reloaded, so they're memoized on [entries,payments]
+  // — same computation, same output, just not redone on unrelated re-renders.
+  const {caisseMovs, caisseLedger, caisseBalance, cashIn, cashOut, tfIn, tfOut} = useMemo(()=>{
+    const movs=[
+      ...entries.filter(e=>e.type==='TRANSFER').map(e=>({
+        key:'t'+e.id, id:e.id, type:'TRANSFER', date:e.date, created_at:e.created_at,
+        label:e.label, category:e.category, amount:e.amount, _in:e.category==='Transfert vers caisse' })),
+      ...entries.filter(e=>(e.type==='AR'||e.type==='AP')&&e.payment_method==='Espèces'&&e.status==='Payé'&&paysFor(e.id).length===0)
+        .map(e=>({ key:'e'+e.id, type:e.type, date:e.date, created_at:e.created_at,
+          label:e.label, category:e.category, amount:e.amount, _in:e.type==='AR' })),
+      ...payments.filter(p=>p.method==='Espèces'&&entryById[p.entry_id]).map(p=>{
+        const e=entryById[p.entry_id];
+        return { key:'p'+p.id, type:e.type, date:p.date, created_at:p.created_at,
+          label:e.label+' — paiement', category:e.category, amount:p.amount, _in:e.type==='AR' };
+      }),
+    ].sort((a,b)=> a.date===b.date ? String(a.created_at||'').localeCompare(String(b.created_at||'')) : (a.date<b.date?-1:1));
+    let _run=0;
+    const ledger = movs.map(m=>{ _run += (m._in?1:-1)*Number(m.amount||0); return {...m, _bal:_run}; });
+    return {
+      caisseMovs:movs, caisseLedger:ledger, caisseBalance:_run,
+      cashIn:  ledger.filter(e=>e.type==='AR').reduce((s,e)=>s+Number(e.amount||0),0),
+      cashOut: ledger.filter(e=>e.type==='AP').reduce((s,e)=>s+Number(e.amount||0),0),
+      tfIn:    ledger.filter(e=>e.type==='TRANSFER'&&e._in).reduce((s,e)=>s+Number(e.amount||0),0),
+      tfOut:   ledger.filter(e=>e.type==='TRANSFER'&&!e._in).reduce((s,e)=>s+Number(e.amount||0),0),
+    };
+  },[entries, payments, entryById, paymentsByEntry]);
+
+  // ---- Chèques: every check payment (attached payments + legacy full-check entries) ----
+  const checkRows=useMemo(()=>[
+    ...payments.filter(p=>p.method==='Chèque'&&entryById[p.entry_id]).map(p=>{
+      const e=entryById[p.entry_id];
+      return { key:'p'+p.id, src:'payment', pid:p.id, date:p.date, amount:p.amount,
+        dir:e.type==='AR'?'in':'out', label:e.label, party:e.party_name,
+        number:p.check_number, status:p.check_status||'À traiter', direction:p.check_direction||'' };
+    }),
+    ...entries.filter(e=>(e.type==='AR'||e.type==='AP')&&e.payment_method==='Chèque'&&paysFor(e.id).length===0).map(e=>({
+      key:'e'+e.id, src:'entry', pid:e.id, date:e.date, amount:e.amount,
+      dir:e.type==='AR'?'in':'out', label:e.label, party:e.party_name,
+      number:e.check_number, status:e.check_status||'À traiter', direction:e.check_direction||'' })),
+  ].sort((a,b)=>(b.date||'').localeCompare(a.date||'')),[entries, payments, entryById, paymentsByEntry]);
+
   async function addPayment(e){
     const amt=Number(payForm.amount);
     if(!amt||amt<=0){ toast('Montant invalide'); return; }
@@ -5276,57 +5336,6 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
   const pendingAP = entries.filter(e=>e.type==='AP'&&['En attente','Partiel'].includes(effStatus(e))).reduce((s,e)=>s+restOf(e),0);
   const overdueAP = entries.filter(e=>e.type==='AP'&&e.status==='En retard').reduce((s,e)=>s+Number(e.amount||0),0);
 
-  // ---- Caisse (petty cash) — ESPÈCES uniquement (les chèques et virements n'y entrent jamais) :
-  //  · écritures entièrement en espèces marquées Payé (sans paiements attachés)
-  //  · paiements partiels/attachés réglés en espèces
-  //  · transferts manuels banque <-> caisse
-  const entryById=useMemo(()=>{
-    const m={}; entries.forEach(e=>{ m[e.id]=e; }); return m;
-  },[entries]);
-
-  // Caisse ledger + chèques list both scan entries/payments and previously
-  // recomputed on every render of this component (864 lines, every keystroke
-  // in any filter/form on any tab). They only actually need to change when
-  // the underlying data is reloaded, so they're memoized on [entries,payments]
-  // — same computation, same output, just not redone on unrelated re-renders.
-  const {caisseMovs, caisseLedger, caisseBalance, cashIn, cashOut, tfIn, tfOut} = useMemo(()=>{
-    const movs=[
-      ...entries.filter(e=>e.type==='TRANSFER').map(e=>({
-        key:'t'+e.id, id:e.id, type:'TRANSFER', date:e.date, created_at:e.created_at,
-        label:e.label, category:e.category, amount:e.amount, _in:e.category==='Transfert vers caisse' })),
-      ...entries.filter(e=>(e.type==='AR'||e.type==='AP')&&e.payment_method==='Espèces'&&e.status==='Payé'&&paysFor(e.id).length===0)
-        .map(e=>({ key:'e'+e.id, type:e.type, date:e.date, created_at:e.created_at,
-          label:e.label, category:e.category, amount:e.amount, _in:e.type==='AR' })),
-      ...payments.filter(p=>p.method==='Espèces'&&entryById[p.entry_id]).map(p=>{
-        const e=entryById[p.entry_id];
-        return { key:'p'+p.id, type:e.type, date:p.date, created_at:p.created_at,
-          label:e.label+' — paiement', category:e.category, amount:p.amount, _in:e.type==='AR' };
-      }),
-    ].sort((a,b)=> a.date===b.date ? String(a.created_at||'').localeCompare(String(b.created_at||'')) : (a.date<b.date?-1:1));
-    let _run=0;
-    const ledger = movs.map(m=>{ _run += (m._in?1:-1)*Number(m.amount||0); return {...m, _bal:_run}; });
-    return {
-      caisseMovs:movs, caisseLedger:ledger, caisseBalance:_run,
-      cashIn:  ledger.filter(e=>e.type==='AR').reduce((s,e)=>s+Number(e.amount||0),0),
-      cashOut: ledger.filter(e=>e.type==='AP').reduce((s,e)=>s+Number(e.amount||0),0),
-      tfIn:    ledger.filter(e=>e.type==='TRANSFER'&&e._in).reduce((s,e)=>s+Number(e.amount||0),0),
-      tfOut:   ledger.filter(e=>e.type==='TRANSFER'&&!e._in).reduce((s,e)=>s+Number(e.amount||0),0),
-    };
-  },[entries, payments, entryById, paymentsByEntry]);
-
-  // ---- Chèques: every check payment (attached payments + legacy full-check entries) ----
-  const checkRows=useMemo(()=>[
-    ...payments.filter(p=>p.method==='Chèque'&&entryById[p.entry_id]).map(p=>{
-      const e=entryById[p.entry_id];
-      return { key:'p'+p.id, src:'payment', pid:p.id, date:p.date, amount:p.amount,
-        dir:e.type==='AR'?'in':'out', label:e.label, party:e.party_name,
-        number:p.check_number, status:p.check_status||'À traiter', direction:p.check_direction||'' };
-    }),
-    ...entries.filter(e=>(e.type==='AR'||e.type==='AP')&&e.payment_method==='Chèque'&&paysFor(e.id).length===0).map(e=>({
-      key:'e'+e.id, src:'entry', pid:e.id, date:e.date, amount:e.amount,
-      dir:e.type==='AR'?'in':'out', label:e.label, party:e.party_name,
-      number:e.check_number, status:e.check_status||'À traiter', direction:e.check_direction||'' })),
-  ].sort((a,b)=>(b.date||'').localeCompare(a.date||'')),[entries, payments, entryById, paymentsByEntry]);
   async function updCheck(row, patch){
     const table=row.src==='payment'?'entry_payments':'accounting_entries';
     await sb.from(table).update(patch).eq('id',row.pid);
