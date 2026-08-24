@@ -4876,19 +4876,38 @@ function EntryForm({ entry, onSave, onCancel, adminEmail, toast }){
   const [busy,setBusy]=useState(false);
   const [employees,setEmployees]=useState([]);
   const [agents,setAgents]=useState([]);
+  const [clients,setClients]=useState([]);
+  const [newClient,setNewClient]=useState({name:'',phone:'',email:'',company:''});
   const set=(k,v)=>setForm(p=>({...p,[k]:v, ...(k==='type'?{category:''}:{})}));
   useEffect(()=>{
     sb.from('employees').select('id,name,email').order('name').then(({data})=>setEmployees(data||[]));
     sb.from('commercial_agents').select('*').eq('active',true).order('name').then(({data})=>setAgents(data||[]));
+    sb.from('clients').select('*').order('name').then(({data})=>setClients(data||[]));
   },[]);
 
   async function save(){
     if(!form.label.trim()){ toast('Libellé requis'); return; }
     if(!form.amount||isNaN(Number(form.amount))){ toast('Montant invalide'); return; }
     if(!form.date){ toast('Date requise'); return; }
+    if(form.type==='AR'&&form.client_id==='__new__'&&!newClient.name.trim()){ toast('Nom du client requis'); return; }
     setBusy(true);
+    let clientId = form.client_id||null, clientName = form.party_name||null;
+    if(form.type==='AR'&&clientId==='__new__'){
+      const { data:cdata, error:cerr } = await sb.from('clients')
+        .insert([{name:newClient.name.trim(),phone:newClient.phone.trim()||null,email:newClient.email.trim()||null,company:newClient.company.trim()||null,created_by:adminEmail}])
+        .select().single();
+      if(cerr){ setBusy(false); toast('Erreur client : '+cerr.message); return; }
+      clientId = cdata.id; clientName = cdata.name;
+      await logAction(adminEmail,'Client ajouté',cdata.name);
+    } else if(form.type==='AR'&&clientId){
+      clientName = clients.find(c=>c.id===clientId)?.name || clientName;
+    } else if(form.type!=='AR'){
+      clientId = null;
+    }
     const payload = {...form, amount:Number(form.amount), updated_at:new Date().toISOString(),
-      party_type:form.party_type||null, party_name:form.party_name||null};
+      party_type:form.type==='AR'?(clientId?'client':null):(form.party_type||null),
+      party_name:form.type==='AR'?clientName:(form.party_name||null),
+      client_id:clientId};
     let res;
     if(entry?.id){ res = await sb.from('accounting_entries').update(payload).eq('id',entry.id); }
     else { res = await sb.from('accounting_entries').insert([{...payload, created_by:adminEmail}]); }
@@ -4963,26 +4982,53 @@ function EntryForm({ entry, onSave, onCancel, adminEmail, toast }){
           <input value={form.notes||''} onChange={e=>set('notes',e.target.value)} placeholder="Remarques…" /></div>
       </div>
 
-      <div className="field">
-        <label>Partie liée</label>
-        <select value={form.party_type||''} onChange={e=>setForm({...form,party_type:e.target.value,party_name:''})}>
-          <option value="">— Aucune —</option>
-          <option value="employee">Employé</option>
-          <option value="business">Entreprise</option>
-          <option value="other">Autre personne</option>
-        </select>
-      </div>
-      {form.party_type && (
-        <div className="field">
-          <label>{form.party_type==='employee'?'Employé':form.party_type==='business'?'Nom de l\'entreprise':'Nom'}</label>
-          {form.party_type==='employee'
-            ? <select value={form.party_name||''} onChange={e=>setForm({...form,party_name:e.target.value})}>
-                <option value="">— Sélectionner un employé —</option>
-                {employees.map(e=><option key={e.id} value={e.name||e.email}>{e.name||e.email}</option>)}
-              </select>
-            : <input value={form.party_name||''} onChange={e=>setForm({...form,party_name:e.target.value})} placeholder="Nom..." />
-          }
-        </div>
+      {form.type==='AR' ? (
+        <>
+          <div className="field">
+            <label>Client</label>
+            <select value={form.client_id||''} onChange={e=>set('client_id',e.target.value)}>
+              <option value="">— Aucun client —</option>
+              {clients.map(c=><option key={c.id} value={c.id}>{c.name}{c.company?` (${c.company})`:''}</option>)}
+              <option value="__new__">+ Nouveau client…</option>
+            </select>
+          </div>
+          {form.client_id==='__new__' && (
+            <div className="grid2">
+              <div className="field"><label>Nom du client *</label>
+                <input value={newClient.name} onChange={e=>setNewClient(p=>({...p,name:e.target.value}))} placeholder="Nom..." /></div>
+              <div className="field"><label>Entreprise</label>
+                <input value={newClient.company} onChange={e=>setNewClient(p=>({...p,company:e.target.value}))} placeholder="Optionnel" /></div>
+              <div className="field"><label>Téléphone</label>
+                <input value={newClient.phone} onChange={e=>setNewClient(p=>({...p,phone:e.target.value}))} placeholder="+228 …" /></div>
+              <div className="field"><label>Email</label>
+                <input value={newClient.email} onChange={e=>setNewClient(p=>({...p,email:e.target.value}))} placeholder="Optionnel" /></div>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <div className="field">
+            <label>Partie liée</label>
+            <select value={form.party_type||''} onChange={e=>setForm({...form,party_type:e.target.value,party_name:''})}>
+              <option value="">— Aucune —</option>
+              <option value="employee">Employé</option>
+              <option value="business">Entreprise</option>
+              <option value="other">Autre personne</option>
+            </select>
+          </div>
+          {form.party_type && (
+            <div className="field">
+              <label>{form.party_type==='employee'?'Employé':form.party_type==='business'?'Nom de l\'entreprise':'Nom'}</label>
+              {form.party_type==='employee'
+                ? <select value={form.party_name||''} onChange={e=>setForm({...form,party_name:e.target.value})}>
+                    <option value="">— Sélectionner un employé —</option>
+                    {employees.map(e=><option key={e.id} value={e.name||e.email}>{e.name||e.email}</option>)}
+                  </select>
+                : <input value={form.party_name||''} onChange={e=>setForm({...form,party_name:e.target.value})} placeholder="Nom..." />
+              }
+            </div>
+          )}
+        </>
       )}
 
       <div style={{display:'flex',gap:10,marginTop:4}}>
@@ -5074,9 +5120,10 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
   const [entries,setEntries]=useState([]);
   const [payments,setPayments]=useState([]);
   const [agents,setAgents]=useState([]);
+  const [clients,setClients]=useState([]);
   const [loading,setLoading]=useState(true);
   const [editing,setEditing]=useState(null);
-  const [tab,setTab]=useState(entryOnly?'ar':'dashboard'); // dashboard | ar | ap | caisse | cheques | agents
+  const [tab,setTab]=useState(entryOnly?'ar':'dashboard'); // dashboard | ar | ap | caisse | cheques | agents | clients
   const [filterStatus,setFilterStatus]=useState('all');
   const [filterMonth,setFilterMonth]=useState('all');
   const [filterYear,setFilterYear]=useState(String(new Date().getFullYear()));
@@ -5094,15 +5141,20 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
   const [agOpen,setAgOpen]=useState(null);
   const [team,setTeam]=useState([]);
   const creatorName=(email)=>{ if(!email) return null; const t=team.find(u=>u.email===email); return t?.name||email; };
+  // clients form
+  const [clForm,setClForm]=useState({name:'',phone:'',email:'',company:'',notes:''});
+  const [clBusy,setClBusy]=useState(false);
+  const [clOpen,setClOpen]=useState(null);
 
   async function load(){
-    const [en,pa,ag,tm]=await Promise.all([
+    const [en,pa,ag,tm,cl]=await Promise.all([
       sb.from('accounting_entries').select('*').order('date',{ascending:false}),
       sb.from('entry_payments').select('*').order('date',{ascending:true}),
       sb.from('commercial_agents').select('*').order('name'),
       sb.from('user_roles').select('email,name'),
+      sb.from('clients').select('*').order('name'),
     ]);
-    setEntries(en.data||[]); setPayments(pa.data||[]); setAgents(ag.data||[]); setTeam(tm.data||[]);
+    setEntries(en.data||[]); setPayments(pa.data||[]); setAgents(ag.data||[]); setTeam(tm.data||[]); setClients(cl.data||[]);
     setLoading(false);
   }
   useEffect(()=>{ load(); },[]);
@@ -5295,6 +5347,23 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
   const delAgentRow=useDeleteAction('commercial_agents',{adminEmail,toast,reload:load,logLabel:'Agent supprimé'});
   const delAgent=(a)=>delAgentRow(a.id,`Supprimer l'agent ${a.name} ? Ses commandes resteront mais sans agent.`,a.name,'Agent supprimé');
 
+  // ---- clients ----
+  async function addClient(){
+    if(!clForm.name.trim()){ toast('Nom requis'); return; }
+    setClBusy(true);
+    const { error }=await sb.from('clients').insert([{name:clForm.name.trim(),phone:clForm.phone.trim()||null,
+      email:clForm.email.trim()||null,company:clForm.company.trim()||null,notes:clForm.notes.trim()||null,created_by:adminEmail}]);
+    setClBusy(false);
+    if(error){ toast('Erreur : '+error.message+' — table clients manquante ?'); return; }
+    await logAction(adminEmail,'Client ajouté',clForm.name);
+    toast('Client ajouté ✓'); setClForm({name:'',phone:'',email:'',company:'',notes:''}); load();
+  }
+  async function updClient(id,patch){
+    await sb.from('clients').update(patch).eq('id',id); load();
+  }
+  const delClientRow=useDeleteAction('clients',{adminEmail,toast,reload:load,logLabel:'Client supprimé'});
+  const delClient=(c)=>delClientRow(c.id,`Supprimer le client ${c.name} ? Ses commandes resteront mais sans client lié.`,c.name,'Client supprimé');
+
   async function saveTransfer(){
     if(!tf.amount||isNaN(Number(tf.amount))||Number(tf.amount)<=0){ toast('Montant invalide'); return; }
     if(!tf.date){ toast('Date requise'); return; }
@@ -5374,7 +5443,7 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
     <div>
       {/* Sub-tabs */}
       <div style={{display:'flex',gap:0,marginBottom:24,borderBottom:'2px solid var(--line)'}}>
-        {[{k:'dashboard',l:'📊 Tableau de bord'},{k:'ar',l:'💚 Recettes (AR)'},{k:'ap',l:'🔴 Dépenses (AP)'},{k:'caisse',l:'💵 Caisse'},{k:'cheques',l:'🧾 Chèques'},{k:'agents',l:'🤝 Agents'}]
+        {[{k:'dashboard',l:'📊 Tableau de bord'},{k:'ar',l:'💚 Recettes (AR)'},{k:'ap',l:'🔴 Dépenses (AP)'},{k:'caisse',l:'💵 Caisse'},{k:'cheques',l:'🧾 Chèques'},{k:'agents',l:'🤝 Agents'},{k:'clients',l:'👥 Clients'}]
           .filter(t=>!entryOnly||t.k==='ar'||t.k==='ap').map(t=>(
           <button key={t.k} onClick={()=>{setTab(t.k);setInvoiceId(null);}}
             style={{padding:'10px 20px',border:'none',borderBottom:tab===t.k?'2px solid var(--navy)':'2px solid transparent',
@@ -5727,6 +5796,130 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
               );
             })}
         </div>
+      ) : tab==='clients' ? (
+        /* ===== CLIENTS ===== */
+        (()=>{
+          const clientStats = clients.map(c=>{
+            const orders = entries.filter(e=>e.type==='AR'&&e.client_id===c.id);
+            const totalInvoiced = orders.reduce((s,e)=>s+Number(e.amount||0),0);
+            const totalCollected = orders.reduce((s,e)=>s+Math.min(Number(e.amount||0),paidOf(e)||(effStatus(e)==='Payé'?Number(e.amount||0):0)),0);
+            const balanceOwed = orders.reduce((s,e)=>s+restOf(e),0);
+            const lastOrder = orders.length ? orders.reduce((a,b)=>a.date>b.date?a:b) : null;
+            return { c, orders, totalInvoiced, totalCollected, balanceOwed, lastOrder };
+          }).sort((a,b)=>b.totalInvoiced-a.totalInvoiced);
+          const unlinkedOrders = entries.filter(e=>e.type==='AR'&&!e.client_id&&e.party_name);
+          return (
+          <div>
+            <div className="panel" style={{marginBottom:20}}>
+              <div style={{fontWeight:700,fontSize:14,color:'var(--navy)',marginBottom:12}}>+ Ajouter un client</div>
+              <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end'}}>
+                <div className="field" style={{margin:0,minWidth:180,flex:1}}>
+                  <label>Nom *</label>
+                  <input value={clForm.name} onChange={e=>setClForm(p=>({...p,name:e.target.value}))} placeholder="Prénom Nom" />
+                </div>
+                <div className="field" style={{margin:0,minWidth:160,flex:1}}>
+                  <label>Entreprise</label>
+                  <input value={clForm.company} onChange={e=>setClForm(p=>({...p,company:e.target.value}))} placeholder="Optionnel" />
+                </div>
+                <div className="field" style={{margin:0,width:170}}>
+                  <label>Téléphone</label>
+                  <input value={clForm.phone} onChange={e=>setClForm(p=>({...p,phone:e.target.value}))} placeholder="+228 …" />
+                </div>
+                <div className="field" style={{margin:0,width:200}}>
+                  <label>Email</label>
+                  <input value={clForm.email} onChange={e=>setClForm(p=>({...p,email:e.target.value}))} placeholder="Optionnel" />
+                </div>
+                <button className="btn-primary" disabled={clBusy} onClick={addClient} style={{marginBottom:0}}>{clBusy?'…':'+ Ajouter'}</button>
+              </div>
+            </div>
+
+            {clientStats.length===0 ? <div className="panel"><div className="empty">Aucun client. Ajoutez-les ci-dessus, ou directement depuis une nouvelle écriture Recette (AR).</div></div> :
+              clientStats.map(({c,orders,totalInvoiced,totalCollected,balanceOwed,lastOrder})=>{
+                const isOpen=clOpen===c.id;
+                return (
+                  <div key={c.id} className="panel" style={{marginBottom:12}}>
+                    <div style={{display:'flex',alignItems:'center',gap:14,flexWrap:'wrap'}}>
+                      <span style={{width:38,height:38,borderRadius:'50%',background:'var(--navy)',color:'#fff',display:'inline-flex',
+                        alignItems:'center',justifyContent:'center',fontWeight:800,fontSize:15,flexShrink:0}}>
+                        {c.name.trim().charAt(0).toUpperCase()}</span>
+                      <div style={{minWidth:150,flex:1}}>
+                        <div style={{fontWeight:700,fontSize:14.5,color:'var(--navy)'}}>{c.name}{c.company&&<span style={{fontSize:12,color:'var(--muted)'}}> — {c.company}</span>}</div>
+                        <div style={{fontSize:12,color:'var(--muted)'}}>{c.phone||'—'}{c.email?' · '+c.email:''}{lastOrder?' · dernière commande '+lastOrder.date:''}</div>
+                      </div>
+                      <div style={{textAlign:'center',minWidth:80}}>
+                        <div style={{fontSize:10.5,fontWeight:700,color:'var(--muted)'}}>COMMANDES</div>
+                        <div style={{fontWeight:800,fontSize:16,color:'var(--navy)'}}>{orders.length}</div>
+                      </div>
+                      <div style={{textAlign:'center',minWidth:110}}>
+                        <div style={{fontSize:10.5,fontWeight:700,color:'var(--muted)'}}>TOTAL FACTURÉ</div>
+                        <div style={{fontWeight:800,fontSize:16,color:'var(--navy)'}}>{Number(totalInvoiced).toLocaleString('fr-FR')}</div>
+                      </div>
+                      <div style={{textAlign:'center',minWidth:110}}>
+                        <div style={{fontSize:10.5,fontWeight:700,color:'var(--muted)'}}>ENCAISSÉ</div>
+                        <div style={{fontWeight:800,fontSize:16,color:'#1f7a48'}}>{Number(totalCollected).toLocaleString('fr-FR')}</div>
+                      </div>
+                      <div style={{textAlign:'center',minWidth:120,background:balanceOwed>0?'#fce8e8':'#f0f0f0',borderRadius:10,padding:'6px 12px'}}>
+                        <div style={{fontSize:10.5,fontWeight:700,color:balanceOwed>0?'#c0392b':'var(--muted)'}}>SOLDE DÛ</div>
+                        <div style={{fontWeight:800,fontSize:17,color:balanceOwed>0?'#c0392b':'var(--muted)'}}>{Number(balanceOwed).toLocaleString('fr-FR')} F</div>
+                      </div>
+                      <div style={{display:'flex',gap:6,flexShrink:0}}>
+                        <button className="btn-ghost" style={{fontSize:12,padding:'6px 12px'}} onClick={()=>setClOpen(isOpen?null:c.id)}>{isOpen?'Fermer':'Historique'}</button>
+                        <button className="icon-btn del" onClick={()=>delClient(c)}>✕</button>
+                      </div>
+                    </div>
+                    {isOpen && (
+                      <div style={{marginTop:14,paddingTop:14,borderTop:'1px solid var(--line)'}}>
+                        <div style={{display:'flex',gap:14,flexWrap:'wrap',marginBottom:12,alignItems:'flex-end'}}>
+                          <div className="field" style={{margin:0,width:180}}>
+                            <label>Téléphone</label>
+                            <input defaultValue={c.phone||''} onBlur={e=>updClient(c.id,{phone:e.target.value||null})} />
+                          </div>
+                          <div className="field" style={{margin:0,width:200}}>
+                            <label>Email</label>
+                            <input defaultValue={c.email||''} onBlur={e=>updClient(c.id,{email:e.target.value||null})} />
+                          </div>
+                          <div className="field" style={{margin:0,width:180}}>
+                            <label>Entreprise</label>
+                            <input defaultValue={c.company||''} onBlur={e=>updClient(c.id,{company:e.target.value||null})} />
+                          </div>
+                          <div className="field" style={{margin:0,flex:1,minWidth:200}}>
+                            <label>Notes</label>
+                            <input defaultValue={c.notes||''} onBlur={e=>updClient(c.id,{notes:e.target.value||null})} placeholder="Remarques…" />
+                          </div>
+                        </div>
+                        {orders.length===0 ? <p style={{fontSize:13,color:'var(--muted)',fontStyle:'italic',margin:0}}>Aucune commande liée à ce client.</p> : (
+                          <table className="admin-table"><thead><tr>
+                            <th>Date</th><th>Libellé</th><th style={{textAlign:'right'}}>Montant</th>
+                            <th style={{textAlign:'right'}}>Encaissé</th><th style={{textAlign:'right'}}>Solde</th><th>Statut</th>
+                          </tr></thead><tbody>
+                            {orders.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(o=>(
+                              <tr key={o.id}>
+                                <td style={{fontSize:12.5,color:'var(--muted)'}}>{o.date}</td>
+                                <td style={{fontWeight:600,fontSize:13}}>{o.label}</td>
+                                <td style={{textAlign:'right',fontWeight:700}}>{Number(o.amount).toLocaleString('fr-FR')}</td>
+                                <td style={{textAlign:'right',color:'#1f7a48',fontWeight:700}}>{Number(paidOf(o)||(effStatus(o)==='Payé'?Number(o.amount||0):0)).toLocaleString('fr-FR')}</td>
+                                <td style={{textAlign:'right',color:restOf(o)>0?'#c0392b':'var(--muted)',fontWeight:700}}>{Number(restOf(o)).toLocaleString('fr-FR')}</td>
+                                <td><span style={{fontSize:11,fontWeight:700,padding:'2px 8px',borderRadius:20,
+                                  background:STATUS_BG[effStatus(o)]||'#f0f0f0',color:STATUS_COLORS[effStatus(o)]||'#888'}}>{effStatus(o)}</span></td>
+                              </tr>
+                            ))}
+                          </tbody></table>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+            {unlinkedOrders.length>0 && (
+              <div className="panel" style={{marginTop:20,background:'#fff4e0'}}>
+                <div style={{fontWeight:700,fontSize:13,color:'#9a6a00',marginBottom:8}}>⚠ {unlinkedOrders.length} recette(s) avec une partie liée mais sans client rattaché</div>
+                <div style={{fontSize:12.5,color:'#9a6a00'}}>Ces écritures ont un nom en texte libre (ancien format) — modifiez-les pour les rattacher à un client et les inclure dans les statistiques ci-dessus.</div>
+              </div>
+            )}
+          </div>
+          );
+        })()
       ) : !entryOnly && invoiceId && entryById[invoiceId] ? (
         /* ===== INVOICE VIEW — all payments happen here ===== */
         (()=>{
