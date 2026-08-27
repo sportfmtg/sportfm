@@ -19,7 +19,19 @@ if (location.hostname.endsWith('.vercel.app')) {
   location.replace('https://sportfmtg.com' + location.pathname + location.search + location.hash);
 }
 </script>
-<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5823956449205503" crossorigin="anonymous"></script>
+<script>
+// AdSense (incl. Auto ads) must never run on the admin panel — it's a login
+// form / internal tool with no publisher content, and Google flags auto-
+// injected ads on that kind of screen as a policy violation. Only load the
+// ad script when this page isn't opening straight into #admin.
+if (location.hash !== '#admin') {
+  var _ads = document.createElement('script');
+  _ads.async = true;
+  _ads.src = 'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5823956449205503';
+  _ads.crossOrigin = 'anonymous';
+  document.currentScript.parentNode.insertBefore(_ads, document.currentScript.nextSibling);
+}
+</script>
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -7588,8 +7600,13 @@ function App(){
       if(data){ setOpenArticle(data); window.scrollTo({top:0}); }
     })();
   },[]);
-  const goAdmin=()=>{ location.hash='admin'; setRoute('admin'); };
-  const goSite=()=>{ location.hash=''; setRoute('site'); };
+  // Full reloads (not client-side hash swaps) on both sides of this boundary:
+  // the AdSense loader in <head> decides once, at parse time, whether to run
+  // based on location.hash — a plain SPA route change would leave ads either
+  // stuck loaded on the admin panel (if entered from the site) or stuck
+  // unloaded on the site (if exited from admin) for the rest of the session.
+  const goAdmin=()=>{ location.assign(location.pathname+'#admin'); location.reload(); };
+  const goSite=()=>{ location.assign(location.pathname); location.reload(); };
 
   function navTo(n, resultsSubTab){
     setNav(n); setResultsTab(resultsSubTab||'results'); setOpenArticle(null); setDrawer(false);
