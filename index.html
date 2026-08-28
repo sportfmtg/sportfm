@@ -1800,7 +1800,37 @@ function SpotRequestForm({ onBack, toast }){
       <button className="btn-ghost" style={{marginBottom:24}} onClick={onBack}>← Retour</button>
       <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:13,letterSpacing:'.08em',color:'var(--red)',marginBottom:8}}>RÉSERVER UN SPOT RADIO</div>
       <h1 style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:32,color:'var(--navy)',margin:'0 0 8px',lineHeight:1.1}}>Faites passer votre message sur SportFM 91.9</h1>
-      <p style={{color:'#5a6178',fontSize:15,marginBottom:32}}>Remplissez ce formulaire pour réserver un créneau publicitaire. Notre équipe vous recontacte pour finaliser.</p>
+      <p style={{color:'#5a6178',fontSize:15,marginBottom:24}}>Un spot radio diffusé aux heures de forte écoute — matinale, débats sportifs, résultats en direct — touche des milliers d'auditeurs fidèles au Togo et dans la diaspora. Remplissez le formulaire ci-dessous pour réserver un créneau ; notre équipe vous recontacte sous 24h ouvrées pour finaliser les détails et le tarif.</p>
+
+      <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:28}}>
+        {[
+          {n:'91.9',l:'FM à Lomé, en direct'},
+          {n:'25 ans',l:"d'antenne et de crédibilité"},
+          {n:'799+',l:'auditeurs en ligne en simultané'},
+        ].map((k,i)=>(
+          <div key={i} style={{background:'#f8f9fc',border:'1px solid var(--line)',borderRadius:10,padding:'14px 12px',textAlign:'center'}}>
+            <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:20,color:'var(--navy)'}}>{k.n}</div>
+            <div style={{fontSize:11.5,color:'var(--muted)',marginTop:2}}>{k.l}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{marginBottom:28}}>
+        <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:13,letterSpacing:'.06em',color:'var(--navy)',marginBottom:10}}>COMMENT ÇA MARCHE</div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14}}>
+          {[
+            {i:'📝',t:'1. Vous réservez',d:"Choisissez vos jours, un créneau horaire et la durée de votre spot dans le formulaire."},
+            {i:'📞',t:'2. On vous rappelle',d:'Notre équipe vous contacte pour valider le script, le tarif et la date de diffusion.'},
+            {i:'📻',t:'3. Vous êtes à l’antenne',d:'Votre message est diffusé sur 91.9 FM aux créneaux convenus, avec un rapport de diffusion.'},
+          ].map((s,i)=>(
+            <div key={i}>
+              <div style={{fontSize:22,marginBottom:4}}>{s.i}</div>
+              <div style={{fontWeight:700,fontSize:13.5,color:'var(--navy)',marginBottom:3}}>{s.t}</div>
+              <div style={{fontSize:12.5,color:'#5a6178',lineHeight:1.4}}>{s.d}</div>
+            </div>
+          ))}
+        </div>
+      </div>
 
       <div style={{background:'#fff',border:'1px solid var(--line)',borderRadius:14,padding:28,display:'flex',flexDirection:'column',gap:18}}>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
