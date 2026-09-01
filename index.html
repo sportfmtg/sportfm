@@ -6743,8 +6743,8 @@ function AdminManager({ adminEmail, toast }){
         youtube_sub_target:Number(goalForm.youtube_sub_target)||0, youtube_sub_actual:Number(goalForm.youtube_sub_actual)||0,
         instagram_target:Number(goalForm.instagram_target)||0, instagram_actual:Number(goalForm.instagram_actual)||0,
         youtube_views_target:Number(goalForm.youtube_views_target)||0, youtube_views_actual:Number(goalForm.youtube_views_actual)||0,
-        emphasis:goalForm.emphasis.trim()||null, retro_notes:goalForm.retro_notes.trim()||null,
-        next_actions:goalForm.next_actions.trim()||null, updated_by:adminEmail,
+        emphasis:(goalForm.emphasis||'').trim()||null, retro_notes:(goalForm.retro_notes||'').trim()||null,
+        next_actions:(goalForm.next_actions||'').trim()||null, updated_by:adminEmail,
       };
       const { error } = await sb.from('monthly_goals').upsert([payload],{onConflict:'year,month'});
       if(error){ toast('Erreur : '+error.message+' — table monthly_goals manquante ?'); return; }
@@ -6959,7 +6959,7 @@ function AdminManager({ adminEmail, toast }){
             )}
 
             <div className="field"><label>🌟 Emphase du mois <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(le thème / la priorité principale)</span></label>
-              <input value={goalForm.emphasis} onChange={e=>setGoalForm(f=>({...f,emphasis:e.target.value}))}
+              <input value={goalForm.emphasis||''} onChange={e=>setGoalForm(f=>({...f,emphasis:e.target.value}))}
                 placeholder="Ex : Pousser le contenu TikTok pendant la CAN" /></div>
 
             <div style={{overflowX:'auto',marginTop:6}}>
@@ -7004,10 +7004,10 @@ function AdminManager({ adminEmail, toast }){
 
             <div className="grid2" style={{marginTop:18}}>
               <div className="field"><label>❌ Ce qui n'a pas fonctionné</label>
-                <textarea value={goalForm.retro_notes} onChange={e=>setGoalForm(f=>({...f,retro_notes:e.target.value}))}
+                <textarea value={goalForm.retro_notes||''} onChange={e=>setGoalForm(f=>({...f,retro_notes:e.target.value}))}
                   style={{minHeight:80}} placeholder="Ex : pas assez de vidéos publiées la 2e semaine, manque de relance sur Instagram…" /></div>
               <div className="field"><label>✅ À corriger le mois prochain</label>
-                <textarea value={goalForm.next_actions} onChange={e=>setGoalForm(f=>({...f,next_actions:e.target.value}))}
+                <textarea value={goalForm.next_actions||''} onChange={e=>setGoalForm(f=>({...f,next_actions:e.target.value}))}
                   style={{minHeight:80}} placeholder="Ex : planifier 3 tournages/semaine, publier plus tôt dans la journée…" /></div>
             </div>
 
