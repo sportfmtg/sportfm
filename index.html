@@ -6706,7 +6706,20 @@ function AdminManager({ adminEmail, toast }){
 
   // ---- monthly goals ----
   const existingGoal = goals.find(g=>g.year===goalYear && g.month===goalMonth) || null;
-  useEffect(()=>{ setGoalForm(existingGoal ? {...EMPTY_GOAL,...existingGoal} : EMPTY_GOAL); },[goalYear,goalMonth,goals.length]);
+  // Most recently recorded month strictly before the one being viewed — its
+  // actual results become the starting targets for a brand-new month, so
+  // "where we ended up" carries forward instead of typing the same numbers
+  // in twice every month.
+  const prevGoal = goals
+    .filter(g=>g.year<goalYear || (g.year===goalYear && g.month<goalMonth))
+    .sort((a,b)=> a.year!==b.year ? b.year-a.year : b.month-a.month)[0] || null;
+  useEffect(()=>{
+    if(existingGoal){ setGoalForm({...EMPTY_GOAL,...existingGoal}); return; }
+    setGoalForm(prevGoal ? {...EMPTY_GOAL,
+      tiktok_target:prevGoal.tiktok_actual||'', youtube_sub_target:prevGoal.youtube_sub_actual||'',
+      instagram_target:prevGoal.instagram_actual||'', youtube_views_target:prevGoal.youtube_views_actual||'',
+    } : EMPTY_GOAL);
+  },[goalYear,goalMonth,goals.length]);
 
   // Every short-video content task completed (done) during a given month
   // counts automatically — no manual entry needed for this metric.
@@ -6722,21 +6735,29 @@ function AdminManager({ adminEmail, toast }){
 
   async function saveGoal(){
     setGoalBusy(true);
-    const payload={
-      year:goalYear, month:goalMonth,
-      video_target:Number(goalForm.video_target)||0,
-      tiktok_target:Number(goalForm.tiktok_target)||0, tiktok_actual:Number(goalForm.tiktok_actual)||0,
-      youtube_sub_target:Number(goalForm.youtube_sub_target)||0, youtube_sub_actual:Number(goalForm.youtube_sub_actual)||0,
-      instagram_target:Number(goalForm.instagram_target)||0, instagram_actual:Number(goalForm.instagram_actual)||0,
-      youtube_views_target:Number(goalForm.youtube_views_target)||0, youtube_views_actual:Number(goalForm.youtube_views_actual)||0,
-      emphasis:goalForm.emphasis.trim()||null, retro_notes:goalForm.retro_notes.trim()||null,
-      next_actions:goalForm.next_actions.trim()||null, updated_by:adminEmail,
-    };
-    const { error } = await sb.from('monthly_goals').upsert([payload],{onConflict:'year,month'});
-    setGoalBusy(false);
-    if(error){ toast('Erreur : '+error.message+' — table monthly_goals manquante ?'); return; }
-    await logAction(adminEmail,'Objectifs du mois enregistrés',`${MONTH_NAMES_FR[goalMonth-1]} ${goalYear}`);
-    toast('Objectifs enregistrés ✓'); load();
+    try{
+      const payload={
+        year:goalYear, month:goalMonth,
+        video_target:Number(goalForm.video_target)||0,
+        tiktok_target:Number(goalForm.tiktok_target)||0, tiktok_actual:Number(goalForm.tiktok_actual)||0,
+        youtube_sub_target:Number(goalForm.youtube_sub_target)||0, youtube_sub_actual:Number(goalForm.youtube_sub_actual)||0,
+        instagram_target:Number(goalForm.instagram_target)||0, instagram_actual:Number(goalForm.instagram_actual)||0,
+        youtube_views_target:Number(goalForm.youtube_views_target)||0, youtube_views_actual:Number(goalForm.youtube_views_actual)||0,
+        emphasis:goalForm.emphasis.trim()||null, retro_notes:goalForm.retro_notes.trim()||null,
+        next_actions:goalForm.next_actions.trim()||null, updated_by:adminEmail,
+      };
+      const { error } = await sb.from('monthly_goals').upsert([payload],{onConflict:'year,month'});
+      if(error){ toast('Erreur : '+error.message+' — table monthly_goals manquante ?'); return; }
+      await logAction(adminEmail,'Objectifs du mois enregistrés',`${MONTH_NAMES_FR[goalMonth-1]} ${goalYear}`);
+      toast('Objectifs enregistrés ✓'); load();
+    }catch(err){
+      // A thrown error (network failure, bad request, etc.) here used to skip
+      // straight past setGoalBusy(false) below and leave the button stuck on
+      // "…" forever with no visible error — this is the fix for that.
+      toast('Erreur inattendue : '+(err?.message||err));
+    }finally{
+      setGoalBusy(false);
+    }
   }
 
   // Per-metric % achieved + overall grade for a given goal row (goalForm live,
@@ -6930,6 +6951,12 @@ function AdminManager({ adminEmail, toast }){
                 {[goalYear-1,goalYear,goalYear+1].filter((y,i,a)=>a.indexOf(y)===i).map(y=><option key={y} value={y}>{y}</option>)}
               </select>
             </div>
+
+            {!existingGoal && prevGoal && (
+              <div style={{fontSize:12.5,color:'#2a5bd0',background:'#e7eefc',borderRadius:8,padding:'8px 12px',marginBottom:16}}>
+                ℹ️ Cibles pré-remplies à partir des résultats réels de {MONTH_NAMES_FR[prevGoal.month-1]} {prevGoal.year} — modifiez-les si besoin.
+              </div>
+            )}
 
             <div className="field"><label>🌟 Emphase du mois <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(le thème / la priorité principale)</span></label>
               <input value={goalForm.emphasis} onChange={e=>setGoalForm(f=>({...f,emphasis:e.target.value}))}
