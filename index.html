@@ -7704,7 +7704,11 @@ function App(){
   // button silently do nothing. replaceState is synchronous with no
   // navigation involved at all, so the hash is guaranteed correct by the
   // time reload() runs.
-  const goAdmin=()=>{ history.replaceState(null,'',location.pathname+'#admin'); location.reload(); };
+  //
+  // No on-page link to admin any more — it's deliberately not discoverable
+  // by clicking around the site. It's still reachable directly, either via
+  // sportfmtg.com/admin (a Vercel redirect to /#admin) or a bookmarked
+  // #admin link; both land here since goSite is the only in-app trigger left.
   const goSite=()=>{ history.replaceState(null,'',location.pathname); location.reload(); };
 
   function navTo(n, resultsSubTab){
@@ -7782,7 +7786,6 @@ function App(){
         <div className="right">
           <span onClick={()=>navTo('Shows')}>Grille des programmes</span>
           <span>Newsletter</span>
-          <span className="signin" onClick={goAdmin}>Admin</span>
         </div>
       </div></div>
 
