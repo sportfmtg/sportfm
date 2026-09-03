@@ -24,11 +24,29 @@ if (location.hostname.endsWith('.vercel.app')) {
 // form / internal tool with no publisher content, and Google flags auto-
 // injected ads on that kind of screen as a policy violation. Only load the
 // ad script when this page isn't opening straight into #admin.
+//
+// Loaded WITHOUT the "?client=" query param on purpose: that shorthand
+// auto-enables every Auto ads format, including anchor (sticky bottom) and
+// vignette (full-screen interstitial) ads. Vignettes in particular are
+// built for classic multi-page sites — on an SPA, a client-side nav click
+// can look like a "page transition" to Google's script, which can fire a
+// full-screen ad over a view that hasn't rendered its content yet. The
+// explicit page-level-ads push below turns Auto ads on but keeps anchor
+// ads off; there's no equivalent config flag for vignettes, so if Google's
+// dashboard (Ads > Auto ads > overlay ads) offers a vignette toggle once
+// the account is reviewable again, turn that off too.
 if (location.hash !== '#admin') {
   var _ads = document.createElement('script');
   _ads.async = true;
-  _ads.src = 'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5823956449205503';
+  _ads.src = 'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js';
   _ads.crossOrigin = 'anonymous';
+  _ads.onload = function(){
+    (window.adsbygoogle = window.adsbygoogle || []).push({
+      google_ad_client: 'ca-pub-5823956449205503',
+      enable_page_level_ads: true,
+      overlays: { bottom: false }
+    });
+  };
   document.currentScript.parentNode.insertBefore(_ads, document.currentScript.nextSibling);
 }
 </script>
