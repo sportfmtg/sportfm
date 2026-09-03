@@ -7342,7 +7342,7 @@ function PopupAd({ ads }){
   );
 }
 
-const EMPTY_AD = { title:'', type:'banner', image_url:'', video_url:'', link_url:'', active:true, position:'sidebar', page_placement:'all', sort_order:0, cta_text:'' };
+const EMPTY_AD = { title:'', type:'banner', image_url:'', video_url:'', link_url:'', active:true, position:'sidebar', page_placement:'all', sort_order:0, cta_text:'', end_date:'' };
 const AD_PAGES = [
   { value:'all',       label:'Toutes les pages' },
   { value:'home',      label:'Accueil' },
@@ -7356,6 +7356,7 @@ function AdminAds({ ads, reload, toast, adminEmail }){
   const [editing,setEditing]=useState(null);
   const [uploading,setUploading]=useState(false);
   const adImgRef=useRef(null);
+  const todayStr=new Date().toISOString().slice(0,10);
 
   async function handleAdImg(e){
     const file=e.target.files?.[0]; if(!file) return;
@@ -7377,7 +7378,7 @@ function AdminAds({ ads, reload, toast, adminEmail }){
     const payload={ title:editing.title, type:editing.type, image_url:editing.image_url||null,
       video_url:editing.video_url||null, link_url:editing.link_url||null,
       active:editing.active, position:editing.position, page_placement:editing.page_placement||'all', sort_order:editing.sort_order||0,
-      cta_text:editing.cta_text||null };
+      cta_text:editing.cta_text||null, end_date:editing.end_date||null };
     const res = editing.id
       ? await sb.from('ads').update(payload).eq('id',editing.id)
       : await sb.from('ads').insert([payload]);
@@ -7454,6 +7455,10 @@ function AdminAds({ ads, reload, toast, adminEmail }){
       )}
       <div className="field"><label>Lien de destination <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel — clic utilisateur)</span></label>
         <input value={editing.link_url||''} onChange={e=>setEditing(p=>({...p,link_url:e.target.value}))} placeholder="https://votresite.com" /></div>
+      <div className="field"><label>Date de fin <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label>
+        <input type="date" value={editing.end_date||''} onChange={e=>setEditing(p=>({...p,end_date:e.target.value}))} />
+        <div className="hint">Après cette date, la pub s'arrête automatiquement sur le site — pas besoin de revenir la désactiver. Laissez vide pour une diffusion sans date de fin.</div>
+      </div>
       <div style={{display:'flex',gap:20,alignItems:'center',marginBottom:18}}>
         <label style={{display:'flex',gap:8,alignItems:'center',fontWeight:600,fontSize:14,cursor:'pointer'}}>
           <input type="checkbox" checked={editing.active} onChange={e=>setEditing(p=>({...p,active:e.target.checked}))} />
@@ -7483,7 +7488,14 @@ function AdminAds({ ads, reload, toast, adminEmail }){
             <td>{ad.type==='banner'?'Bannière':'Vidéo'}</td>
             <td>{ad.position==='sidebar'?'Latérale':ad.position==='popup'?'Pop-up':'Pleine largeur'}</td>
             <td>{(AD_PAGES.find(p=>p.value===(ad.page_placement||'all'))||AD_PAGES[0]).label}</td>
-            <td><span className={'pill '+(ad.active?'pub':'draft')}>{ad.active?'Actif':'Inactif'}</span></td>
+            <td>
+              <span className={'pill '+(ad.active?'pub':'draft')}>{ad.active?'Actif':'Inactif'}</span>
+              {ad.end_date && (
+                <div style={{fontSize:11,color:ad.end_date<todayStr?'var(--red)':'var(--muted)',marginTop:3,fontWeight:600}}>
+                  {ad.end_date<todayStr?'⏱ Expirée le ':'Fin le '}{ad.end_date}
+                </div>
+              )}
+            </td>
             <td style={{textAlign:'right',whiteSpace:'nowrap'}}>
               <button className="icon-btn" onClick={()=>setEditing({...ad})}>Modifier</button>
               <button className="icon-btn" onClick={()=>toggleAd(ad)}>{ad.active?'Désactiver':'Activer'}</button>
@@ -7576,12 +7588,16 @@ function App(){
     // 2) Fresh first screen: newest 1000 articles + the small tables, in parallel
     //    (article page fetched via the same fetchArticlesPage() helper the
     //    admin panel's full-archive load uses — one query definition, not two)
+    // An ad with a past end_date stops showing here even if `active` is still
+    // true in the DB — that's the whole point of the end date: no one has to
+    // remember to come back and flip the toggle off.
+    const todayStr=new Date().toISOString().slice(0,10);
     const [art1,st,sc,fx,ads,sh]=await Promise.all([
       fetchArticlesPage(true, 0),
       sb.from('standings').select('*'),
       sb.from('scores').select('*').order('created_at',{ascending:false}),
       sb.from('fixtures').select('*'),
-      sb.from('ads').select('*').eq('active',true).order('sort_order',{ascending:true}),
+      sb.from('ads').select('*').eq('active',true).or(`end_date.is.null,end_date.gte.${todayStr}`).order('sort_order',{ascending:true}),
       sb.from('shows').select('*').order('sort_order',{ascending:true}),
     ]);
     const fresh={ articles:art1, standings:st.data||[], scores:sc.data||[],
@@ -7680,8 +7696,16 @@ function App(){
   // based on location.hash — a plain SPA route change would leave ads either
   // stuck loaded on the admin panel (if entered from the site) or stuck
   // unloaded on the site (if exited from admin) for the rest of the session.
-  const goAdmin=()=>{ location.assign(location.pathname+'#admin'); location.reload(); };
-  const goSite=()=>{ location.assign(location.pathname); location.reload(); };
+  // history.replaceState() first, THEN reload() — location.assign() to a URL
+  // differing only by fragment doesn't force a real navigation (same-document
+  // fragment changes never do, per spec), so calling reload() right after it
+  // was a race: the reload could fire before that fragment change committed
+  // and just reload the page with the OLD hash still in place, making the
+  // button silently do nothing. replaceState is synchronous with no
+  // navigation involved at all, so the hash is guaranteed correct by the
+  // time reload() runs.
+  const goAdmin=()=>{ history.replaceState(null,'',location.pathname+'#admin'); location.reload(); };
+  const goSite=()=>{ history.replaceState(null,'',location.pathname); location.reload(); };
 
   function navTo(n, resultsSubTab){
     setNav(n); setResultsTab(resultsSubTab||'results'); setOpenArticle(null); setDrawer(false);
