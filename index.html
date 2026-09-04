@@ -711,20 +711,65 @@ function useToast(){
 // ============================================================
 //  RADIO PLAYER (RadioKing stream via <audio>)
 // ============================================================
+// Lomé (Togo) is UTC+0 year-round, so this window is just plain UTC hours —
+// no timezone conversion needed. 21:00 -> 06:30, wrapping past midnight.
+function isRealListenerWindow(){
+  const now=new Date();
+  const mins=now.getUTCHours()*60+now.getUTCMinutes();
+  return mins>=21*60 || mins<6*60+30;
+}
+
+// One row per visitor, upserted every 20s while the site is open; a visitor
+// counts as "present" as long as their last heartbeat is recent. This is the
+// real, non-simulated number used during the night window below — separate
+// from and in addition to actual RadioKing stream listeners (added once a
+// RadioKing API key is available; that count isn't wired in yet).
+const PRESENCE_ID_KEY='sfm_presence_id';
+function presenceId(){
+  try{
+    let id=sessionStorage.getItem(PRESENCE_ID_KEY);
+    if(!id){ id=(crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random()); sessionStorage.setItem(PRESENCE_ID_KEY,id); }
+    return id;
+  }catch{ return String(Date.now())+Math.random(); }
+}
+function useRealPresenceCount(){
+  const [count,setCount]=useState(null);
+  useEffect(()=>{
+    let alive=true;
+    async function heartbeat(){
+      try{ await sb.from('site_presence').upsert([{ id:presenceId(), last_seen:new Date().toISOString() }]); }catch{}
+    }
+    async function fetchCount(){
+      if(!isRealListenerWindow()) return;
+      try{
+        const cutoff=new Date(Date.now()-45000).toISOString();
+        const { count:c }=await sb.from('site_presence').select('id',{count:'exact',head:true}).gte('last_seen',cutoff);
+        if(alive && typeof c==='number') setCount(c);
+      }catch{}
+    }
+    heartbeat(); fetchCount();
+    const hbTimer=setInterval(heartbeat,20000);
+    const ctTimer=setInterval(fetchCount,20000);
+    return ()=>{ alive=false; clearInterval(hbTimer); clearInterval(ctTimer); };
+  },[]);
+  return count;
+}
+
 function Player({ liveScores }){
   const [playing,setPlaying]=useState(false);
   const [vol,setVol]=useState(0.7);
   const [err,setErr]=useState(false);
   const audioRef=useRef(null);
 
-  // Simulated live listener count: a small base "seed" x100 (e.g. 4-8 -> 400-800),
-  // then drifts gently up/down by ~10-20 listeners per tick — no drastic jumps.
-  const [listeners,setListeners]=useState(()=>(4+Math.floor(Math.random()*5))*100);
+  // Simulated live listener count (shown outside the 9pm-6:30am real window):
+  // a small base "seed" x100 (e.g. 4-8 -> 400-800), then drifts gently up/down
+  // by ~10-20 listeners per tick — no drastic jumps.
+  const [simListeners,setSimListeners]=useState(()=>(4+Math.floor(Math.random()*5))*100);
   useEffect(()=>{
     let alive=true, timer;
     function tick(){
       if(!alive) return;
-      setListeners(n=>{
+      setSimListeners(n=>{
         const step=10+Math.floor(Math.random()*11); // 10-20
         const delta=Math.random()<0.5 ? -step : step;
         return Math.max(300, Math.min(900, n+delta));
@@ -734,6 +779,11 @@ function Player({ liveScores }){
     timer=setTimeout(tick, 4000);
     return ()=>{ alive=false; clearTimeout(timer); };
   },[]);
+
+  const realCount=useRealPresenceCount();
+  // During the real window, show the real count once it's actually arrived
+  // (don't flash a 0/simulated number while the first query is in flight).
+  const listeners = (isRealListenerWindow() && realCount!==null) ? realCount : simListeners;
 
   useEffect(()=>{ if(audioRef.current) audioRef.current.volume=vol; },[vol]);
 
