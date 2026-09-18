@@ -20,33 +20,34 @@ if (location.hostname.endsWith('.vercel.app')) {
 }
 </script>
 <script>
-// AdSense (incl. Auto ads) must never run on the admin panel — it's a login
-// form / internal tool with no publisher content, and Google flags auto-
-// injected ads on that kind of screen as a policy violation. Only load the
-// ad script when this page isn't opening straight into #admin.
+// AdSense: Auto ads' automatic placement is OFF, on purpose, for now.
 //
-// Loaded WITHOUT the "?client=" query param on purpose: that shorthand
-// auto-enables every Auto ads format, including anchor (sticky bottom) and
-// vignette (full-screen interstitial) ads. Vignettes in particular are
-// built for classic multi-page sites — on an SPA, a client-side nav click
-// can look like a "page transition" to Google's script, which can fire a
-// full-screen ad over a view that hasn't rendered its content yet. The
-// explicit page-level-ads push below turns Auto ads on but keeps anchor
-// ads off; there's no equivalent config flag for vignettes, so if Google's
-// dashboard (Ads > Auto ads > overlay ads) offers a vignette toggle once
-// the account is reviewable again, turn that off too.
+// Three review rounds were denied for "Google-served ads on screens without
+// publisher-content" with no specific URL named. After fixing every thin
+// screen we could find (#admin, the Spot booking page) and still getting
+// denied, inspecting the live DOM turned up the real, confirmed cause: Auto
+// ads' page-level push (enable_page_level_ads) inserts an <ins> ad slot as a
+// direct child of <body> — outside every content container — currently
+// "unfilled" only because the account isn't approved yet. That's Google's
+// automatic overlay/vignette (full-screen interstitial) placement, built for
+// classic multi-page sites; on this SPA a client-side nav click can look
+// like a "page transition" to it, and once filled it renders as a full-
+// screen ad detached from any content, on every page, not one thin screen.
+// There's no code-level flag to disable vignettes specifically (only anchor
+// ads have one — overlays:{bottom:false}, used previously) — the real
+// control is a dashboard toggle (Ads > Auto ads > Overlay ads), which
+// AdSense doesn't expose until the site is already approved. Chicken, egg.
+//
+// So: load the base script (keeps the account linked to the site) but never
+// call enable_page_level_ads — no automatic placement of any format, no
+// stray body-level slot, nothing to mis-time against an SPA route change.
+// Ads stay off everywhere until specific <ins> units are added deliberately
+// in chosen content-rich spots, once the account is approved.
 if (location.hash !== '#admin') {
   var _ads = document.createElement('script');
   _ads.async = true;
   _ads.src = 'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js';
   _ads.crossOrigin = 'anonymous';
-  _ads.onload = function(){
-    (window.adsbygoogle = window.adsbygoogle || []).push({
-      google_ad_client: 'ca-pub-5823956449205503',
-      enable_page_level_ads: true,
-      overlays: { bottom: false }
-    });
-  };
   document.currentScript.parentNode.insertBefore(_ads, document.currentScript.nextSibling);
 }
 </script>
