@@ -4804,6 +4804,251 @@ function MonEspace({ session, userPerms, onClose, toast }){
 }
 
 // ============================================================
+//  MAINTENANCE & ACHATS (assistant/secrétaire — signaler des pannes,
+//  demander du matériel, suivre chaque dossier jusqu'à sa clôture)
+// ============================================================
+const MAINT_STATUSES = [
+  { key:'reported',    label:'Signalé',    color:'#9a6a00', bg:'#fff4e0' },
+  { key:'in_progress', label:'En cours',   color:'#2a5bd0', bg:'#e7eefc' },
+  { key:'resolved',    label:'Résolu ✓',   color:'#1f7a48', bg:'#e3f6ea' },
+  { key:'cancelled',   label:'Annulé',     color:'#6b7180', bg:'#f1f2f6' },
+];
+const PO_STATUSES = [
+  { key:'requested', label:'Demandé',   color:'#9a6a00', bg:'#fff4e0' },
+  { key:'approved',  label:'Approuvé',  color:'#2a5bd0', bg:'#e7eefc' },
+  { key:'ordered',   label:'Commandé',  color:'#6a3fc0', bg:'#eee7fc' },
+  { key:'received',  label:'Reçu ✓',    color:'#1f7a48', bg:'#e3f6ea' },
+  { key:'cancelled', label:'Annulé',    color:'#6b7180', bg:'#f1f2f6' },
+];
+const MAINT_PRIORITIES = [
+  { key:'normal', label:'Normal',   color:'var(--muted)' },
+  { key:'high',   label:'Prioritaire', color:'#e87820' },
+  { key:'urgent', label:'URGENT',   color:'var(--red)' },
+];
+const EMPTY_ISSUE = { title:'', description:'', location:'', priority:'normal' };
+const EMPTY_PO = { item:'', quantity:'1', unit:'', supplier:'', estimated_cost:'', needed_by:'', notes:'' };
+
+function AdminMaintenance({ adminEmail, toast }){
+  const [tab,setTab]=useState('issues'); // 'issues' | 'orders'
+  const [issues,setIssues]=useState([]);
+  const [orders,setOrders]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [editingIssue,setEditingIssue]=useState(null); // null closed, {} new, object = editing
+  const [editingOrder,setEditingOrder]=useState(null);
+  const [showDone,setShowDone]=useState(false);
+
+  async function load(){
+    const [is,po]=await Promise.all([
+      sb.from('maintenance_issues').select('*').order('created_at',{ascending:false}),
+      sb.from('purchase_orders').select('*').order('created_at',{ascending:false}),
+    ]);
+    if(is.error) toast('Table maintenance_issues manquante — exécutez le SQL fourni');
+    if(po.error) toast('Table purchase_orders manquante — exécutez le SQL fourni');
+    setIssues(is.data||[]); setOrders(po.data||[]); setLoading(false);
+  }
+  useEffect(()=>{ load(); },[]);
+
+  async function saveIssue(){
+    if(!editingIssue.title.trim()){ toast('Titre requis'); return; }
+    const payload={ title:editingIssue.title.trim(), description:editingIssue.description?.trim()||null,
+      location:editingIssue.location?.trim()||null, priority:editingIssue.priority||'normal' };
+    let res;
+    if(editingIssue.id){ res=await sb.from('maintenance_issues').update(payload).eq('id',editingIssue.id); }
+    else { res=await sb.from('maintenance_issues').insert([{...payload, status:'reported', reported_by:adminEmail}]); }
+    if(res.error){ toast('Erreur : '+res.error.message); return; }
+    await logAction(adminEmail, editingIssue.id?'Panne modifiée':'Panne signalée', payload.title);
+    toast(editingIssue.id?'Mis à jour':'Panne signalée ✓'); setEditingIssue(null); load();
+  }
+  async function issueStatus(it,status){
+    const patch={ status, updated_at:new Date().toISOString() };
+    if(status==='resolved'||status==='cancelled') patch.resolved_at=new Date().toISOString();
+    await sb.from('maintenance_issues').update(patch).eq('id',it.id);
+    await logAction(adminEmail,'Statut panne → '+status,it.title);
+    load();
+  }
+  const delIssueRow=useDeleteAction('maintenance_issues',{adminEmail,toast,reload:load,logLabel:'Panne supprimée'});
+  const delIssue=(it)=>delIssueRow(it.id,`Supprimer "${it.title}" ?`,it.title,'Supprimée');
+
+  async function saveOrder(){
+    if(!editingOrder.item.trim()){ toast('Article requis'); return; }
+    const payload={ item:editingOrder.item.trim(), quantity:Number(editingOrder.quantity)||1,
+      unit:editingOrder.unit?.trim()||null, supplier:editingOrder.supplier?.trim()||null,
+      estimated_cost:editingOrder.estimated_cost?Number(editingOrder.estimated_cost):null,
+      needed_by:editingOrder.needed_by||null, notes:editingOrder.notes?.trim()||null };
+    let res;
+    if(editingOrder.id){ res=await sb.from('purchase_orders').update(payload).eq('id',editingOrder.id); }
+    else { res=await sb.from('purchase_orders').insert([{...payload, status:'requested', requested_by:adminEmail}]); }
+    if(res.error){ toast('Erreur : '+res.error.message); return; }
+    await logAction(adminEmail, editingOrder.id?'Commande modifiée':'Commande demandée', payload.item);
+    toast(editingOrder.id?'Mis à jour':'Demande créée ✓'); setEditingOrder(null); load();
+  }
+  async function orderStatus(o,status){
+    const patch={ status, updated_at:new Date().toISOString() };
+    if(status==='received'||status==='cancelled') patch.received_at=new Date().toISOString();
+    await sb.from('purchase_orders').update(patch).eq('id',o.id);
+    await logAction(adminEmail,'Statut commande → '+status,o.item);
+    load();
+  }
+  const delOrderRow=useDeleteAction('purchase_orders',{adminEmail,toast,reload:load,logLabel:'Commande supprimée'});
+  const delOrder=(o)=>delOrderRow(o.id,`Supprimer la demande "${o.item}" ?`,o.item,'Supprimée');
+
+  if(editingIssue!==null) return (
+    <div className="panel">
+      <h3 style={{marginBottom:20}}>{editingIssue.id?'Modifier le signalement':'Signaler un problème'}</h3>
+      <div className="field"><label>Titre *</label>
+        <input value={editingIssue.title} onChange={e=>setEditingIssue(p=>({...p,title:e.target.value}))}
+          placeholder="Ex : Climatiseur studio B en panne" /></div>
+      <div className="grid2">
+        <div className="field"><label>Lieu <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label>
+          <input value={editingIssue.location||''} onChange={e=>setEditingIssue(p=>({...p,location:e.target.value}))} placeholder="Ex : Studio B, Bureau accueil…" /></div>
+        <div className="field"><label>Priorité</label>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:4}}>
+            {MAINT_PRIORITIES.map(p=>(
+              <button key={p.key} type="button" onClick={()=>setEditingIssue(x=>({...x,priority:p.key}))}
+                style={{padding:'8px 14px',borderRadius:20,fontSize:13,fontWeight:700,cursor:'pointer',border:'2px solid',
+                  borderColor:editingIssue.priority===p.key?p.color:'var(--line)',
+                  background:editingIssue.priority===p.key?p.color+'18':'#fff',
+                  color:editingIssue.priority===p.key?p.color:'#5a6178'}}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="field"><label>Description <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label>
+        <textarea value={editingIssue.description||''} onChange={e=>setEditingIssue(p=>({...p,description:e.target.value}))}
+          style={{minHeight:80}} placeholder="Détails du problème…" /></div>
+      <div style={{display:'flex',gap:10,marginTop:4}}>
+        <button className="btn-primary" onClick={saveIssue}>{editingIssue.id?'Enregistrer':'Signaler'}</button>
+        <button className="btn-ghost" onClick={()=>setEditingIssue(null)}>Annuler</button>
+      </div>
+    </div>
+  );
+
+  if(editingOrder!==null) return (
+    <div className="panel">
+      <h3 style={{marginBottom:20}}>{editingOrder.id?'Modifier la demande':'Nouvelle demande d\'achat'}</h3>
+      <div className="field"><label>Article / matériel *</label>
+        <input value={editingOrder.item} onChange={e=>setEditingOrder(p=>({...p,item:e.target.value}))}
+          placeholder="Ex : Câbles XLR 5m, Cartouches d'encre…" /></div>
+      <div className="grid2">
+        <div className="field"><label>Quantité</label>
+          <input type="number" min="1" value={editingOrder.quantity} onChange={e=>setEditingOrder(p=>({...p,quantity:e.target.value}))} /></div>
+        <div className="field"><label>Unité <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label>
+          <input value={editingOrder.unit||''} onChange={e=>setEditingOrder(p=>({...p,unit:e.target.value}))} placeholder="Ex : pièces, boîtes, mètres…" /></div>
+      </div>
+      <div className="grid2">
+        <div className="field"><label>Fournisseur <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label>
+          <input value={editingOrder.supplier||''} onChange={e=>setEditingOrder(p=>({...p,supplier:e.target.value}))} placeholder="Ex : Electro Plus" /></div>
+        <div className="field"><label>Coût estimé (FCFA) <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label>
+          <input type="number" min="0" value={editingOrder.estimated_cost||''} onChange={e=>setEditingOrder(p=>({...p,estimated_cost:e.target.value}))} placeholder="0" /></div>
+      </div>
+      <div className="field"><label>Besoin pour le <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label>
+        <input type="date" value={editingOrder.needed_by||''} onChange={e=>setEditingOrder(p=>({...p,needed_by:e.target.value}))} /></div>
+      <div className="field"><label>Notes <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(optionnel)</span></label>
+        <textarea value={editingOrder.notes||''} onChange={e=>setEditingOrder(p=>({...p,notes:e.target.value}))}
+          style={{minHeight:60}} placeholder="Remarques, lien produit…" /></div>
+      <div style={{display:'flex',gap:10,marginTop:4}}>
+        <button className="btn-primary" onClick={saveOrder}>{editingOrder.id?'Enregistrer':'Envoyer la demande'}</button>
+        <button className="btn-ghost" onClick={()=>setEditingOrder(null)}>Annuler</button>
+      </div>
+    </div>
+  );
+
+  const visibleIssues=issues.filter(it=>showDone||(it.status!=='resolved'&&it.status!=='cancelled'));
+  const visibleOrders=orders.filter(o=>showDone||(o.status!=='received'&&o.status!=='cancelled'));
+  const openIssueCount=issues.filter(it=>it.status!=='resolved'&&it.status!=='cancelled').length;
+  const openOrderCount=orders.filter(o=>o.status!=='received'&&o.status!=='cancelled').length;
+
+  return (
+    <div>
+      <div style={{display:'flex',gap:0,marginBottom:24,borderBottom:'2px solid var(--line)'}}>
+        {[{k:'issues',l:`🔧 Maintenance (${openIssueCount})`},{k:'orders',l:`🛒 Achats (${openOrderCount})`}].map(t=>(
+          <button key={t.k} onClick={()=>setTab(t.k)}
+            style={{padding:'10px 20px',border:'none',borderBottom:tab===t.k?'2px solid var(--navy)':'2px solid transparent',
+              background:'none',fontWeight:700,fontSize:13.5,color:tab===t.k?'var(--navy)':'var(--muted)',cursor:'pointer',marginBottom:'-2px'}}>
+            {t.l}
+          </button>
+        ))}
+        <div style={{flex:1}} />
+        <label style={{display:'flex',alignItems:'center',gap:6,fontSize:12.5,color:'var(--muted)',cursor:'pointer',marginBottom:8}}>
+          <input type="checkbox" checked={showDone} onChange={e=>setShowDone(e.target.checked)} /> Voir les dossiers clôturés
+        </label>
+        <button className="btn-primary" style={{marginBottom:6,marginRight:0}}
+          onClick={()=>tab==='issues'?setEditingIssue({...EMPTY_ISSUE}):setEditingOrder({...EMPTY_PO})}>
+          {tab==='issues'?'+ Signaler un problème':'+ Nouvelle demande'}
+        </button>
+      </div>
+
+      {loading ? <Spinner/> : tab==='issues' ? (
+        visibleIssues.length===0 ? <div className="panel"><div className="empty">Aucune panne {showDone?'':'en cours'}. Tout va bien 👍</div></div> :
+        visibleIssues.map(it=>{
+          const st=MAINT_STATUSES.find(s=>s.key===it.status)||MAINT_STATUSES[0];
+          const pr=MAINT_PRIORITIES.find(p=>p.key===it.priority)||MAINT_PRIORITIES[0];
+          return (
+            <div key={it.id} className="panel" style={{marginBottom:12}}>
+              <div style={{display:'flex',alignItems:'flex-start',gap:14,flexWrap:'wrap'}}>
+                <div style={{flex:1,minWidth:200}}>
+                  <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                    <span style={{fontWeight:700,fontSize:14.5,color:'var(--navy)'}}>{it.title}</span>
+                    {it.priority!=='normal' && <span style={{fontSize:10.5,fontWeight:800,color:pr.color}}>{pr.label}</span>}
+                  </div>
+                  <div style={{fontSize:12,color:'var(--muted)',marginTop:3}}>
+                    {it.location&&<>📍 {it.location} · </>}Signalé par {it.reported_by} · {timeAgo(it.created_at)}
+                  </div>
+                  {it.description&&<div style={{fontSize:13,color:'#5a6178',marginTop:6}}>{it.description}</div>}
+                </div>
+                <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:8,flexShrink:0}}>
+                  <select value={it.status} onChange={e=>issueStatus(it,e.target.value)}
+                    style={{fontSize:11.5,fontWeight:700,padding:'4px 8px',borderRadius:20,border:'none',background:st.bg,color:st.color,cursor:'pointer'}}>
+                    {MAINT_STATUSES.map(s=><option key={s.key} value={s.key}>{s.label}</option>)}
+                  </select>
+                  <div style={{display:'flex',gap:6}}>
+                    <button className="icon-btn" onClick={()=>setEditingIssue({...it})}>Modifier</button>
+                    <button className="icon-btn del" onClick={()=>delIssue(it)}>✕</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })
+      ) : (
+        visibleOrders.length===0 ? <div className="panel"><div className="empty">Aucune demande d'achat {showDone?'':'en cours'}.</div></div> :
+        visibleOrders.map(o=>{
+          const st=PO_STATUSES.find(s=>s.key===o.status)||PO_STATUSES[0];
+          return (
+            <div key={o.id} className="panel" style={{marginBottom:12}}>
+              <div style={{display:'flex',alignItems:'flex-start',gap:14,flexWrap:'wrap'}}>
+                <div style={{flex:1,minWidth:200}}>
+                  <div style={{fontWeight:700,fontSize:14.5,color:'var(--navy)'}}>{o.item} <span style={{color:'var(--muted)',fontWeight:600}}>× {o.quantity}{o.unit?' '+o.unit:''}</span></div>
+                  <div style={{fontSize:12,color:'var(--muted)',marginTop:3}}>
+                    {o.supplier&&<>Fournisseur : {o.supplier} · </>}
+                    {o.estimated_cost!=null&&<>≈ {Number(o.estimated_cost).toLocaleString('fr-FR')} FCFA · </>}
+                    Demandé par {o.requested_by} · {timeAgo(o.created_at)}
+                    {o.needed_by&&<> · besoin pour le {o.needed_by}</>}
+                  </div>
+                  {o.notes&&<div style={{fontSize:13,color:'#5a6178',marginTop:6}}>{o.notes}</div>}
+                </div>
+                <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:8,flexShrink:0}}>
+                  <select value={o.status} onChange={e=>orderStatus(o,e.target.value)}
+                    style={{fontSize:11.5,fontWeight:700,padding:'4px 8px',borderRadius:20,border:'none',background:st.bg,color:st.color,cursor:'pointer'}}>
+                    {PO_STATUSES.map(s=><option key={s.key} value={s.key}>{s.label}</option>)}
+                  </select>
+                  <div style={{display:'flex',gap:6}}>
+                    <button className="icon-btn" onClick={()=>setEditingOrder({...o})}>Modifier</button>
+                    <button className="icon-btn del" onClick={()=>delOrder(o)}>✕</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
+// ============================================================
 //  ADMIN SHELL
 // ============================================================
 const MODULES = [
@@ -4821,6 +5066,7 @@ const MODULES = [
   { key:'can_announcements', label:'Annonces' },
   { key:'can_broadcast',    label:'Planning Diffusion' },
   { key:'can_manager',      label:'Manager (Évaluations)' },
+  { key:'can_maintenance',  label:'Maintenance & Achats' },
 ];
 
 function PermCheckboxes({ perms, onChange }){
@@ -6411,6 +6657,7 @@ const PAGE_LOG_KEYWORDS = {
   accounting: ['écriture','comptab','recette','dépense','ap','ar'],
   users:      ['utilisateur','accès','rôle','retiré','ajouté'],
   manager:    ['évalu'],
+  maintenance:['panne','commande','achat','matériel','fournisseur'],
   logs:       [],
 };
 
@@ -7261,7 +7508,7 @@ function Admin({ session, onExit, data, reload, toast, userPerms, showProfile })
   const full = userPerms?.__full;
   const can = (k) => !!(full || userPerms?.[k]);
   const jobTitle = userPerms?.job_title || '';
-  const firstTab = ['can_articles','can_scores','can_partners','can_ads','can_content','can_emissions','can_finance','can_accounting','can_accounting_entry'].find(k=>can(k));
+  const firstTab = ['can_articles','can_scores','can_partners','can_ads','can_content','can_emissions','can_finance','can_accounting','can_accounting_entry','can_maintenance'].find(k=>can(k));
   const [tab,setTab]=useState(firstTab ? (firstTab==='can_accounting_entry'?'accounting':firstTab.replace('can_','')) : 'articles');
   const adminEmail = session.user.email;
   async function logout(){ await sb.auth.signOut(); onExit(); }
@@ -7288,6 +7535,7 @@ function Admin({ session, onExit, data, reload, toast, userPerms, showProfile })
         {can('can_finance') && <button className={tab==='finance'?'active':''} onClick={()=>setTab('finance')}>💰 Paie</button>}
         {(can('can_accounting')||can('can_accounting_entry')) && <button className={tab==='accounting'?'active':''} onClick={()=>setTab('accounting')}>📊 Comptabilité</button>}
         {can('can_manager') && <button className={tab==='manager'?'active':''} onClick={()=>setTab('manager')}>⭐ Manager</button>}
+        {can('can_maintenance') && <button className={tab==='maintenance'?'active':''} onClick={()=>setTab('maintenance')}>🔧 Maintenance</button>}
       </div></div>
       <div className="admin-body"><div className="wrap">
         {tab==='articles' && can('can_articles') && <><AdminArticles articles={data.articles} reload={reload} toast={toast} adminEmail={adminEmail} /><PageJournal section="articles" /></>}
@@ -7304,6 +7552,7 @@ function Admin({ session, onExit, data, reload, toast, userPerms, showProfile })
           {can('can_accounting')&&<PageJournal section="accounting" />}</>}
         {tab==='broadcast' && can('can_broadcast') && <AdminBroadcast adminEmail={adminEmail} toast={toast} isAdmin={userPerms?.__full||userPerms?.can_team} />}
         {tab==='manager' && can('can_manager') && <><AdminManager adminEmail={adminEmail} toast={toast} /><PageJournal section="manager" /></>}
+        {tab==='maintenance' && can('can_maintenance') && <><AdminMaintenance adminEmail={adminEmail} toast={toast} /><PageJournal section="maintenance" /></>}
       </div></div>
     </div>
   );
