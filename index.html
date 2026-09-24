@@ -60,6 +60,7 @@ if (location.hash !== '#admin') {
 <script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js" crossorigin></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a" crossorigin="anonymous"></script>
 <style>
   :root{
     --navy:#0B245E; --navy-deep:#081A45; --red:#EF003F; --ink:#14182a;
@@ -692,10 +693,23 @@ function useTicker(intervalMs){
 // something extra (cascading deletes, recomputing a linked row, custom
 // error branches, or that skip the toast/log step) — those keep their own
 // hand-written function so this refactor changes zero behavior anywhere.
+// Supabase never throws on an RLS/constraint failure — it resolves with
+// { error }. Writes that ignored that result showed "Enregistré ✓" (and
+// reloaded, snapping the UI back) when nothing had actually been saved.
+// Wrap a write in dbOk() to surface the failure and stop the caller:
+//   if(!await dbOk(sb.from('t').update(x).eq('id',id), toast)) return;
+async function dbOk(query, toast){
+  try{
+    const { error }=await query;
+    if(error){ toast('Échec : '+error.message); return false; }
+    return true;
+  }catch(e){ toast('Échec : '+(e?.message||e)); return false; }
+}
+
 function useDeleteAction(table, { adminEmail, toast, reload, logLabel }){
   return useCallback(async (id, confirmMsg, logDetail, successMsg)=>{
     if(!confirm(confirmMsg)) return;
-    await sb.from(table).delete().eq('id', id);
+    if(!await dbOk(sb.from(table).delete().eq('id', id), toast)) return;
     await logAction(adminEmail, logLabel, logDetail);
     toast(successMsg);
     reload();
@@ -1535,12 +1549,25 @@ function ArticlesPage({ articles, onOpen }){
   const [activeCat, setActiveCat] = useState('Tout');
   const [activeSub, setActiveSub] = useState(null);
 
-  const published = (articles||[]).filter(a=>a.published);
+  // Only render a page of cards at a time. The archive is ~3,200 articles;
+  // drawing them all put ~29,000 elements in the DOM and lagged/crashed
+  // mid-range phones. "Voir plus" reveals the next batch.
+  const PAGE_SIZE = 24;
+  const [shown, setShown] = useState(PAGE_SIZE);
 
-  const tierCount = (key) => key==='Tout' ? published.length
-    : published.filter(a=>classifyArticle(a).tier===key).length;
-  const subCount = (tier,label) =>
-    published.filter(a=>{ const cl=classifyArticle(a); return cl.tier===tier && cl.sub===label; }).length;
+  // Classify each article ONCE per articles change (classifyArticle used to run
+  // for every article, for every tab and chip counter, on every render).
+  const classified = useMemo(
+    ()=>(articles||[]).filter(a=>a.published).map(a=>({ a, cl:classifyArticle(a) })),
+    [articles]);
+  const { tierCounts, subCounts } = useMemo(()=>{
+    const t={}, s={};
+    classified.forEach(({cl})=>{ t[cl.tier]=(t[cl.tier]||0)+1; const k=cl.tier+'||'+cl.sub; s[k]=(s[k]||0)+1; });
+    return { tierCounts:t, subCounts:s };
+  },[classified]);
+
+  const tierCount = (key) => key==='Tout' ? classified.length : (tierCounts[key]||0);
+  const subCount = (tier,label) => subCounts[tier+'||'+label]||0;
 
   const cats = ['Tout', ...ARTICLE_TREE.map(n=>n.key), 'Autre'];
   const activeNode = ARTICLE_TREE.find(n=>n.key===activeCat);
@@ -1548,15 +1575,15 @@ function ArticlesPage({ articles, onOpen }){
   const visibleSubs = activeNode && activeNode.subs.length>1
     ? activeNode.subs.filter(s=>subCount(activeCat,s.label)>0) : [];
 
-  const filtered = published.filter(a=>{
+  const filtered = classified.filter(({cl})=>{
     if(activeCat==='Tout') return true;
-    const cl = classifyArticle(a);
     if(cl.tier!==activeCat) return false;
     if(activeSub && cl.sub!==activeSub) return false;
     return true;
-  });
+  }).map(x=>x.a);
 
-  const pickTab = (cat) => { setActiveCat(cat); setActiveSub(null); };
+  const pickTab = (cat) => { setActiveCat(cat); setActiveSub(null); setShown(PAGE_SIZE); };
+  const pickSub = (label) => { setActiveSub(label); setShown(PAGE_SIZE); };
 
   return (
     <div>
@@ -1590,7 +1617,7 @@ function ArticlesPage({ articles, onOpen }){
             const active = activeSub===label;
             const count = label ? subCount(activeCat,label) : tierCount(activeCat);
             return (
-              <button key={label||'__all'} onClick={()=>setActiveSub(label)}
+              <button key={label||'__all'} onClick={()=>pickSub(label)}
                 style={{background:active?'var(--navy)':'#fff',color:active?'#fff':'#3a3f4a',
                   border:active?'1px solid var(--navy)':'1px solid var(--line)',
                   borderRadius:999,padding:'7px 14px',fontSize:13.5,fontWeight:600,cursor:'pointer',
@@ -1611,8 +1638,9 @@ function ArticlesPage({ articles, onOpen }){
           <div style={{fontWeight:700}}>Aucun article dans cette catégorie</div>
         </div>
       ) : (
+        <>
         <div className="grid3">
-          {filtered.map(a=>(
+          {filtered.slice(0,shown).map(a=>(
             <article key={a.id} className="gcard" onClick={()=>onOpen(a)} style={{cursor:'pointer'}}>
               <div className={`img shot${a.image_url?' has-img':''}`}
                 style={a.image_url?{'--img':`url(${a.image_url})`}:null} />
@@ -1627,6 +1655,14 @@ function ArticlesPage({ articles, onOpen }){
             </article>
           ))}
         </div>
+        {filtered.length>shown && (
+          <div style={{textAlign:'center',margin:'28px 0 8px'}}>
+            <button className="btn-ghost" onClick={()=>setShown(n=>n+PAGE_SIZE)}>
+              Voir plus d'articles ({filtered.length-shown} restants)
+            </button>
+          </div>
+        )}
+        </>
       )}
     </div>
   );
@@ -1715,6 +1751,18 @@ function linkifyHtml(html){
   }).join('');
 }
 
+// Article bodies are stored as HTML and injected with dangerouslySetInnerHTML,
+// so anything in them (a pasted <img onerror=…>, <svg onload=…>, javascript:
+// links…) would run in every reader's browser — including an admin's, where
+// it could lift their session. Sanitize at render time. If DOMPurify failed to
+// load (CDN blocked), fall back to escaped plain text rather than raw HTML.
+function safeHtml(html){
+  if(window.DOMPurify){
+    return window.DOMPurify.sanitize(String(html||''), { ADD_ATTR:['target','rel'] });
+  }
+  return String(html||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
 function ArticleView({ article, onBack, backLabel }){
   const blocks=(article.body||'').split(/\n\s*\n/).filter(Boolean);
   const [copied,setCopied]=useState(false);
@@ -1768,7 +1816,7 @@ function ArticleView({ article, onBack, backLabel }){
         {!article.image_url && <span className="imglabel">[ photo de l'article ]</span>}
       </div>
       {/(<[a-z][^>]*>)/i.test(article.body||'')
-        ? <div className="prose" dangerouslySetInnerHTML={{__html:linkifyHtml((article.body||'').replace(/<a\s/gi,'<a target="_blank" rel="noopener noreferrer" '))}} />
+        ? <div className="prose" dangerouslySetInnerHTML={{__html:safeHtml(linkifyHtml((article.body||'').replace(/<a\s/gi,'<a target="_blank" rel="noopener noreferrer" ')))}} />
         : <div className="prose">{blocks.map((b,i)=>{
             const m=b.trim().match(/^\[img:\s*(\S+?)\s*\]$/);
             return m
@@ -1972,6 +2020,159 @@ function SpotRequestForm({ onBack, toast }){
         </button>
         {!canSubmit && <p style={{fontSize:12,color:'var(--muted)',margin:0,textAlign:'center'}}>* Entreprise, email, jour(s) et message sont obligatoires</p>}
       </div>
+    </div>
+  );
+}
+
+// ============================================================
+//  CONTACT + CONFIDENTIALITÉ (public pages) and staff inbox
+// ============================================================
+function ContactPage({ onBack, onNav, toast }){
+  const [f,setF]=useState({ name:'', email:'', message:'', website:'' }); // website = honeypot
+  const [busy,setBusy]=useState(false);
+  const [done,setDone]=useState(false);
+  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+  const canSend = f.name.trim() && /\S+@\S+\.\S+/.test(f.email) && f.message.trim().length>=5;
+
+  async function submit(){
+    if(f.website){ setDone(true); return; } // bots fill the hidden field — pretend it worked
+    try{
+      const last=Number(localStorage.getItem('contact_last')||0);
+      if(Date.now()-last<30000){ toast('Un instant avant de renvoyer un message'); return; }
+    }catch{}
+    setBusy(true);
+    const { error }=await sb.from('contact_messages').insert([{
+      name:f.name.trim().slice(0,100), email:f.email.trim().slice(0,150),
+      message:f.message.trim().slice(0,3000), status:'new' }]);
+    setBusy(false);
+    if(error){ toast('Envoi impossible — '+error.message); return; }
+    try{ localStorage.setItem('contact_last',String(Date.now())); }catch{}
+    setDone(true);
+  }
+
+  if(done) return (
+    <div style={{textAlign:'center',padding:'60px 20px'}}>
+      <div style={{fontSize:52,marginBottom:12}}>✉️</div>
+      <h2 style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,color:'var(--navy)',fontSize:28,margin:'0 0 12px'}}>Message envoyé !</h2>
+      <p style={{color:'#5a6178',fontSize:16,maxWidth:'44ch',margin:'0 auto 20px'}}>Merci {f.name||''}. Notre équipe vous répondra à l'adresse indiquée dès que possible.</p>
+      <button className="btn-ghost" onClick={onBack}>Retour à SportFM</button>
+    </div>
+  );
+
+  return (
+    <div className="wrap" style={{maxWidth:640,paddingTop:40,paddingBottom:60}}>
+      <button className="btn-ghost" style={{marginBottom:24}} onClick={onBack}>← Retour</button>
+      <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:13,letterSpacing:'.08em',color:'var(--red)',marginBottom:8}}>CONTACT</div>
+      <h1 style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:32,color:'var(--navy)',margin:'0 0 8px',lineHeight:1.1}}>Écrivez à la rédaction de SportFM</h1>
+      <p style={{color:'#5a6178',fontSize:15,marginBottom:24}}>Une question, une info, une suggestion d'article ou d'émission ? Envoyez-nous un message : SportFM 91.9 FM, la radio sportive de Lomé (Togo).</p>
+
+      <div style={{background:'#fff',border:'1px solid var(--line)',borderRadius:14,padding:28,display:'flex',flexDirection:'column',gap:16,marginBottom:28}}>
+        <div className="field" style={{margin:0}}><label>Votre nom *</label>
+          <input className="inp" value={f.name} maxLength={100} onChange={e=>set('name',e.target.value)} placeholder="Prénom Nom" /></div>
+        <div className="field" style={{margin:0}}><label>Votre e-mail *</label>
+          <input className="inp" type="email" value={f.email} maxLength={150} onChange={e=>set('email',e.target.value)} placeholder="vous@exemple.com" /></div>
+        <div className="field" style={{margin:0}}><label>Message *</label>
+          <textarea className="inp" rows={6} value={f.message} maxLength={3000} onChange={e=>set('message',e.target.value)} style={{resize:'vertical'}} placeholder="Écrivez votre message ici…" /></div>
+        {/* honeypot — hidden from people, filled by bots */}
+        <input tabIndex={-1} autoComplete="off" aria-hidden="true" value={f.website} onChange={e=>set('website',e.target.value)}
+          style={{position:'absolute',left:'-9999px',width:1,height:1,opacity:0}} />
+        <button className="btn-primary" disabled={busy||!canSend} onClick={submit}>{busy?'Envoi…':'Envoyer le message ✉️'}</button>
+      </div>
+
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:12,marginBottom:24}}>
+        <button className="btn-ghost" onClick={()=>onNav('Spot')}>📻 Réserver un spot publicitaire</button>
+        <button className="btn-ghost" onClick={()=>onNav('Partner')}>🤝 Devenir partenaire</button>
+      </div>
+      <div style={{fontSize:13.5,color:'var(--muted)'}}>
+        Retrouvez-nous aussi sur{' '}
+        <a href="https://www.youtube.com/@sportfmtg/videos" target="_blank" rel="noopener noreferrer">YouTube</a>,{' '}
+        <a href="https://www.instagram.com/sportfmtg/" target="_blank" rel="noopener noreferrer">Instagram</a> et{' '}
+        <a href="https://www.tiktok.com/@sportfmtg" target="_blank" rel="noopener noreferrer">TikTok</a>.
+        {' '}Voir aussi notre <a href="#" onClick={e=>{e.preventDefault();onNav('Privacy');}}>politique de confidentialité</a>.
+      </div>
+    </div>
+  );
+}
+
+function PrivacyPage({ onBack, onNav }){
+  const H=({children})=><h2 style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:20,color:'var(--navy)',margin:'28px 0 8px'}}>{children}</h2>;
+  const P=({children})=><p style={{color:'#3a3f4a',fontSize:15,lineHeight:1.6,margin:'0 0 10px'}}>{children}</p>;
+  return (
+    <div className="wrap" style={{maxWidth:760,paddingTop:40,paddingBottom:60}}>
+      <button className="btn-ghost" style={{marginBottom:24}} onClick={onBack}>← Retour</button>
+      <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:13,letterSpacing:'.08em',color:'var(--red)',marginBottom:8}}>CONFIDENTIALITÉ</div>
+      <h1 style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:32,color:'var(--navy)',margin:'0 0 8px',lineHeight:1.1}}>Politique de confidentialité</h1>
+      <p style={{color:'var(--muted)',fontSize:13,marginBottom:8}}>Dernière mise à jour : 24 septembre 2026</p>
+
+      <H>Qui sommes-nous</H>
+      <P>SportFM (91.9 FM, Lomé, Togo) édite le site sportfmtg.com : actualités sportives, résultats, classements, émissions et écoute de la radio en direct. Pour toute question sur vos données, utilisez notre <a href="#" onClick={e=>{e.preventDefault();onNav('Contact');}}>page Contact</a>.</P>
+
+      <H>Les données que nous recevons</H>
+      <P><strong>Formulaires.</strong> Quand vous nous écrivez (Contact), réservez un spot, devenez partenaire ou commentez un article, nous enregistrons ce que vous saisissez : nom, e-mail, téléphone (si fourni), message et, pour les demandes commerciales, les détails de votre projet. Ces données servent uniquement à vous répondre et à traiter votre demande.</P>
+      <P><strong>Mesure d'audience.</strong> Nous utilisons PostHog pour comprendre comment le site est utilisé (pages vues, parcours) afin de l'améliorer.</P>
+      <P><strong>Suivi des erreurs.</strong> Nous utilisons Sentry pour détecter les bugs techniques ; il peut enregistrer des informations sur les erreurs rencontrées et, le cas échéant, une relecture anonymisée de la session.</P>
+      <P><strong>Publicité.</strong> Le site charge le service Google AdSense. Google peut utiliser des cookies pour diffuser et mesurer des annonces ; vous pouvez gérer vos préférences sur <a href="https://adssettings.google.com" target="_blank" rel="noopener noreferrer">adssettings.google.com</a>.</P>
+      <P><strong>Stockage sur votre appareil.</strong> Pour accélérer le site, nous gardons localement un cache des articles récents ; nous retenons aussi le nom que vous utilisez pour commenter, et un identifiant aléatoire de session (sans lien avec votre identité) qui sert à compter les visiteurs présents.</P>
+
+      <H>Hébergement et prestataires</H>
+      <P>Le site est hébergé par Vercel ; les données des formulaires sont stockées chez Supabase. Les prestataires cités ci-dessus (PostHog, Sentry, Google) traitent des données pour notre compte ou selon leurs propres politiques.</P>
+
+      <H>Durée de conservation</H>
+      <P>Nous conservons vos données le temps nécessaire aux finalités décrites ci-dessus, puis les supprimons ou les anonymisons.</P>
+
+      <H>Vos droits</H>
+      <P>Vous pouvez demander l'accès, la rectification ou la suppression des données vous concernant, ou vous opposer à leur traitement, en nous écrivant via la <a href="#" onClick={e=>{e.preventDefault();onNav('Contact');}}>page Contact</a>. Nous ne vendons pas vos données personnelles.</P>
+
+      <H>Modifications</H>
+      <P>Cette politique peut évoluer ; la date de dernière mise à jour figure en haut de cette page.</P>
+    </div>
+  );
+}
+
+function AdminMessages({ toast, adminEmail }){
+  const [rows,setRows]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [showDone,setShowDone]=useState(false);
+  async function load(){
+    setLoading(true);
+    const { data, error }=await sb.from('contact_messages').select('*').order('created_at',{ascending:false});
+    if(error) toast('Table contact_messages manquante — exécutez le SQL fourni');
+    setRows(data||[]); setLoading(false);
+  }
+  useEffect(()=>{ load(); },[]);
+  async function setStatus(m,status){
+    if(!await dbOk(sb.from('contact_messages').update({status}).eq('id',m.id), toast)) return;
+    load();
+  }
+  const delRow=useDeleteAction('contact_messages',{adminEmail,toast,reload:load,logLabel:'Message supprimé'});
+  const visible=rows.filter(m=>showDone||m.status!=='done');
+  const newCount=rows.filter(m=>m.status==='new').length;
+  return (
+    <div>
+      <div style={{display:'flex',alignItems:'center',gap:14,marginBottom:16,flexWrap:'wrap'}}>
+        <h3 style={{margin:0,marginRight:'auto'}}>Messages reçus ({newCount} nouveau{newCount>1?'x':''})</h3>
+        <label style={{display:'flex',alignItems:'center',gap:6,fontSize:12.5,color:'var(--muted)',cursor:'pointer'}}>
+          <input type="checkbox" checked={showDone} onChange={e=>setShowDone(e.target.checked)} /> Voir les messages traités
+        </label>
+      </div>
+      {loading ? <Spinner/> : visible.length===0 ? <div className="panel"><div className="empty">Aucun message {showDone?'':'à traiter'}.</div></div> :
+        visible.map(m=>(
+          <div key={m.id} className="panel" style={{marginBottom:12,borderLeft:m.status==='new'?'4px solid var(--red)':undefined}}>
+            <div style={{display:'flex',gap:14,flexWrap:'wrap',alignItems:'flex-start'}}>
+              <div style={{flex:1,minWidth:220}}>
+                <div style={{fontWeight:700,color:'var(--navy)'}}>{m.name} <a href={'mailto:'+m.email} style={{fontWeight:500,fontSize:13,marginLeft:6}}>{m.email}</a></div>
+                <div style={{fontSize:12,color:'var(--muted)',marginTop:2}}>{timeAgo(m.created_at)}</div>
+                <div style={{fontSize:14,color:'#3a3f4a',marginTop:8,whiteSpace:'pre-wrap'}}>{m.message}</div>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:8,alignItems:'flex-end'}}>
+                <select value={m.status} onChange={e=>setStatus(m,e.target.value)} style={{fontSize:12,fontWeight:700,padding:'4px 8px',borderRadius:8,border:'1px solid var(--line)'}}>
+                  <option value="new">Nouveau</option><option value="read">Lu</option><option value="done">Traité ✓</option>
+                </select>
+                <button className="icon-btn del" onClick={()=>delRow(m.id,`Supprimer le message de ${m.name} ?`,m.name,'Supprimé')}>✕</button>
+              </div>
+            </div>
+          </div>
+        ))}
     </div>
   );
 }
@@ -2333,20 +2534,20 @@ function AdminContent({ adminEmail, userRole, toast }){
     };
     const { data:newTask, error }=await sb.from('content_tasks').insert([{...payload, created_by:s.sent_by}]).select().single();
     if(error){ setAcceptingId(null); toast('Erreur : '+error.message); return; }
-    await sb.from('content_scripts').update({status:'accepted', accepted_at:new Date().toISOString(), content_task_id:newTask.id}).eq('id',s.id);
+    if(!await dbOk(sb.from('content_scripts').update({status:'accepted', accepted_at:new Date().toISOString(), content_task_id:newTask.id}).eq('id',s.id), toast)){ setAcceptingId(null); return; }
     await logAction(adminEmail,'Script accepté',s.title);
     setAcceptingId(null); toast('Script accepté — tâche créée ✓'); load();
   }
 
   async function quickStatus(id,status,title){
-    await sb.from('content_tasks').update({status,updated_at:new Date().toISOString()}).eq('id',id);
+    if(!await dbOk(sb.from('content_tasks').update({status,updated_at:new Date().toISOString()}).eq('id',id), toast)) return;
     await logAction(adminEmail,'Statut tâche → '+status,title);
     load();
   }
 
   async function deleteTask(id,title){
     if(!confirm('Supprimer cette tâche ?')) return;
-    await sb.from('content_tasks').delete().eq('id',id);
+    if(!await dbOk(sb.from('content_tasks').delete().eq('id',id), toast)) return;
     await logAction(adminEmail,'Tâche supprimée',title);
     load();
   }
@@ -3570,7 +3771,7 @@ function AdminSpots({ toast, adminEmail }){
   useEffect(()=>{ load(); },[]);
 
   async function updateStatus(id,status){
-    await sb.from('spot_requests').update({status}).eq('id',id);
+    if(!await dbOk(sb.from('spot_requests').update({status}).eq('id',id), toast)) return;
     load();
   }
 
@@ -3584,7 +3785,7 @@ function AdminSpots({ toast, adminEmail }){
     }]);
     setTaskBusy(false);
     if(error){ toast('Erreur création tâche: '+error.message); return; }
-    await sb.from('spot_requests').update({status:'in_progress'}).eq('id',spot.id);
+    if(!await dbOk(sb.from('spot_requests').update({status:'in_progress'}).eq('id',spot.id), toast)) return;
     toast('Tâche créée dans Contenu ✓'); setCreatingTask(null); load();
   }
 
@@ -3671,9 +3872,11 @@ function AdminPartners({ partners, reload, toast, adminEmail }){
       <div style={{display:'flex',borderBottom:'1px solid var(--line)',marginBottom:20}}>
         <button style={tabStyle('partners')} onClick={()=>setPTab('partners')}>🤝 Partenaires</button>
         <button style={tabStyle('spots')} onClick={()=>setPTab('spots')}>📻 Spots Radio</button>
+        <button style={tabStyle('messages')} onClick={()=>setPTab('messages')}>✉️ Messages</button>
       </div>
 
       {pTab==='spots' && <AdminSpots toast={toast} adminEmail={adminEmail} />}
+      {pTab==='messages' && <AdminMessages toast={toast} adminEmail={adminEmail} />}
       {pTab==='partners' && <>
       {/* KPI bar */}
       <div style={{display:'flex',gap:12,marginBottom:20,flexWrap:'wrap'}}>
@@ -4364,8 +4567,8 @@ function AdminFinance({ adminEmail, userRole, toast }){
   const deleteStub=(id,label)=>deleteStubRow(id,'Supprimer cette fiche de paie ?',label,'Supprimé');
   async function deleteEmp(id,name){
     if(!confirm(`Supprimer ${name} ? Ses fiches de paie seront également supprimées.`)) return;
-    await sb.from('paystubs').delete().eq('employee_id',id);
-    await sb.from('employees').delete().eq('id',id);
+    if(!await dbOk(sb.from('paystubs').delete().eq('employee_id',id), toast)) return;
+    if(!await dbOk(sb.from('employees').delete().eq('id',id), toast)) return;
     await logAction(adminEmail,'Employé supprimé',name); toast('Supprimé'); load();
   }
 
@@ -4525,7 +4728,7 @@ function AdminFinance({ adminEmail, userRole, toast }){
                               onClick={async()=>{
                                 setSending(s.id);
                                 sendPaystubEmail(emp,s);
-                                await sb.from('paystubs').update({sent_at:new Date().toISOString()}).eq('id',s.id);
+                                if(!await dbOk(sb.from('paystubs').update({sent_at:new Date().toISOString()}).eq('id',s.id), toast)){ setSending(null); return; }
                                 await logAction(adminEmail,'Fiche envoyée',label);
                                 toast('E-mail ouvert pour '+emp.name); load(); setSending(null);
                               }}>
@@ -4632,7 +4835,7 @@ function MonEspace({ session, userPerms, onClose, toast }){
 
   async function deleteAnn(id){
     if(!confirm('Supprimer cette annonce ?')) return;
-    await sb.from('announcements').delete().eq('id',id);
+    if(!await dbOk(sb.from('announcements').delete().eq('id',id), toast)) return;
     toast('Annonce supprimée'); loadAnnouncements();
   }
 
@@ -4862,7 +5065,7 @@ function AdminMaintenance({ adminEmail, toast }){
   async function issueStatus(it,status){
     const patch={ status, updated_at:new Date().toISOString() };
     if(status==='resolved'||status==='cancelled') patch.resolved_at=new Date().toISOString();
-    await sb.from('maintenance_issues').update(patch).eq('id',it.id);
+    if(!await dbOk(sb.from('maintenance_issues').update(patch).eq('id',it.id), toast)) return;
     await logAction(adminEmail,'Statut panne → '+status,it.title);
     load();
   }
@@ -4885,7 +5088,7 @@ function AdminMaintenance({ adminEmail, toast }){
   async function orderStatus(o,status){
     const patch={ status, updated_at:new Date().toISOString() };
     if(status==='received'||status==='cancelled') patch.received_at=new Date().toISOString();
-    await sb.from('purchase_orders').update(patch).eq('id',o.id);
+    if(!await dbOk(sb.from('purchase_orders').update(patch).eq('id',o.id), toast)) return;
     await logAction(adminEmail,'Statut commande → '+status,o.item);
     load();
   }
@@ -5120,7 +5323,7 @@ function AdminUsers({ adminEmail, toast }){
   }
 
   async function updateUser(u, patch){
-    await sb.from('user_roles').update(patch).eq('id',u.id);
+    if(!await dbOk(sb.from('user_roles').update(patch).eq('id',u.id), toast)) return;
     await logAction(adminEmail,'Accès modifié', u.email);
     toast('Mis à jour'); load();
   }
@@ -5620,7 +5823,7 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
     if(error){ setPayBusy(false); toast('Erreur : '+error.message+' — table entry_payments manquante ?'); return; }
     const newPaid=paidOf(e)+amt;
     const newStatus=newPaid>=Number(e.amount||0)-0.001 ? 'Payé' : 'Partiel';
-    await sb.from('accounting_entries').update({status:newStatus}).eq('id',e.id);
+    if(!await dbOk(sb.from('accounting_entries').update({status:newStatus}).eq('id',e.id), toast)) return;
     await logAction(adminEmail,'Paiement enregistré',`${e.label} — ${fmtFCFA(amt)} (${payForm.method})`);
     setPayBusy(false);
     toast(newStatus==='Payé'?'Paiement enregistré — soldé ✓':'Paiement enregistré — reste '+fmtFCFA(Number(e.amount)-newPaid));
@@ -5629,10 +5832,10 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
   }
   async function deletePayment(p, e){
     if(!confirm('Supprimer ce paiement ?')) return;
-    await sb.from('entry_payments').delete().eq('id',p.id);
+    if(!await dbOk(sb.from('entry_payments').delete().eq('id',p.id), toast)) return;
     const newPaid=paidOf(e)-Number(p.amount||0);
     const newStatus=newPaid<=0?'En attente':newPaid>=Number(e.amount||0)-0.001?'Payé':'Partiel';
-    await sb.from('accounting_entries').update({status:newStatus}).eq('id',e.id);
+    if(!await dbOk(sb.from('accounting_entries').update({status:newStatus}).eq('id',e.id), toast)) return;
     toast('Paiement supprimé'); load();
   }
 
@@ -5707,7 +5910,7 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
     toast('Agent ajouté ✓'); setAgForm({name:'',phone:'',commission_pct:''}); load();
   }
   async function updAgent(id,patch){
-    await sb.from('commercial_agents').update(patch).eq('id',id); load();
+    await dbOk(sb.from('commercial_agents').update(patch).eq('id',id), toast); load();
   }
   const delAgentRow=useDeleteAction('commercial_agents',{adminEmail,toast,reload:load,logLabel:'Agent supprimé'});
   const delAgent=(a)=>delAgentRow(a.id,`Supprimer l'agent ${a.name} ? Ses commandes resteront mais sans agent.`,a.name,'Agent supprimé');
@@ -5724,7 +5927,7 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
     toast('Client ajouté ✓'); setClForm({name:'',phone:'',email:'',company:'',notes:''}); load();
   }
   async function updClient(id,patch){
-    await sb.from('clients').update(patch).eq('id',id); load();
+    await dbOk(sb.from('clients').update(patch).eq('id',id), toast); load();
   }
   const delClientRow=useDeleteAction('clients',{adminEmail,toast,reload:load,logLabel:'Client supprimé'});
   const delClient=(c)=>delClientRow(c.id,`Supprimer le client ${c.name} ? Ses commandes resteront mais sans client lié.`,c.name,'Client supprimé');
@@ -5772,7 +5975,7 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
 
   async function updCheck(row, patch){
     const table=row.src==='payment'?'entry_payments':'accounting_entries';
-    await sb.from(table).update(patch).eq('id',row.pid);
+    if(!await dbOk(sb.from(table).update(patch).eq('id',row.pid), toast)) return;
     load();
   }
   const CHECK_STATUSES=['À traiter','Déposé en banque','Encaissé','Remis à un tiers','Rejeté'];
@@ -6476,7 +6679,7 @@ function AdminAccounting({ adminEmail, toast, entryOnly }){
                             ? <span style={{fontSize:11,fontWeight:700,padding:'3px 9px',borderRadius:20,
                                 background:STATUS_BG[st]||'#f0f0f0',color:STATUS_COLORS[st]||'#888'}}>{st}</span>
                             : <select value={e.status}
-                                onChange={async ev=>{ await sb.from('accounting_entries').update({status:ev.target.value}).eq('id',e.id); load(); }}
+                                onChange={async ev=>{ await dbOk(sb.from('accounting_entries').update({status:ev.target.value}).eq('id',e.id), toast); load(); }}
                                 style={{fontSize:11,padding:'3px 7px',border:'1px solid var(--line)',borderRadius:6,background:STATUS_BG[e.status]||'#f0f0f0',color:STATUS_COLORS[e.status]||'#888',fontWeight:700,cursor:'pointer'}}>
                                 {ENTRY_STATUSES.map(s=><option key={s}>{s}</option>)}
                               </select>}
@@ -7012,11 +7215,11 @@ function AdminManager({ adminEmail, toast }){
   }
   async function cancelScript(s){
     if(!confirm(`Annuler l'envoi de "${s.title}" ?`)) return;
-    await sb.from('content_scripts').delete().eq('id',s.id);
+    if(!await dbOk(sb.from('content_scripts').delete().eq('id',s.id), toast)) return;
     toast('Script annulé'); load();
   }
   async function saveDelayReason(s,reason){
-    await sb.from('content_scripts').update({delay_reason:reason.trim()||null}).eq('id',s.id);
+    if(!await dbOk(sb.from('content_scripts').update({delay_reason:reason.trim()||null}).eq('id',s.id), toast)) return;
     load();
   }
 
@@ -7127,7 +7330,7 @@ function AdminManager({ adminEmail, toast }){
 
   async function deleteEval(ev){
     if(!confirm('Supprimer cette évaluation ?')) return;
-    await sb.from('task_evaluations').delete().eq('id',ev.id);
+    if(!await dbOk(sb.from('task_evaluations').delete().eq('id',ev.id), toast)) return;
     toast('Évaluation supprimée'); load();
   }
 
@@ -7689,7 +7892,7 @@ function AdminAds({ ads, reload, toast, adminEmail }){
   }
 
   async function toggleAd(ad){
-    await sb.from('ads').update({active:!ad.active}).eq('id',ad.id);
+    if(!await dbOk(sb.from('ads').update({active:!ad.active}).eq('id',ad.id), toast)) return;
     await logAction(adminEmail, ad.active?'Pub désactivée':'Pub activée', ad.title);
     reload();
   }
@@ -8085,7 +8288,6 @@ function App(){
         </div>
         <div className="right">
           <span onClick={()=>navTo('Shows')}>Grille des programmes</span>
-          <span>Newsletter</span>
         </div>
       </div></div>
 
@@ -8107,6 +8309,8 @@ function App(){
       {!isPartner && <Ticker scores={data.scores} />}
 
       {loading ? <Spinner/> :
+        nav==='Contact' ? <ContactPage onBack={()=>navTo('Home')} onNav={navTo} toast={toast} /> :
+        nav==='Privacy' ? <PrivacyPage onBack={()=>navTo('Home')} onNav={navTo} /> :
         isSpot ? <SpotRequestForm onBack={()=>navTo('Home')} toast={toast} /> :
         isPartner ? <PartnerView onBack={()=>navTo('Home')} toast={toast} /> :
         openArticle ? <div className="wrap"><ArticleView article={openArticle} onBack={()=>{setOpenArticle(null); if(location.hash.startsWith('#article=')) history.replaceState(null,'',location.pathname);}} backLabel={navLabel(nav)} /></div> :
@@ -8124,7 +8328,9 @@ function App(){
         <div className="fnav">
           <span onClick={()=>navTo('Partner')}>Devenir partenaire</span>
           <span onClick={()=>navTo('Shows')}>Programmes</span>
-          <span>Publicité</span><span>Contact</span>
+          <span onClick={()=>navTo('Spot')}>Publicité</span>
+          <span onClick={()=>navTo('Contact')}>Contact</span>
+          <span onClick={()=>navTo('Privacy')}>Confidentialité</span>
         </div>
         <div className="social-links">
           <a href="https://www.youtube.com/@sportfmtg/videos" target="_blank" rel="noopener noreferrer" title="YouTube">
