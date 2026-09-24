@@ -1,4 +1,7 @@
 {
+  "buildCommand": "node build.js",
+  "outputDirectory": "dist",
+  "installCommand": "npm install",
   "redirects": [
     {
       "source": "/(.*)",
@@ -13,6 +16,7 @@
     }
   ],
   "rewrites": [
-    { "source": "/a/:id", "destination": "/api/share?id=:id" }
+    { "source": "/a/:id", "destination": "/api/share?id=:id" },
+    { "source": "/sitemap.xml", "destination": "/api/sitemap" }
   ]
 }

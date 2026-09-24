@@ -5,50 +5,60 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SportFM — 91.9 FM, la référence sportive au Togo et en Afrique</title>
 <meta name="description" content="SportFM 91.9 FM est la radio sportive de référence au Togo : actualités football et sport africain, résultats en direct, classements, émissions et podcasts.">
-<script
-  src="https://js-de.sentry-cdn.com/8798e9ae2832f93f8d200b0c77f496a3.min.js"
-  crossorigin="anonymous"
-></script>
 <script>
-  !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.uploadQueue=t.uploadQueue||[],t.uploadQueue.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey getNextSurveyStep identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_property getSessionProperty createPersonProfile opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing debug".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
-  posthog.init('phc_mv8dAiMovQwJL7gUR5tGeUVxn3aRw72uHtPRRJ59a96a', { api_host: 'https://us.i.posthog.com', person_profiles: 'identified_only' })
+// ---- Cookie consent + third-party trackers -------------------------------
+// Nothing that tracks visitors loads until they accept: PostHog (analytics),
+// Sentry (error monitoring + session replay) and Google AdSense are all
+// injected by loadTrackers() below, only when the saved choice is "all".
+// The choice lives in localStorage ("sfm_consent": "all" | "essential") and
+// can be changed any time from the footer ("Cookies") — see CookieBanner.
+//
+// AdSense: Auto ads' automatic placement stays OFF (see git history: it put a
+// stray ad slot outside all content and got the site denied by AdSense). Only
+// the base script loads, and never on the admin panel.
+// Staff on #admin still get Sentry (error monitoring for the admin tools) —
+// no visitor data is involved there — but no analytics or ads.
+(function(){
+  var KEY='sfm_consent', loaded=false, isAdmin=(location.hash==='#admin');
+  function get(){ try{ return localStorage.getItem(KEY); }catch(e){ return null; } }
+  function inject(src, extra){
+    var s=document.createElement('script'); s.async=true; s.src=src; s.crossOrigin='anonymous';
+    if(extra) for(var k in extra) s.setAttribute(k, extra[k]);
+    document.head.appendChild(s);
+  }
+  function loadSentry(){ inject('https://js-de.sentry-cdn.com/8798e9ae2832f93f8d200b0c77f496a3.min.js'); }
+  function loadPostHog(){
+    !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.uploadQueue=t.uploadQueue||[],t.uploadQueue.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey getNextSurveyStep identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_property getSessionProperty createPersonProfile opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing debug".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+    posthog.init('phc_mv8dAiMovQwJL7gUR5tGeUVxn3aRw72uHtPRRJ59a96a', { api_host: 'https://us.i.posthog.com', person_profiles: 'identified_only' })
+  }
+  function loadAds(){ inject('https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js'); }
+  function loadTrackers(){
+    if(loaded) return; loaded=true;
+    loadSentry();
+    if(!isAdmin){ loadPostHog(); loadAds(); }
+  }
+  function announce(){ try{ window.dispatchEvent(new Event('sfm-consent-change')); }catch(e){} }
+  window.sfmConsent={
+    get:get,
+    set:function(v){
+      var prev=get();
+      try{ localStorage.setItem(KEY,v); }catch(e){}
+      if(v==='all') loadTrackers();
+      // Trackers can't be unloaded from a running page — if they were already
+      // running, a reload gives a clean, tracker-free session.
+      else if(loaded || prev==='all'){ announce(); location.reload(); return; }
+      announce();
+    },
+    reset:function(){ try{ localStorage.removeItem(KEY); }catch(e){} announce(); }
+  };
+  if(isAdmin) loadSentry();
+  else if(get()==='all') loadTrackers();
+})();
 </script>
 <script>
 // Canonical domain: any *.vercel.app host redirects to sportfmtg.com (keeps path + #admin etc.)
 if (location.hostname.endsWith('.vercel.app')) {
   location.replace('https://sportfmtg.com' + location.pathname + location.search + location.hash);
-}
-</script>
-<script>
-// AdSense: Auto ads' automatic placement is OFF, on purpose, for now.
-//
-// Three review rounds were denied for "Google-served ads on screens without
-// publisher-content" with no specific URL named. After fixing every thin
-// screen we could find (#admin, the Spot booking page) and still getting
-// denied, inspecting the live DOM turned up the real, confirmed cause: Auto
-// ads' page-level push (enable_page_level_ads) inserts an <ins> ad slot as a
-// direct child of <body> — outside every content container — currently
-// "unfilled" only because the account isn't approved yet. That's Google's
-// automatic overlay/vignette (full-screen interstitial) placement, built for
-// classic multi-page sites; on this SPA a client-side nav click can look
-// like a "page transition" to it, and once filled it renders as a full-
-// screen ad detached from any content, on every page, not one thin screen.
-// There's no code-level flag to disable vignettes specifically (only anchor
-// ads have one — overlays:{bottom:false}, used previously) — the real
-// control is a dashboard toggle (Ads > Auto ads > Overlay ads), which
-// AdSense doesn't expose until the site is already approved. Chicken, egg.
-//
-// So: load the base script (keeps the account linked to the site) but never
-// call enable_page_level_ads — no automatic placement of any format, no
-// stray body-level slot, nothing to mis-time against an SPA route change.
-// Ads stay off everywhere until specific <ins> units are added deliberately
-// in chosen content-rich spots, once the account is approved.
-if (location.hash !== '#admin') {
-  var _ads = document.createElement('script');
-  _ads.async = true;
-  _ads.src = 'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js';
-  _ads.crossOrigin = 'anonymous';
-  document.currentScript.parentNode.insertBefore(_ads, document.currentScript.nextSibling);
 }
 </script>
 <link rel="icon" type="image/png" href="/favicon.png">
@@ -59,7 +69,7 @@ if (location.hash !== '#admin') {
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js" crossorigin></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js" integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a" crossorigin="anonymous"></script>
 <style>
   :root{
@@ -2027,6 +2037,35 @@ function SpotRequestForm({ onBack, toast }){
 // ============================================================
 //  CONTACT + CONFIDENTIALITÉ (public pages) and staff inbox
 // ============================================================
+// Consent banner. The trackers themselves are loaded (or not) by the consent
+// manager script in <head>; this only asks and records the choice.
+function CookieBanner({ onNav }){
+  const read=()=>{ try{ return window.sfmConsent ? window.sfmConsent.get() : 'essential'; }catch{ return 'essential'; } };
+  const [choice,setChoice]=useState(read);
+  useEffect(()=>{
+    const h=()=>setChoice(read());
+    window.addEventListener('sfm-consent-change',h);
+    return ()=>window.removeEventListener('sfm-consent-change',h);
+  },[]);
+  if(choice) return null;
+  const btn={padding:'10px 20px',borderRadius:8,fontWeight:800,fontSize:14,cursor:'pointer',border:'2px solid #fff'};
+  return (
+    <div role="dialog" aria-label="Cookies et confidentialité"
+      style={{position:'fixed',left:0,right:0,bottom:0,zIndex:400,background:'#0B245E',color:'#fff',padding:'16px 20px',
+        boxShadow:'0 -6px 24px rgba(0,0,0,.25)',display:'flex',gap:16,alignItems:'center',justifyContent:'center',flexWrap:'wrap'}}>
+      <div style={{maxWidth:720,fontSize:13.5,lineHeight:1.5}}>
+        🍪 Nous utilisons des outils de mesure d'audience et de suivi des erreurs (PostHog, Sentry) ainsi que Google AdSense.
+        Ils ne se lancent qu'avec votre accord ; le site fonctionne de la même façon si vous refusez.{' '}
+        <a href="#" style={{color:'#fff',textDecoration:'underline'}} onClick={e=>{e.preventDefault();onNav('Privacy');}}>En savoir plus</a>
+      </div>
+      <div style={{display:'flex',gap:10,flexShrink:0}}>
+        <button style={{...btn,background:'transparent',color:'#fff'}} onClick={()=>window.sfmConsent&&window.sfmConsent.set('essential')}>Refuser</button>
+        <button style={{...btn,background:'#fff',color:'#0B245E'}} onClick={()=>window.sfmConsent&&window.sfmConsent.set('all')}>Accepter</button>
+      </div>
+    </div>
+  );
+}
+
 function ContactPage({ onBack, onNav, toast }){
   const [f,setF]=useState({ name:'', email:'', message:'', website:'' }); // website = honeypot
   const [busy,setBusy]=useState(false);
@@ -2065,6 +2104,17 @@ function ContactPage({ onBack, onNav, toast }){
       <div style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:13,letterSpacing:'.08em',color:'var(--red)',marginBottom:8}}>CONTACT</div>
       <h1 style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:800,fontSize:32,color:'var(--navy)',margin:'0 0 8px',lineHeight:1.1}}>Écrivez à la rédaction de SportFM</h1>
       <p style={{color:'#5a6178',fontSize:15,marginBottom:24}}>Une question, une info, une suggestion d'article ou d'émission ? Envoyez-nous un message : SportFM 91.9 FM, la radio sportive de Lomé (Togo).</p>
+
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:12,marginBottom:24}}>
+        <a href="mailto:radiosportfmtg@gmail.com" style={{display:'block',background:'#f8f9fc',border:'1px solid var(--line)',borderRadius:12,padding:'14px 16px',textDecoration:'none'}}>
+          <div style={{fontSize:11,fontWeight:800,letterSpacing:'.06em',color:'var(--muted)'}}>E-MAIL</div>
+          <div style={{fontWeight:700,color:'var(--navy)',marginTop:3,wordBreak:'break-all'}}>radiosportfmtg@gmail.com</div>
+        </a>
+        <a href="tel:+22892036031" style={{display:'block',background:'#f8f9fc',border:'1px solid var(--line)',borderRadius:12,padding:'14px 16px',textDecoration:'none'}}>
+          <div style={{fontSize:11,fontWeight:800,letterSpacing:'.06em',color:'var(--muted)'}}>TÉLÉPHONE</div>
+          <div style={{fontWeight:700,color:'var(--navy)',marginTop:3}}>+228 92 03 60 31</div>
+        </a>
+      </div>
 
       <div style={{background:'#fff',border:'1px solid var(--line)',borderRadius:14,padding:28,display:'flex',flexDirection:'column',gap:16,marginBottom:28}}>
         <div className="field" style={{margin:0}}><label>Votre nom *</label>
@@ -2109,9 +2159,10 @@ function PrivacyPage({ onBack, onNav }){
 
       <H>Les données que nous recevons</H>
       <P><strong>Formulaires.</strong> Quand vous nous écrivez (Contact), réservez un spot, devenez partenaire ou commentez un article, nous enregistrons ce que vous saisissez : nom, e-mail, téléphone (si fourni), message et, pour les demandes commerciales, les détails de votre projet. Ces données servent uniquement à vous répondre et à traiter votre demande.</P>
-      <P><strong>Mesure d'audience.</strong> Nous utilisons PostHog pour comprendre comment le site est utilisé (pages vues, parcours) afin de l'améliorer.</P>
-      <P><strong>Suivi des erreurs.</strong> Nous utilisons Sentry pour détecter les bugs techniques ; il peut enregistrer des informations sur les erreurs rencontrées et, le cas échéant, une relecture anonymisée de la session.</P>
-      <P><strong>Publicité.</strong> Le site charge le service Google AdSense. Google peut utiliser des cookies pour diffuser et mesurer des annonces ; vous pouvez gérer vos préférences sur <a href="https://adssettings.google.com" target="_blank" rel="noopener noreferrer">adssettings.google.com</a>.</P>
+      <P><strong>Cookies et outils tiers — uniquement avec votre accord.</strong> Lors de votre première visite, une bannière vous demande d'accepter ou de refuser les outils ci-dessous. S'ils sont refusés, aucun d'eux n'est chargé et le site fonctionne normalement. Vous pouvez changer d'avis à tout moment via le lien « Cookies » en bas de page.</P>
+      <P><strong>Mesure d'audience.</strong> Avec votre accord, nous utilisons PostHog pour comprendre comment le site est utilisé (pages vues, parcours) afin de l'améliorer.</P>
+      <P><strong>Suivi des erreurs.</strong> Avec votre accord, nous utilisons Sentry pour détecter les bugs techniques ; il peut enregistrer des informations sur les erreurs rencontrées et, le cas échéant, une relecture anonymisée de la session. L'équipe qui utilise l'espace d'administration est également suivie par Sentry pour les erreurs de cet outil interne.</P>
+      <P><strong>Publicité.</strong> Avec votre accord, le site charge le service Google AdSense. Google peut utiliser des cookies pour diffuser et mesurer des annonces ; vous pouvez gérer vos préférences sur <a href="https://adssettings.google.com" target="_blank" rel="noopener noreferrer">adssettings.google.com</a>.</P>
       <P><strong>Stockage sur votre appareil.</strong> Pour accélérer le site, nous gardons localement un cache des articles récents ; nous retenons aussi le nom que vous utilisez pour commenter, et un identifiant aléatoire de session (sans lien avec votre identité) qui sert à compter les visiteurs présents.</P>
 
       <H>Hébergement et prestataires</H>
@@ -8331,6 +8382,7 @@ function App(){
           <span onClick={()=>navTo('Spot')}>Publicité</span>
           <span onClick={()=>navTo('Contact')}>Contact</span>
           <span onClick={()=>navTo('Privacy')}>Confidentialité</span>
+          <span onClick={()=>window.sfmConsent&&window.sfmConsent.reset()}>Cookies</span>
         </div>
         <div className="social-links">
           <a href="https://www.youtube.com/@sportfmtg/videos" target="_blank" rel="noopener noreferrer" title="YouTube">
@@ -8347,6 +8399,7 @@ function App(){
       </div></footer>
 
       <Player liveScores={data.scores} />
+      <CookieBanner onNav={navTo} />
       <PopupAd ads={data.ads} />
 
       <div className={"drawer"+(drawer?" open":"")} onClick={e=>{if(e.target.className.includes('drawer'))setDrawer(false);}}>
