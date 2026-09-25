@@ -8,8 +8,6 @@
 // structured data — so each article can be found, indexed and shared on its own.
 // Listed in /sitemap.xml (api/sitemap.js).
 
-const sanitizeHtml = require('sanitize-html');
-
 const SUPABASE_URL = "https://mmiegwjrzxbyguczcnku.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1taWVnd2pyenhieWd1Y3pjbmt1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzMDc5NjUsImV4cCI6MjA5Nzg4Mzk2NX0.q53UjckFFquySvy46MYm1IXd8TZ4_eI1sbcjVecsV5Q";
 const SITE = "https://sportfmtg.com";
@@ -28,20 +26,72 @@ function fmtDate(iso){
   catch { return ''; }
 }
 
+// Built-in allowlist sanitizer for article HTML (no dependencies, so it behaves
+// identically locally and on Vercel). It REBUILDS the markup instead of trying
+// to strip bad parts: only the tags below survive, each with only the
+// attributes listed; everything else — unknown tags, comments, scripts and
+// their contents, every other attribute (all on* handlers, style, srcset…) —
+// is dropped, and all text is escaped. Fails closed: anything it can't parse
+// cleanly ends up as escaped text, never as markup. The page also sends a
+// Content-Security-Policy with script-src 'none' as a second layer.
+const ALLOWED_TAGS = new Set(['p','br','strong','b','em','i','u','a','ul','ol','li','blockquote','h2','h3','h4','img','figure','figcaption','hr']);
+const VOID_TAGS = new Set(['br','hr','img']);
+const DROP_WITH_CONTENT = /<(script|style|iframe|object|embed|noscript|template|svg|math|form|textarea|title|head)\b[\s\S]*?(?:<\/\1\s*>|$)/gi;
+
+function safeHref(v){
+  v = String(v == null ? '' : v).trim().replace(/&amp;/gi, '&');
+  if (/&(?:#|colon|tab|newline)/i.test(v)) return '';        // entity-obfuscated schemes
+  if (/[\u0000-\u0020\u007f-\u009f]/.test(v)) return '';      // whitespace / control chars anywhere
+  if (!/^(?:https?:\/\/|mailto:|tel:)/i.test(v)) return '';    // literal allowed scheme only
+  return v.length <= 2000 ? v : '';
+}
+function safeSrc(v){ const u = safeHref(v); return /^https?:\/\//i.test(u) ? u : ''; }
+function escText(t){
+  return String(t).replace(/&(?!(?:[a-zA-Z]{2,8}|#\d{1,7}|#x[0-9a-fA-F]{1,6});)/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function parseAttrs(str){
+  const out = {}; const re = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g; let m;
+  while ((m = re.exec(str))) { const k = m[1].toLowerCase(); if (!(k in out)) out[k] = m[2] != null ? m[2] : m[3] != null ? m[3] : m[4] != null ? m[4] : ''; }
+  return out;
+}
+function sanitizeBodyHtml(html){
+  const cleaned = String(html).replace(DROP_WITH_CONTENT, '');
+  const stack = []; let out = '';
+  for (const tok of cleaned.split(/(<[^<>]*>)/)) {
+    if (!tok) continue;
+    if (tok[0] !== '<') { out += escText(tok); continue; }
+    const m = tok.match(/^<(\/?)([a-zA-Z][a-zA-Z0-9]*)([\s\S]*?)\/?>$/);
+    if (!m) continue;                                   // comment, doctype, junk
+    const closing = m[1] === '/', name = m[2].toLowerCase();
+    if (!ALLOWED_TAGS.has(name)) continue;
+    if (closing) {
+      if (VOID_TAGS.has(name)) continue;
+      const i = stack.lastIndexOf(name); if (i < 0) continue;
+      while (stack.length > i) out += '</' + stack.pop() + '>';
+      continue;
+    }
+    const attrs = parseAttrs(m[3]);
+    if (name === 'a') {
+      const href = safeHref(attrs.href);
+      if (!href) continue;
+      out += '<a href="' + esc(href) + '" target="_blank" rel="noopener noreferrer">'; stack.push('a');
+    } else if (name === 'img') {
+      const src = safeSrc(attrs.src); if (!src) continue;
+      out += '<img src="' + esc(src) + '" alt="' + esc(String(attrs.alt || '').slice(0, 200)) + '" loading="lazy">';
+    } else if (VOID_TAGS.has(name)) {
+      out += '<' + name + '>';
+    } else { out += '<' + name + '>'; stack.push(name); }
+  }
+  while (stack.length) out += '</' + stack.pop() + '>';
+  return out;
+}
+
 // Bodies are either HTML (from the editor) or plain text: blank-line
 // separated paragraphs, with a line "[img: https://…]" meaning an image —
 // the same two formats the site's own article view understands.
 function renderBody(body){
   const text = String(body || '');
-  if (/(<[a-z][^>]*>)/i.test(text)) {
-    return sanitizeHtml(text, {
-      allowedTags: ['p','br','strong','b','em','i','u','a','ul','ol','li','blockquote','h2','h3','h4','img','figure','figcaption','hr'],
-      allowedAttributes: { a:['href','target','rel'], img:['src','alt'] },
-      allowedSchemes: ['http','https','mailto','tel'],
-      allowedSchemesByTag: { img:['http','https'] },
-      transformTags: { a: sanitizeHtml.simpleTransform('a', { target:'_blank', rel:'noopener noreferrer' }) },
-    });
-  }
+  if (/(<[a-z][^>]*>)/i.test(text)) return sanitizeBodyHtml(text);
   return text.split(/\n\s*\n/).map(b => b.trim()).filter(Boolean).map(b => {
     const m = b.match(/^\[img:\s*(\S+?)\s*\]$/);
     if (m) { const u = safeUrl(m[1]); return u ? `<img src="${esc(u)}" alt="" loading="lazy">` : ''; }
@@ -62,7 +112,7 @@ h1{font-size:34px;line-height:1.15;margin:14px 0 10px;color:#0B245E}.dek{font-si
 footer{border-top:1px solid #e6e8ef;padding:22px 20px;text-align:center;font-size:13.5px;color:#6b7180}footer a{margin:0 8px}
 @media(max-width:600px){h1{font-size:27px}.prose{font-size:17px}}`;
 
-module.exports = async (req, res) => {
+async function handler(req, res){
   const id = String((req.query && req.query.id) || '');
 
   let a = null;
@@ -79,6 +129,8 @@ module.exports = async (req, res) => {
   }
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'none'; img-src https: http: data:; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; base-uri 'none'; form-action 'none'");
 
   if (!a) {
     res.setHeader('Cache-Control', 'public, s-maxage=60');
@@ -155,4 +207,16 @@ ${renderBody(a.body)}
 <footer>© SportFM · Lomé, Togo · <a href="${SITE}/">Accueil</a> · <a href="https://www.youtube.com/@sportfmtg/videos">YouTube</a> · <a href="https://www.instagram.com/sportfmtg/">Instagram</a> · <a href="https://www.tiktok.com/@sportfmtg">TikTok</a></footer>
 </body>
 </html>`);
+}
+
+module.exports = async (req, res) => {
+  try { await handler(req, res); }
+  catch (e) {
+    // Never leave a bare platform error page; keep a short reason in a header so it's diagnosable.
+    try {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('X-Share-Error', String(e && e.message || e).replace(/[^\x20-\x7e]/g, ' ').slice(0, 180));
+      res.status(500).send('<!doctype html><meta charset="utf-8"><title>Erreur — SportFM</title><p>Une erreur est survenue. <a href="' + SITE + '/">Retour à SportFM</a></p>');
+    } catch (_) {}
+  }
 };
