@@ -24,7 +24,8 @@ module.exports = async (req, res) => {
     }
   } catch (e) { /* serve what we have — at least the home page */ }
 
-  const urls = [`  <url><loc>${SITE}/</loc><changefreq>hourly</changefreq><priority>1.0</priority></url>`];
+  const urls = [`  <url><loc>${SITE}/</loc><changefreq>hourly</changefreq><priority>1.0</priority></url>`,
+    ...['/a-propos', '/contact', '/confidentialite'].map(p => `  <url><loc>${SITE}${p}</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>`)];
   for (const a of rows) {
     const last = a.updated_at || a.created_at;
     urls.push(`  <url><loc>${SITE}/a/${xmlEsc(a.id)}</loc>${last ? `<lastmod>${new Date(last).toISOString()}</lastmod>` : ''}</url>`);
