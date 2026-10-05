@@ -650,6 +650,149 @@ async function fetchArticleBody(id){
   const { data } = await sb.from('articles').select('body').eq('id', id).single();
   return data?.body || '';
 }
+
+// ---- Public site: don't download the whole archive on every visit ----------
+// The full article list (3,200+ rows, ~570 KB compressed) used to be fetched on
+// every page load and was the main source of Supabase egress. The homepage only
+// needs the newest few plus any current "à la une"; the full archive is fetched
+// only when someone opens the Articles tab, and kept in the browser (IndexedDB)
+// so later visits download just what changed since.
+const HOME_ARTICLE_COUNT = 40;
+const HERO_TTL_MS = 2*24*3600*1000;   // same rule Home uses to expire "à la une"
+const ARCHIVE_REFRESH_MS = 3*24*3600*1000; // full re-download every 3 days (picks up deletions)
+
+async function fetchHomeArticles(){
+  const heroCutoff = new Date(Date.now()-HERO_TTL_MS).toISOString();
+  const [latest, heroes] = await Promise.all([
+    sb.from('articles').select(ART_META_COLS).eq('published',true).order('created_at',{ascending:false}).limit(HOME_ARTICLE_COUNT),
+    sb.from('articles').select(ART_META_COLS).eq('published',true).eq('is_hero',true).gte('updated_at',heroCutoff),
+  ]);
+  return mergeArticles(latest.data||[], heroes.data||[]);
+}
+
+// Merge lists by id (later lists win), newest first.
+function mergeArticles(...lists){
+  const byId=new Map();
+  for(const list of lists) for(const a of (list||[])) byId.set(a.id,a);
+  return [...byId.values()].sort((x,y)=>String(y.created_at||'').localeCompare(String(x.created_at||'')));
+}
+
+// Tiny IndexedDB key/value store for the archive (too big for localStorage).
+const ARCHIVE_KEY='articles_archive_v1';
+function idbOpen(){
+  return new Promise((res,rej)=>{
+    const r=indexedDB.open('sportfm',1);
+    r.onupgradeneeded=()=>r.result.createObjectStore('kv');
+    r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);
+  });
+}
+async function idbGet(key){
+  const db=await idbOpen();
+  return new Promise((res,rej)=>{ const q=db.transaction('kv').objectStore('kv').get(key); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); });
+}
+async function idbSet(key,val){
+  const db=await idbOpen();
+  return new Promise((res,rej)=>{ const tx=db.transaction('kv','readwrite'); tx.objectStore('kv').put(val,key); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); });
+}
+
+// Full published archive, from the browser cache when possible. `onRows` is
+// called with whatever is available as soon as it is (cached copy first, then
+// the synced one), so the Articles tab fills in without waiting.
+async function loadArticleArchive(onRows){
+  let cached=null;
+  try{ cached=await idbGet(ARCHIVE_KEY); }catch{}
+  const fresh = cached && Array.isArray(cached.rows) && cached.syncedAt && (Date.now()-cached.savedAt < ARCHIVE_REFRESH_MS);
+
+  let rows;
+  if(fresh){
+    onRows(cached.rows);
+    // Only rows created/edited since the last sync — usually a handful.
+    // No published filter here, so articles that were unpublished drop out.
+    let changed=[];
+    for(let off=0;;off+=1000){
+      const { data, error }=await sb.from('articles').select(ART_META_COLS)
+        .or(`updated_at.gt."${cached.syncedAt}",created_at.gt."${cached.syncedAt}"`)
+        .order('created_at',{ascending:false}).range(off,off+999);
+      if(error) return cached.rows;
+      changed=changed.concat(data||[]);
+      if(!data || data.length<1000) break;
+    }
+    const gone=new Set(changed.filter(a=>!a.published).map(a=>a.id));
+    rows=mergeArticles(cached.rows.filter(a=>!gone.has(a.id)), changed.filter(a=>a.published));
+    if(!changed.length){ onRows(rows); return rows; }   // nothing new — keep savedAt as is
+  } else {
+    rows=await fetchArticlesMeta(true);
+  }
+  onRows(rows);
+  const syncedAt=rows.reduce((m,a)=>{ const t=a.updated_at&&a.updated_at>(a.created_at||'')?a.updated_at:a.created_at; return t&&t>m?t:m; },'');
+  try{ await idbSet(ARCHIVE_KEY,{ rows, syncedAt, savedAt: fresh ? cached.savedAt : Date.now() }); }catch{}
+  return rows;
+}
+// ---- IMAGE UPLOADS: shrink before upload, cache for a year -----------------
+// Phone photos were going up untouched (one is 4.1 MB) and then downloaded at
+// full size by every visitor, even where they're shown ~300px wide — the main
+// driver of Supabase "cached egress". compressImage() resizes to at most
+// maxDim px on the long side and re-encodes (WebP, or JPEG/PNG where the
+// browser can't encode WebP), and keeps the original if that isn't smaller.
+// GIF/SVG/AVIF etc. are passed through untouched.
+// Uploaded paths are unique (timestamped), so a 1-year cache is safe: return
+// visitors never re-download an image.
+const UPLOAD_CACHE_CONTROL = '31536000';
+async function compressImage(file, { maxDim=1600, quality=0.8 }={}){
+  if(!file || !/^image\/(jpeg|png|webp)$/i.test(file.type) || !window.createImageBitmap) return file;
+  try{
+    const bmp = await createImageBitmap(file, { imageOrientation:'from-image' });
+    const scale = Math.min(1, maxDim/Math.max(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width*scale)), h = Math.max(1, Math.round(bmp.height*scale));
+    const canvas = document.createElement('canvas'); canvas.width=w; canvas.height=h;
+    const ctx = canvas.getContext('2d');
+    const mayHaveAlpha = /png|webp/i.test(file.type);
+    if(!mayHaveAlpha){ ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h); }
+    ctx.drawImage(bmp, 0, 0, w, h);
+    if(bmp.close) bmp.close();
+    const encode = (type,q)=>new Promise(r=>canvas.toBlob(r,type,q));
+    let blob = await encode('image/webp', quality);
+    if(!blob || blob.type!=='image/webp'){                 // e.g. Safari: no WebP encoder
+      blob = mayHaveAlpha ? await encode('image/png') : await encode('image/jpeg', quality);
+    }
+    if(!blob || blob.size >= file.size) return file;       // never make it bigger
+    const ext = blob.type==='image/webp' ? 'webp' : blob.type==='image/png' ? 'png' : 'jpg';
+    return new File([blob], (file.name||'image').replace(/\.[^.]+$/,'')+'.'+ext, { type:blob.type });
+  }catch(e){ return file; }
+}
+const fmtSize = n => n>=1048576 ? (n/1048576).toFixed(1).replace('.',',')+' Mo' : Math.max(1,Math.round(n/1024))+' Ko';
+
+// ---- LAZY BACKGROUND IMAGES ------------------------------------------------
+// Card/hero photos are CSS backgrounds (.shot.has-img uses var(--img)), and
+// browsers download CSS backgrounds immediately — even far below the fold, even
+// if the visitor never scrolls. Elements now carry data-bg="<url>" instead, and
+// this sets --img only once the element comes within ~400px of the viewport.
+// (Fewer image downloads = less Supabase "cached egress".) If the URL in
+// data-bg changes on an element that's already been shown (the rotating
+// "à la une" hero), it's applied right away.
+(function lazyBackgrounds(){
+  const setBg=el=>{
+    const u=el.getAttribute('data-bg');
+    if(u) el.style.setProperty('--img','url("'+u.replace(/"/g,'%22')+'")'); else el.style.removeProperty('--img');
+    el.dataset.bgShown='1';
+  };
+  const io=('IntersectionObserver' in window)
+    ? new IntersectionObserver(entries=>{ for(const e of entries) if(e.isIntersecting){ io.unobserve(e.target); setBg(e.target); } },{ rootMargin:'400px 0px' })
+    : null;
+  const watch=el=>{ if(el.dataset.bgShown || !io) setBg(el); else io.observe(el); };
+  const scan=root=>{ if(root.nodeType!==1) return; if(root.hasAttribute('data-bg')) watch(root); root.querySelectorAll('[data-bg]').forEach(watch); };
+  const start=()=>{
+    scan(document.body);
+    new MutationObserver(muts=>{
+      for(const m of muts){
+        if(m.type==='attributes') watch(m.target);
+        else m.addedNodes.forEach(scan);
+      }
+    }).observe(document.body,{ childList:true, subtree:true, attributes:true, attributeFilter:['data-bg'] });
+  };
+  if(document.body) start(); else document.addEventListener('DOMContentLoaded',start);
+})();
+
 const crests = ['#0B245E','#10307a','#3a4a6b','#5a3b8a','#1f6b4a','#7a4a1f','#444c5e','#6b1f3a'];
 const NAVS = [
   { key:'Home',      label:'Accueil' },
@@ -1310,13 +1453,13 @@ function Home({ articles, standings, fixtures, onOpen, onNav, onTrial, ads }){
   const rest = articles.filter(a=>a.id!==hero.id);
   const secondary = rest.slice(0,3);
   const grid = rest.slice(3,6);
-  const imgStyle = (a)=> a.image_url ? {'--img':`url(${a.image_url})`} : null;
+  const imgBg = (a)=> a.image_url || undefined;   // lazy: see LAZY BACKGROUND IMAGES
   const imgCls = (a)=> "img shot"+(a.image_url?" has-img":"");
   return (
     <div className="body">
       <div>
         <article className="hero" onClick={()=>onOpen(hero)}>
-          <div className={imgCls(hero)} style={imgStyle(hero)}>
+          <div className={imgCls(hero)} data-bg={imgBg(hero)}>
             <span className="tagchip">{hero.tag}</span>
             {!hero.image_url && <span className="imglabel">[ photo principale ]</span>}
           </div>
@@ -1340,7 +1483,7 @@ function Home({ articles, standings, fixtures, onOpen, onNav, onTrial, ads }){
         <div className="seclist">
           {secondary.map(a=>(
             <article className="secitem" key={a.id} onClick={()=>onOpen(a)}>
-              <div className={imgCls(a)} style={imgStyle(a)}></div>
+              <div className={imgCls(a)} data-bg={imgBg(a)}></div>
               <div>
                 <div className="eyebrow">{a.tag}</div>
                 <h3>{a.title}</h3>
@@ -1355,7 +1498,7 @@ function Home({ articles, standings, fixtures, onOpen, onNav, onTrial, ads }){
           <div className="grid3">
             {grid.map(a=>(
               <article className="gcard" key={a.id} onClick={()=>onOpen(a)}>
-                <div className={imgCls(a)} style={imgStyle(a)}></div>
+                <div className={imgCls(a)} data-bg={imgBg(a)}></div>
                 <div className="eyebrow">{a.tag}</div>
                 <h4>{a.title}</h4>
                 <div className="meta">{timeAgo(a.created_at)}</div>
@@ -1393,14 +1536,14 @@ function CategoryView({ cat, articles, onOpen, shows }){
                       {s.link_url
                         ? <a href={extUrl(s.link_url)} target="_blank" rel="noopener noreferrer" style={{display:'block',width:'100%'}}>
                             {s.image_url
-                              ? <img src={s.image_url} alt={s.name} style={{width:'100%',height:'auto',display:'block'}} />
+                              ? <img src={s.image_url} alt={s.name} loading="lazy" decoding="async" style={{width:'100%',height:'auto',display:'block'}} />
                               : <span style={{fontSize:11,color:'#9aa1b6',fontFamily:'ui-monospace,monospace'}}>[ photo ]</span>}
                             <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,0)',transition:'background .2s'}}
                               onMouseEnter={e=>e.currentTarget.style.background='rgba(0,0,0,.18)'}
                               onMouseLeave={e=>e.currentTarget.style.background='rgba(0,0,0,0)'} />
                           </a>
                         : (s.image_url
-                            ? <img src={s.image_url} alt={s.name} style={{width:'100%',height:'auto',display:'block'}} />
+                            ? <img src={s.image_url} alt={s.name} loading="lazy" decoding="async" style={{width:'100%',height:'auto',display:'block'}} />
                             : <span style={{fontSize:11,color:'#9aa1b6',fontFamily:'ui-monospace,monospace'}}>[ photo ]</span>)}
                     </div>
                     <div className="eyebrow" style={{marginTop:10}}>{s.tag}</div>
@@ -1496,7 +1639,7 @@ function CategoryView({ cat, articles, onOpen, shows }){
       <div className="seclist">
         {items.length? items.map(a=>(
           <article className="secitem" key={a.id} onClick={()=>onOpen(a)}>
-            <div className={"img shot"+(a.image_url?" has-img":"")} style={a.image_url?{'--img':`url(${a.image_url})`}:null}></div>
+            <div className={"img shot"+(a.image_url?" has-img":"")} data-bg={a.image_url||undefined}></div>
             <div><div className="eyebrow">{a.tag}</div><h3>{a.title}</h3>{a.dek&&<p>{a.dek}</p>}
               <div className="meta">{a.author} · {timeAgo(a.created_at)}</div></div>
           </article>
@@ -1658,7 +1801,7 @@ function ArticlesPage({ articles, onOpen }){
           {filtered.slice(0,shown).map(a=>(
             <article key={a.id} className="gcard" onClick={()=>onOpen(a)} style={{cursor:'pointer'}}>
               <div className={`img shot${a.image_url?' has-img':''}`}
-                style={a.image_url?{'--img':`url(${a.image_url})`}:null} />
+                data-bg={a.image_url||undefined} />
               <div className="eyebrow" style={{marginTop:10}}>{a.tag||a.category}</div>
               <h4 style={{fontFamily:"'Barlow Semi Condensed',sans-serif",fontWeight:700,fontSize:17,lineHeight:1.15,margin:0,color:'var(--navy)'}}>{a.title}</h4>
               {a.dek && <p style={{fontSize:13.5,color:'var(--muted-2)',marginTop:6,lineHeight:1.45,display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>{a.dek}</p>}
@@ -1773,7 +1916,8 @@ function linkifyHtml(html){
 // load (CDN blocked), fall back to escaped plain text rather than raw HTML.
 function safeHtml(html){
   if(window.DOMPurify){
-    return window.DOMPurify.sanitize(String(html||''), { ADD_ATTR:['target','rel'] });
+    return window.DOMPurify.sanitize(String(html||''), { ADD_ATTR:['target','rel','loading','decoding'] })
+      .replace(/<img(?![^>]*\sloading=)/gi,'<img loading="lazy" decoding="async"');
   }
   return String(html||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
@@ -1827,7 +1971,7 @@ function ArticleView({ article, onBack, backLabel }){
       {article.dek && <p className="standfirst">{article.dek}</p>}
       <div className="byline"><span className="who">{article.author}</span><span>·</span><span>{article.read_time}</span><span>·</span><span>{timeAgo(article.created_at)}</span></div>
       {shareRow}
-      <div className={"img shot"+(article.image_url?" has-img":"")} style={article.image_url?{'--img':`url(${article.image_url})`}:null}>
+      <div className={"img shot"+(article.image_url?" has-img":"")} data-bg={article.image_url||undefined}>
         {!article.image_url && <span className="imglabel">[ photo de l'article ]</span>}
       </div>
       {/(<[a-z][^>]*>)/i.test(article.body||'')
@@ -1835,7 +1979,7 @@ function ArticleView({ article, onBack, backLabel }){
         : <div className="prose">{blocks.map((b,i)=>{
             const m=b.trim().match(/^\[img:\s*(\S+?)\s*\]$/);
             return m
-              ? <img key={i} src={m[1]} alt="" style={{width:'100%',borderRadius:12,margin:'6px 0 20px',display:'block'}} />
+              ? <img key={i} src={m[1]} alt="" loading="lazy" decoding="async" style={{width:'100%',borderRadius:12,margin:'6px 0 20px',display:'block'}} />
               : <p key={i}>{b.split(/(https?:\/\/[^\s]+)/g).map((p,j)=>
                   /^https?:\/\//.test(p)
                     ? <a key={j} href={p} target="_blank" rel="noopener noreferrer">{p}</a>
@@ -2930,17 +3074,19 @@ function ArticleEditor({ initial, onSave, onCancel, toast }){
   const clearDraft=()=>{ try{ localStorage.removeItem(draftKey); }catch{} };
 
   async function handleImgUpload(e){
-    const file=e.target.files?.[0]; if(!file) return;
-    if(!file.type.startsWith('image/')){ toast('Fichier invalide — image uniquement'); return; }
-    if(file.size>8*1024*1024){ toast('Image trop lourde (max 8 Mo)'); return; }
+    const orig=e.target.files?.[0]; if(!orig) return;
+    if(!orig.type.startsWith('image/')){ toast('Fichier invalide — image uniquement'); return; }
     setUploading(true);
     try{
+      const file=await compressImage(orig);
+      if(file.size>8*1024*1024){ toast('Image trop lourde (max 8 Mo)'); return; }
       const ext=file.name.split('.').pop().toLowerCase();
       const path=`articles/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      const { error }=await sb.storage.from('article-images').upload(path,file,{contentType:file.type});
+      const { error }=await sb.storage.from('article-images').upload(path,file,{contentType:file.type,cacheControl:UPLOAD_CACHE_CONTROL});
       if(error) throw error;
       const { data }=sb.storage.from('article-images').getPublicUrl(path);
-      set('image_url',data.publicUrl); toast('Image téléchargée ✓');
+      set('image_url',data.publicUrl);
+      toast(file!==orig ? `Image optimisée et téléchargée ✓ (${fmtSize(orig.size)} → ${fmtSize(file.size)})` : 'Image téléchargée ✓');
     } catch(err){
       const msg = err.message?.includes('Bucket not found')
         ? 'Bucket introuvable — créez le bucket "article-images" dans Supabase → Storage'
@@ -2953,14 +3099,15 @@ function ArticleEditor({ initial, onSave, onCancel, toast }){
   // in the body textarea — ArticleView renders that marker as a real <img>
   // between the surrounding paragraphs.
   async function handleBodyImgUpload(e){
-    const file=e.target.files?.[0]; if(!file) return;
-    if(!file.type.startsWith('image/')){ toast('Fichier invalide — image uniquement'); return; }
-    if(file.size>8*1024*1024){ toast('Image trop lourde (max 8 Mo)'); return; }
+    const orig=e.target.files?.[0]; if(!orig) return;
+    if(!orig.type.startsWith('image/')){ toast('Fichier invalide — image uniquement'); return; }
     setBodyImgBusy(true);
     try{
+      const file=await compressImage(orig);
+      if(file.size>8*1024*1024){ toast('Image trop lourde (max 8 Mo)'); return; }
       const ext=file.name.split('.').pop().toLowerCase();
       const path=`articles/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      const { error }=await sb.storage.from('article-images').upload(path,file,{contentType:file.type});
+      const { error }=await sb.storage.from('article-images').upload(path,file,{contentType:file.type,cacheControl:UPLOAD_CACHE_CONTROL});
       if(error) throw error;
       const { data }=sb.storage.from('article-images').getPublicUrl(path);
       const ed=bodyEdRef.current;
@@ -6747,8 +6894,9 @@ function ShowForm({ show, onSave, onCancel, adminEmail, toast }){
     setBusy(true);
     let image_url = form.image_url||null;
     if(file){
-      const path=`shows/${Date.now()}_${file.name}`;
-      const { error:upErr }=await sb.storage.from('article-images').upload(path,file,{upsert:true});
+      const up=await compressImage(file,{ maxDim:1000 });
+      const path=`shows/${Date.now()}_${up.name}`;
+      const { error:upErr }=await sb.storage.from('article-images').upload(path,up,{upsert:true,contentType:up.type,cacheControl:UPLOAD_CACHE_CONTROL});
       if(upErr){ toast('Upload : '+upErr.message); setBusy(false); return; }
       const { data:u }=sb.storage.from('article-images').getPublicUrl(path);
       image_url=u.publicUrl;
@@ -7802,7 +7950,7 @@ function AdBlock({ ad }){
             src={`https://www.youtube.com/embed/${ytId(ad.video_url)}`} allowFullScreen />
         : <video src={ad.video_url} controls style={{width:'100%',borderRadius:8,display:'block'}} />)
     : (ad.image_url
-        ? <img src={ad.image_url} alt={ad.title} style={{width:'100%',display:'block',borderRadius:8}} />
+        ? <img src={ad.image_url} alt={ad.title} loading="lazy" decoding="async" style={{width:'100%',display:'block',borderRadius:8}} />
         : null);
   if(!body) return null;
   const card=(
@@ -7882,16 +8030,18 @@ function AdminAds({ ads, reload, toast, adminEmail }){
   const todayStr=new Date().toISOString().slice(0,10);
 
   async function handleAdImg(e){
-    const file=e.target.files?.[0]; if(!file) return;
-    if(!file.type.startsWith('image/')){ toast('Image uniquement'); return; }
+    const orig=e.target.files?.[0]; if(!orig) return;
+    if(!orig.type.startsWith('image/')){ toast('Image uniquement'); return; }
     setUploading(true);
     try{
+      const file=await compressImage(orig,{ quality:0.85 });   // banners often carry text: slightly higher quality
       const ext=file.name.split('.').pop().toLowerCase();
       const path=`ads/${Date.now()}.${ext}`;
-      const { error }=await sb.storage.from('article-images').upload(path,file,{contentType:file.type});
+      const { error }=await sb.storage.from('article-images').upload(path,file,{contentType:file.type,cacheControl:UPLOAD_CACHE_CONTROL});
       if(error) throw error;
       const { data }=sb.storage.from('article-images').getPublicUrl(path);
-      setEditing(p=>({...p,image_url:data.publicUrl})); toast('Image téléchargée ✓');
+      setEditing(p=>({...p,image_url:data.publicUrl}));
+      toast(file!==orig ? `Image optimisée et téléchargée ✓ (${fmtSize(orig.size)} → ${fmtSize(file.size)})` : 'Image téléchargée ✓');
     } catch(err){ toast('Erreur : '+err.message); }
     finally{ setUploading(false); }
   }
@@ -8103,6 +8253,8 @@ function App(){
 
   const [data,setData]=useState({ articles:[],standings:[],scores:[],fixtures:[],partners:[],ads:[],shows:[] });
 
+  const archiveLoadedRef = useRef(false);   // full archive has arrived (see ensureArchive)
+  const archiveStartedRef = useRef(false);
   const loadPublic = useCallback(async ()=>{
     // 1) Instant paint from the last visit's cached snapshot
     try{
@@ -8113,46 +8265,44 @@ function App(){
       }
     }catch{}
 
-    // 2) Fresh first screen: newest 1000 articles + the small tables, in parallel
-    //    (article page fetched via the same fetchArticlesPage() helper the
-    //    admin panel's full-archive load uses — one query definition, not two)
+    // 2) Fresh first screen: newest articles (+ current "à la une") and the
+    //    small tables, in parallel. The full archive is NOT loaded here — only
+    //    when the Articles tab is opened (see ensureArchive below).
     // An ad with a past end_date stops showing here even if `active` is still
     // true in the DB — that's the whole point of the end date: no one has to
     // remember to come back and flip the toggle off.
     const todayStr=new Date().toISOString().slice(0,10);
     const [art1,st,sc,fx,ads,sh]=await Promise.all([
-      fetchArticlesPage(true, 0),
+      fetchHomeArticles(),
       sb.from('standings').select('*'),
       sb.from('scores').select('*').order('created_at',{ascending:false}),
       sb.from('fixtures').select('*'),
       sb.from('ads').select('*').eq('active',true).or(`end_date.is.null,end_date.gte.${todayStr}`).order('sort_order',{ascending:true}),
       sb.from('shows').select('*').order('sort_order',{ascending:true}),
     ]);
-    const fresh={ articles:art1, standings:st.data||[], scores:sc.data||[],
+    const fresh={ standings:st.data||[], scores:sc.data||[],
       fixtures:fx.data||[], ads:ads.data||[], shows:sh.data||[] };
-    setData(d=>({...d,...fresh}));
+    // If the full archive already arrived (Articles tab opened early), keep it
+    // and just fold in the fresh homepage rows instead of shrinking the list.
+    setData(d=>({...d,...fresh, articles: archiveLoadedRef.current ? mergeArticles(d.articles, art1) : art1 }));
     setLoading(false);
 
-    // 3) Cache a slim snapshot for instant next visits (~150KB)
+    // 3) Cache a slim snapshot for instant next visits
     try{
-      localStorage.setItem('public_cache_v1', JSON.stringify({
-        ...fresh, articles:fresh.articles.slice(0,300) }));
+      localStorage.setItem('public_cache_v1', JSON.stringify({ ...fresh, articles:art1 }));
     }catch{}
-
-    // 4) Remaining archive pages stream in the background (tabs/counts fill up).
-    //    Deliberately not fetchArticlesMeta(): that awaits the *entire*
-    //    archive before returning anything, whereas the public site wants
-    //    each page painted into view as it arrives.
-    let all=fresh.articles;
-    for(let off=1000; all.length>=off; off+=1000){
-      const page = await fetchArticlesPage(true, off);
-      if(!page.length) break;
-      all=all.concat(page);
-      const snapshot=all;
-      setData(d=>({...d, articles:snapshot}));
-      if(page.length<1000) break;
-    }
   },[]);
+
+  // Full archive, only when a view actually needs it (Articles tab).
+  const ensureArchive = useCallback(()=>{
+    if(archiveStartedRef.current) return;
+    archiveStartedRef.current = true;
+    loadArticleArchive(rows=>{
+      archiveLoadedRef.current = true;
+      setData(d=>({...d, articles: mergeArticles(rows, d.articles.filter(a=>a.published!==false)) }));
+    }).catch(()=>{ archiveStartedRef.current=false; });
+  },[]);
+  useEffect(()=>{ if(nav==='Articles') ensureArchive(); },[nav,ensureArchive]);
 
   const loadAdmin = useCallback(async ()=>{
     // Auto-expire "à la une": clear hero flags older than 2 days
