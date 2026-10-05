@@ -905,6 +905,11 @@ function presenceId(){
     return id;
   }catch{ return String(Date.now())+Math.random(); }
 }
+// One heartbeat + one count check per minute per open tab (was every 20s —
+// ~3x the requests for no visible benefit). A visitor counts as present if seen
+// within the last 2.5 intervals, so one missed beat never makes them vanish.
+const PRESENCE_INTERVAL_MS = 60000;
+const PRESENCE_WINDOW_MS = 150000;
 function useRealPresenceCount(){
   const [count,setCount]=useState(null);
   useEffect(()=>{
@@ -915,14 +920,14 @@ function useRealPresenceCount(){
     async function fetchCount(){
       if(!isRealListenerWindow()) return;
       try{
-        const cutoff=new Date(Date.now()-45000).toISOString();
+        const cutoff=new Date(Date.now()-PRESENCE_WINDOW_MS).toISOString();
         const { count:c }=await sb.from('site_presence').select('id',{count:'exact',head:true}).gte('last_seen',cutoff);
         if(alive && typeof c==='number') setCount(c);
       }catch{}
     }
     heartbeat(); fetchCount();
-    const hbTimer=setInterval(heartbeat,20000);
-    const ctTimer=setInterval(fetchCount,20000);
+    const hbTimer=setInterval(heartbeat,PRESENCE_INTERVAL_MS);
+    const ctTimer=setInterval(fetchCount,PRESENCE_INTERVAL_MS);
     return ()=>{ alive=false; clearInterval(hbTimer); clearInterval(ctTimer); };
   },[]);
   return count;
