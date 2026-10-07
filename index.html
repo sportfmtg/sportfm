@@ -39,8 +39,12 @@
   // Google Analytics 4. Anonymized IPs, no ad personalization / Google signals.
   // send_page_view stays on for the landing page; later in-app navigation is
   // reported by window.sfmTrack (the site changes views without reloading).
-  var GA_ID='G-YW24LWNERX';
+  var GA_ID='G-YW24LWNERX', gaLoaded=false;
+  // Loads for EVERY visitor (owner's decision) except on the admin panel — it is
+  // NOT consent-gated, unlike PostHog/Sentry/AdSense; the cookie banner and the
+  // privacy page say so. Keep those texts in sync if this ever changes.
   function loadGA(){
+    if(gaLoaded) return; gaLoaded=true;
     window.dataLayer=window.dataLayer||[];
     window.gtag=function(){ window.dataLayer.push(arguments); };
     window.gtag('js',new Date());
@@ -48,12 +52,12 @@
     inject('https://www.googletagmanager.com/gtag/js?id='+GA_ID);
   }
   window.sfmTrack=function(path,title){
-    try{ if(loaded && window.gtag && !isAdmin) window.gtag('event','page_view',{ page_path:path, page_title:title, page_location:location.origin+path }); }catch(e){}
+    try{ if(gaLoaded && window.gtag && !isAdmin) window.gtag('event','page_view',{ page_path:path, page_title:title, page_location:location.origin+path }); }catch(e){}
   };
   function loadTrackers(){
     if(loaded) return; loaded=true;
     loadSentry();
-    if(!isAdmin){ loadPostHog(); loadGA(); loadAds(); }
+    if(!isAdmin){ loadPostHog(); loadAds(); }
   }
   function announce(){ try{ window.dispatchEvent(new Event('sfm-consent-change')); }catch(e){} }
   window.sfmConsent={
@@ -70,7 +74,7 @@
     reset:function(){ try{ localStorage.removeItem(KEY); }catch(e){} announce(); }
   };
   if(isAdmin) loadSentry();
-  else if(get()==='all') loadTrackers();
+  else { loadGA(); if(get()==='all') loadTrackers(); }
 })();
 </script>
 <script>
@@ -2222,8 +2226,8 @@ function CookieBanner({ onNav }){
       style={{position:'fixed',left:0,right:0,bottom:0,zIndex:400,background:'#0B245E',color:'#fff',padding:'16px 20px',
         boxShadow:'0 -6px 24px rgba(0,0,0,.25)',display:'flex',gap:16,alignItems:'center',justifyContent:'center',flexWrap:'wrap'}}>
       <div style={{maxWidth:720,fontSize:13.5,lineHeight:1.5}}>
-        🍪 Nous utilisons des outils de mesure d'audience, de suivi des erreurs et de publicité.
-        Ils ne se lancent qu'avec votre accord ; le site fonctionne de la même façon si vous refusez.{' '}
+        🍪 Ce site mesure son audience de façon anonymisée (adresse IP anonymisée). Le suivi des erreurs et la publicité
+        ne se lancent qu'avec votre accord ; le site fonctionne de la même façon si vous refusez.{' '}
         <a href="/confidentialite" style={{color:'#fff',textDecoration:'underline'}}>En savoir plus</a>
       </div>
       <div style={{display:'flex',gap:10,flexShrink:0}}>
