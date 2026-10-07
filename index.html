@@ -36,10 +36,24 @@
     posthog.init('phc_mv8dAiMovQwJL7gUR5tGeUVxn3aRw72uHtPRRJ59a96a', { api_host: 'https://us.i.posthog.com', person_profiles: 'identified_only' })
   }
   function loadAds(){ inject('https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js'); }
+  // Google Analytics 4. Anonymized IPs, no ad personalization / Google signals.
+  // send_page_view stays on for the landing page; later in-app navigation is
+  // reported by window.sfmTrack (the site changes views without reloading).
+  var GA_ID='G-YW24LWNERX';
+  function loadGA(){
+    window.dataLayer=window.dataLayer||[];
+    window.gtag=function(){ window.dataLayer.push(arguments); };
+    window.gtag('js',new Date());
+    window.gtag('config',GA_ID,{ anonymize_ip:true, allow_google_signals:false, allow_ad_personalization_signals:false });
+    inject('https://www.googletagmanager.com/gtag/js?id='+GA_ID);
+  }
+  window.sfmTrack=function(path,title){
+    try{ if(loaded && window.gtag && !isAdmin) window.gtag('event','page_view',{ page_path:path, page_title:title, page_location:location.origin+path }); }catch(e){}
+  };
   function loadTrackers(){
     if(loaded) return; loaded=true;
     loadSentry();
-    if(!isAdmin){ loadPostHog(); loadAds(); }
+    if(!isAdmin){ loadPostHog(); loadGA(); loadAds(); }
   }
   function announce(){ try{ window.dispatchEvent(new Event('sfm-consent-change')); }catch(e){} }
   window.sfmConsent={
@@ -8308,6 +8322,17 @@ function App(){
     }).catch(()=>{ archiveStartedRef.current=false; });
   },[]);
   useEffect(()=>{ if(nav==='Articles') ensureArchive(); },[nav,ensureArchive]);
+
+  // Analytics: the site swaps views without a page load, so tell Google Analytics
+  // about each one (the landing view is already reported when it initializes).
+  const trackedFirstRef = useRef(false);
+  useEffect(()=>{
+    if(route!=='site') return;
+    if(!trackedFirstRef.current){ trackedFirstRef.current=true; return; }
+    const PATHS={ Home:'/', Articles:'/articles', Results:'/resultats', Shows:'/emissions', Spot:'/reserver-un-spot', Partner:'/devenir-partenaire', Contact:'/formulaire-contact' };
+    if(openArticle && openArticle.id) window.sfmTrack&&window.sfmTrack('/a/'+openArticle.id, openArticle.title);
+    else window.sfmTrack&&window.sfmTrack(PATHS[nav]||'/', document.title);
+  },[nav, openArticle&&openArticle.id, route]);
 
   const loadAdmin = useCallback(async ()=>{
     // Auto-expire "à la une": clear hero flags older than 2 days
