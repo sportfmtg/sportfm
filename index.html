@@ -2021,21 +2021,38 @@ const GOALS = ['Notoriété de marque','Spots radio à l\'antenne','Sponsoring d
 const BUDGETS = ['Moins de 100 000 FCFA','100 000 – 300 000 FCFA','300 000 – 750 000 FCFA','750 000 – 1 500 000 FCFA','Plus de 1 500 000 FCFA','Campagne ponctuelle'];
 const INDUSTRIES = ['Commerce / e-commerce','Alimentaire & boissons','Automobile','Finance / assurance','Télécoms / Tech','Services locaux','Santé / Pharma','ONG / Institution','Autre'];
 
-// Packages avec prix (admin seulement) et description partenaire
+// ---- TARIFS ---------------------------------------------------------------
+// Prix visibles côté admin seulement (le partenaire ne voit que le pack suggéré).
+// Règles métier (confirmées par l'équipe) :
+//  - un spot dure de 15 secondes à 1 minute maximum ;
+//  - « top horaire » = passage juste avant le Journal, quand le plus d'auditeurs
+//    sont à l'écoute — tarif différent d'un passage ordinaire ;
+//  - 3 heures de publicité par jour au maximum ;
+//  - Pack Domination = 1 mois.
+// 9 packs, un prix distinct chacun (les anciens doublons ont été fusionnés) :
+//   RADIO         Test 75 000 · Présence 180 000 (pack conseillé) · Impact 420 000 · Domination 750 000
+//   SPONSORING    Associé 300 000 · Officiel 600 000 · Exclusif 1 000 000  (par mois)
+//   DIGITAL / 360 Web Visibilité 300 000 · Pack 360 450 000
 const PACKAGES = {
-  'Pack Test':           { price:'75 000 FCFA',         desc:'1 passage/jour en tranche ordinaire pendant 1 semaine.' },
-  'Pack Présence':       { price:'180 000 FCFA',        desc:'2 passages/jour en tranche ordinaire pendant 2 semaines.' },
-  'Pack Impact':         { price:'420 000 FCFA',        desc:'2 passages/jour + 1 top horaire/jour pendant 1 mois.' },
-  'Pack Domination':     { price:'750 000 FCFA',        desc:'3 passages/jour + 2 tops horaires/jour + 4 insertions premium.' },
+  'Pack Test':           { price:'75 000 FCFA',         desc:'1 spot/jour pendant 1 semaine (7 passages).' },
+  'Pack Présence':       { price:'180 000 FCFA',        desc:'2 spots/jour pendant 2 semaines (28 passages). Pack conseillé.' },
+  'Pack Impact':         { price:'420 000 FCFA',        desc:'2 spots/jour + 1 top horaire/jour pendant 1 mois (90 passages).' },
+  'Pack Domination':     { price:'750 000 FCFA',        desc:'3 spots/jour + 2 tops horaires/jour + 4 insertions premium pendant 1 mois.' },
   'Sponsor Associé':     { price:'300 000 FCFA/mois',   desc:'Mention de soutien + 1 spot/jour lié à l\'émission de votre choix.' },
   'Sponsor Officiel':    { price:'600 000 FCFA/mois',   desc:'2 spots/jour + 3–5 mentions animateur/semaine + présence sur visuels.' },
   'Sponsor Exclusif':    { price:'1 000 000 FCFA/mois', desc:'2–3 spots/jour + visibilité digitale complète + 1 capsule vidéo/mois.' },
   'Pack Web Visibilité': { price:'300 000 FCFA',        desc:'1 bannière accueil + 1 article sponsorisé + 1 publication Facebook.' },
-  'Découverte 360':      { price:'180 000 FCFA',        desc:'10 spots radio + 1 publication Facebook + 1 mention vidéo courte.' },
-  'Visibilité 360':      { price:'450 000 FCFA',        desc:'20 spots + 2 tops horaires + 2 publications Facebook + 2 vidéos sponsorisées.' },
-  'Impact 360':          { price:'900 000 FCFA',        desc:'30 spots + 4 passages premium + 1 publireportage + 4 publications + 2 vidéos + YouTube.' },
-  'Pack Marque Premium': { price:'450 000 FCFA',        desc:'Interview radio + publireportage + 1 vidéo courte sponsorisée.' },
+  'Pack 360':            { price:'450 000 FCFA',        desc:'20 spots + 2 tops horaires + 2 publications Facebook + 2 vidéos sponsorisées. Publireportage / placement de produit sur devis.' },
 };
+// Anciens packs retirés de l'offre (doublons de prix ou trop proches d'un autre) —
+// gardés UNIQUEMENT pour afficher le prix des demandes déjà enregistrées.
+const LEGACY_PACKAGES = {
+  'Découverte 360':      { price:'180 000 FCFA', desc:'10 spots radio + 1 publication Facebook + 1 mention vidéo courte.' },
+  'Visibilité 360':      { price:'450 000 FCFA', desc:'20 spots + 2 tops horaires + 2 publications Facebook + 2 vidéos sponsorisées.' },
+  'Impact 360':          { price:'900 000 FCFA', desc:'30 spots + 4 passages premium + 1 publireportage + 4 publications + 2 vidéos + YouTube.' },
+  'Pack Marque Premium': { price:'450 000 FCFA', desc:'Interview radio + publireportage + 1 vidéo courte sponsorisée.' },
+};
+const PACKAGE_LOOKUP = { ...LEGACY_PACKAGES, ...PACKAGES };
 
 function recommendPackage({ budget, goals }){
   const g = goals||[];
@@ -2043,31 +2060,30 @@ function recommendPackage({ budget, goals }){
 
   if(budget==='Plus de 1 500 000 FCFA'){
     if(has('Sponsoring d\'émission')) return { pkg:'Sponsor Exclusif', why:'Avec votre budget, le Sponsor Exclusif vous offre la présence la plus forte à l\'antenne : 2–3 spots/jour, mentions animateur, visibilité digitale et une capsule vidéo mensuelle.' };
-    return { pkg:'Impact 360', why:'Le pack le plus complet de notre offre : 30 spots radio, passages premium, publireportage, 4 publications sociales, vidéos YouTube et TikTok — une présence totale sur toutes nos plateformes.' };
+    return { pkg:'Pack Domination', why:'3 spots/jour + 2 tops horaires (juste avant le Journal) + 4 insertions premium pendant 1 mois — notre plus forte présence radio. Publireportage, vidéos et activations peuvent s\'y ajouter sur mesure.' };
   }
   if(budget==='750 000 – 1 500 000 FCFA'){
     if(has('Sponsoring d\'émission')) return { pkg:'Sponsor Officiel', why:'2 spots/jour + 3 à 5 mentions animateur par semaine + présence sur nos visuels — votre marque associée à une émission écoutée chaque semaine.' };
-    if(has('Pack 360°')) return { pkg:'Visibilité 360', why:'20 spots radio + 2 tops horaires + 2 publications Facebook + 2 vidéos sponsorisées + 1 placement de produit par émission — une présence multiplateforme cohérente.' };
-    return { pkg:'Pack Domination', why:'3 passages/jour + 2 tops horaires + 4 insertions premium — la présence radio la plus forte pour marquer l\'esprit des auditeurs.' };
+    if(has('Pack 360°')) return { pkg:'Pack 360', why:'20 spots radio + 2 tops horaires + 2 publications Facebook + 2 vidéos sponsorisées — une présence multiplateforme cohérente.' };
+    return { pkg:'Pack Domination', why:'3 spots/jour + 2 tops horaires (juste avant le Journal) + 4 insertions premium pendant 1 mois — la présence radio la plus forte pour marquer l\'esprit des auditeurs.' };
   }
   if(budget==='300 000 – 750 000 FCFA'){
     if(has('Contenu digital / réseaux sociaux') || has('Bannière site web')) return { pkg:'Pack Web Visibilité', why:'Bannière en page d\'accueil + article sponsorisé + publication Facebook — visibilité digitale ciblée sur notre audience web.' };
-    if(has('Publireportage / contenu de marque')) return { pkg:'Pack Marque Premium', why:'Interview radio + publireportage 5 min + vidéo courte sponsorisée — une association de contenu crédible et mémorable.' };
+    if(has('Publireportage / contenu de marque') || has('Pack 360°')) return { pkg:'Pack 360', why:'20 spots radio + 2 tops horaires + 2 publications Facebook + 2 vidéos sponsorisées — une présence multiplateforme cohérente. Un publireportage peut être ajouté sur devis.' };
     if(has('Sponsoring d\'émission')) return { pkg:'Sponsor Associé', why:'Mention de soutien + 1 spot/jour lié à l\'émission de votre choix — une présence régulière auprès d\'une audience fidèle et ciblée.' };
-    return { pkg:'Pack Impact', why:'2 passages/jour + 1 top horaire/jour pendant 1 mois — une présence soutenue qui installe votre marque dans les habitudes d\'écoute.' };
+    return { pkg:'Pack Impact', why:'2 spots/jour + 1 top horaire/jour (juste avant le Journal, au plus fort de l\'écoute) pendant 1 mois — une présence soutenue qui installe votre marque dans les habitudes d\'écoute.' };
   }
   if(budget==='100 000 – 300 000 FCFA'){
-    if(has('Pack 360°')) return { pkg:'Découverte 360', why:'10 spots radio + 1 publication Facebook + 1 mention vidéo courte — le meilleur point d\'entrée pour tester notre audience sur plusieurs canaux.' };
-    return { pkg:'Pack Présence', why:'2 passages/jour en tranche ordinaire pendant 2 semaines — une exposition régulière pour installer votre message auprès des auditeurs.' };
+    return { pkg:'Pack Présence', why:'2 spots/jour pendant 2 semaines — une exposition régulière pour installer votre message auprès des auditeurs.' };
   }
-  return { pkg:'Pack Test', why:'1 passage/jour pendant 1 semaine — idéal pour découvrir notre audience et mesurer l\'impact avant un engagement plus long.' };
+  return { pkg:'Pack Test', why:'1 spot/jour pendant 1 semaine — idéal pour découvrir notre audience et mesurer l\'impact avant un engagement plus long.' };
 }
 
 function SpotRequestForm({ onBack, toast }){
   const [done,setDone]=useState(false);
   const [saving,setSaving]=useState(false);
   const DAYS=['LUNDI','MARDI','MERCREDI','JEUDI','VENDREDI','SAMEDI','DIMANCHE'];
-  const DURATIONS=['30 secondes','60 secondes','90 secondes','2 minutes'];
+  const DURATIONS=['15 secondes','30 secondes','45 secondes','1 minute'];   // un spot ne dépasse pas 1 minute
   const [f,setF]=useState({company:'',contact_name:'',email:'',phone:'',days:[],time_slot:'',duration:'30 secondes',message:'',budget:''});
   const set=(k,v)=>setF(p=>({...p,[k]:v}));
   const toggleDay=(d)=>setF(p=>({...p,days:p.days.includes(d)?p.days.filter(x=>x!==d):[...p.days,d]}));
@@ -2177,12 +2193,14 @@ function SpotRequestForm({ onBack, toast }){
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>
+            <div className="hint" style={{fontSize:12,color:'var(--muted)',marginTop:5}}>Les « tops horaires » (juste avant le Journal) sont les plus écoutés ; leur tarif est différent — notre équipe vous le précisera.</div>
           </div>
           <div className="field" style={{margin:0}}>
             <label>Durée du spot</label>
             <select className="inp" value={f.duration} onChange={e=>set('duration',e.target.value)}>
               {DURATIONS.map(d=><option key={d} value={d}>{d}</option>)}
             </select>
+            <div className="hint" style={{fontSize:12,color:'var(--muted)',marginTop:5}}>Un spot dure de 15 secondes à 1 minute maximum.</div>
           </div>
         </div>
 
@@ -3860,7 +3878,7 @@ function PartnerCRM({ p, onClose, toast, reload, adminEmail }){
   const [notes,setNotes]=useState(p.admin_notes||'');
   const [saving,setSaving]=useState(false);
 
-  const pkg = PACKAGES[p.recommended] || null;
+  const pkg = PACKAGE_LOOKUP[p.recommended] || null;
 
   async function save(){
     setSaving(true);
@@ -4103,7 +4121,7 @@ function AdminPartners({ partners, reload, toast, adminEmail }){
                   </div>
                   <div style={{fontSize:12.5,color:'var(--muted)',marginTop:3}}>
                     {p.contact_name&&p.contact_name+' · '}{p.budget} · Pack : <strong>{p.recommended||'—'}</strong>
-                    {PACKAGES[p.recommended]&&<span style={{color:'var(--red)',fontWeight:700}}> ({PACKAGES[p.recommended].price})</span>}
+                    {PACKAGE_LOOKUP[p.recommended]&&<span style={{color:'var(--red)',fontWeight:700}}> ({PACKAGE_LOOKUP[p.recommended].price})</span>}
                     {' · '}{timeAgo(p.created_at)}
                   </div>
                   {p.admin_notes && <div style={{fontSize:12,color:'#5a6178',marginTop:4,fontStyle:'italic'}}>📝 {p.admin_notes.slice(0,100)}{p.admin_notes.length>100?'…':''}</div>}
