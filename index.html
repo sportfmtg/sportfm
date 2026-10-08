@@ -2998,22 +2998,22 @@ function AdminLogin({ onAuthed, onExit }){
     if(!username.trim()||!pw){ setErr("Nom d'utilisateur et mot de passe requis"); return; }
     setBusy(true); setErr('');
 
-    // Determine the email to use for Supabase Auth
-    // If input looks like an email, use it directly (fallback for admin account)
-    // Otherwise look up username in user_roles table
-    let emailToUse = username.trim().toLowerCase();
-    if(!emailToUse.includes('@')){
-      const { data: row } = await sb.from('user_roles')
-        .select('email')
-        .eq('username', emailToUse)
-        .maybeSingle();
-      if(!row){ setBusy(false); setErr("Nom d'utilisateur introuvable"); return; }
-      emailToUse = row.email;
+    // E-mail: sign in directly. Username: the server looks it up (user_roles isn't
+    // readable by visitors) and returns a session — it never reveals anyone's e-mail.
+    const ident = username.trim().toLowerCase();
+    let data=null, error=null;
+    if(ident.includes('@')){
+      ({ data, error } = await sb.auth.signInWithPassword({ email: ident, password: pw }));
+    } else {
+      try{
+        const r = await fetch('/api/login',{ method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ identifier:ident, password:pw }) });
+        const j = await r.json().catch(()=>null);
+        if(!r.ok){ setBusy(false); setErr((j&&j.error)||'Identifiants incorrects'); return; }
+        ({ data, error } = await sb.auth.setSession({ access_token:j.access_token, refresh_token:j.refresh_token }));
+      }catch{ setBusy(false); setErr('Connexion impossible — réessayez ou utilisez votre e-mail.'); return; }
     }
-
-    const { data, error } = await sb.auth.signInWithPassword({ email: emailToUse, password: pw });
     setBusy(false);
-    if(error){ setErr('Identifiants incorrects'); return; }
+    if(error||!data?.session){ setErr('Identifiants incorrects'); return; }
     onAuthed(data.session);
   }
 
@@ -5478,17 +5478,20 @@ const MODULES = [
   { key:'can_broadcast',    label:'Planning Diffusion' },
   { key:'can_manager',      label:'Manager (Évaluations)' },
   { key:'can_maintenance',  label:'Maintenance & Achats' },
+  { key:'can_manage_accounts', label:'Créer des comptes admin' },
 ];
+// Same address as the server-side constant (api/_lib.js): the account that always has full access.
+const OWNER_EMAIL_UI = 'weareaurumgroup@gmail.com';
 
-function PermCheckboxes({ perms, onChange }){
+function PermCheckboxes({ perms, onChange, allowed }){
   return (
     <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:8,marginTop:8}}>
       {MODULES.map(m=>(
-        <label key={m.key} style={{display:'flex',alignItems:'center',gap:8,fontSize:13,cursor:'pointer',
+        <label key={m.key} title={allowed&&!allowed(m.key)?'Vous ne pouvez pas donner cette permission':undefined} style={{display:'flex',alignItems:'center',gap:8,fontSize:13,cursor:(allowed&&!allowed(m.key))?'not-allowed':'pointer',opacity:(allowed&&!allowed(m.key))?.45:1,
           padding:'8px 10px',border:'1px solid var(--line)',borderRadius:8,
           background:perms[m.key]?'rgba(11,36,94,.05)':'#fff',
           borderColor:perms[m.key]?'var(--navy)':'var(--line)'}}>
-          <input type="checkbox" checked={!!perms[m.key]} onChange={e=>onChange(m.key,e.target.checked)}
+          <input type="checkbox" checked={!!perms[m.key]} disabled={allowed?!allowed(m.key):false} onChange={e=>onChange(m.key,e.target.checked)}
             style={{accentColor:'var(--navy)',width:15,height:15}} />
           <span style={{fontWeight:perms[m.key]?700:400,color:perms[m.key]?'var(--navy)':'#4a5168'}}>{m.label}</span>
         </label>
@@ -5497,7 +5500,158 @@ function PermCheckboxes({ perms, onChange }){
   );
 }
 
-function AdminUsers({ adminEmail, toast }){
+// ---- Créer des comptes admin (identifiant + mot de passe + rôle) ------------
+// Talks to /api/admin-users, which holds the Supabase admin key server-side and
+// re-checks on the server who is asking and what they're allowed to grant.
+const ROLE_PRESETS = [
+  { key:'custom',      label:'Personnalisé (je coche moi-même)', title:'',                      perms:[] },
+  { key:'journaliste', label:'Journaliste',                      title:'Journaliste sportif',   perms:['can_articles','can_scores','can_content'] },
+  { key:'secretaire',  label:'Secrétaire',                       title:'Secrétaire',            perms:['can_accounting_entry','can_maintenance','can_announcements'] },
+  { key:'assistant',   label:'Assistant(e)',                     title:'Assistant(e)',          perms:['can_maintenance','can_announcements'] },
+  { key:'comptable',   label:'Comptable',                        title:'Comptable',             perms:['can_accounting'] },
+];
+function genPassword(){
+  const chars='abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // no 0/O/1/l/I look-alikes
+  const buf=new Uint32Array(14); crypto.getRandomValues(buf);
+  return Array.from(buf,n=>chars[n%chars.length]).join('');
+}
+async function callAccountsApi(payload){
+  const { data:{ session } }=await sb.auth.getSession();
+  if(!session) throw new Error('Session expirée — reconnectez-vous.');
+  let res;
+  try{
+    res=await fetch('/api/admin-users',{ method:'POST', headers:{ 'Content-Type':'application/json', Authorization:'Bearer '+session.access_token }, body:JSON.stringify(payload) });
+  }catch{ throw new Error('Service injoignable — vérifiez la connexion.'); }
+  let j=null; try{ j=await res.json(); }catch{}
+  if(!res.ok) throw new Error((j&&j.error)||'Échec ('+res.status+').');
+  return j;
+}
+async function copyText(t){
+  try{ await navigator.clipboard.writeText(t); return true; }catch{ return false; }
+}
+
+function AccountTools({ adminEmail, toast, userPerms, isOwner, users, onChanged }){
+  // What this person may hand out: the owner everything; others only what they hold themselves, never the account-creation right.
+  const canGive = k => isOwner ? true : (k!=='can_manage_accounts' && !!userPerms?.[k]);
+  const [f,setF]=useState({ name:'', email:'', username:'', password:'', job_title:'', preset:'custom' });
+  const [perms,setPerms]=useState({});
+  const [busy,setBusy]=useState(false);
+  const [done,setDone]=useState(null);       // credentials to show once after creation
+  const [rp,setRp]=useState({ email:'', password:'' });
+  const [rpBusy,setRpBusy]=useState(false);
+  const [rpDone,setRpDone]=useState(null);
+  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+
+  function applyPreset(key){
+    const pr=ROLE_PRESETS.find(x=>x.key===key)||ROLE_PRESETS[0];
+    const next={}; let dropped=0;
+    pr.perms.forEach(k=>{ if(canGive(k)) next[k]=true; else dropped++; });
+    setPerms(next);
+    setF(p=>({...p, preset:key, job_title:p.job_title||pr.title}));
+    if(dropped) toast(dropped===1 ? "1 accès du rôle n'est pas ajouté : vous ne l'avez pas vous-même." : dropped+" accès du rôle ne sont pas ajoutés : vous ne les avez pas vous-même.");
+  }
+
+  async function create(){
+    if(!f.email.trim()||!f.username.trim()||!f.password){ toast('E-mail, nom d\'utilisateur et mot de passe requis'); return; }
+    setBusy(true);
+    try{
+      await callAccountsApi({ action:'create', email:f.email, username:f.username, password:f.password, name:f.name, job_title:f.job_title, perms });
+      setDone({ name:f.name||f.email, username:f.username.trim().toLowerCase(), password:f.password });
+      setF({ name:'', email:'', username:'', password:'', job_title:'', preset:'custom' }); setPerms({});
+      onChanged&&onChanged();
+    }catch(e){ toast(e.message); }
+    finally{ setBusy(false); }
+  }
+  async function reset(){
+    if(!rp.email||!rp.password){ toast('Choisissez un membre et un mot de passe'); return; }
+    setRpBusy(true);
+    try{
+      await callAccountsApi({ action:'reset_password', email:rp.email, password:rp.password });
+      const m=users.find(u=>u.email===rp.email);
+      setRpDone({ who:m?.name||rp.email, username:m?.username||rp.email, password:rp.password });
+      setRp({ email:'', password:'' });
+    }catch(e){ toast(e.message); }
+    finally{ setRpBusy(false); }
+  }
+  const credsText=d=>`SportFM — espace admin\nAdresse : ${location.origin}/admin\nIdentifiant : ${d.username}\nMot de passe : ${d.password}`;
+  const CredBox=({d,onClose,title})=>(
+    <div style={{background:'#e3f6ea',border:'1px solid #b9e3c8',borderRadius:12,padding:'16px 18px',marginBottom:16}}>
+      <div style={{fontWeight:800,color:'#1f7a48',marginBottom:6}}>{title}</div>
+      <div style={{fontSize:14,lineHeight:1.7}}>Pour <strong>{d.who||d.name}</strong> :<br/>
+        Identifiant : <strong style={{fontFamily:'monospace'}}>{d.username}</strong><br/>
+        Mot de passe : <strong style={{fontFamily:'monospace'}}>{d.password}</strong></div>
+      <div style={{fontSize:12.5,color:'#4a5168',margin:'8px 0 12px'}}>⚠ Transmettez-les en privé. Le mot de passe ne sera plus affiché après fermeture.</div>
+      <div style={{display:'flex',gap:8}}>
+        <button className="btn-primary" style={{padding:'8px 14px',fontSize:13}} onClick={async()=>{ toast(await copyText(credsText(d))?'Identifiants copiés ✓':'Copie impossible — notez-les'); }}>📋 Copier les identifiants</button>
+        <button className="btn-ghost" style={{padding:'8px 14px',fontSize:13}} onClick={onClose}>Fermer</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{marginBottom:24}}>
+      <div className="panel" style={{marginBottom:16}}>
+        <h3 style={{marginBottom:6}}>Créer un compte admin</h3>
+        <p style={{fontSize:13,color:'var(--muted)',margin:'0 0 16px'}}>Crée l'identifiant et le mot de passe de connexion, avec son rôle. Vous ne pouvez donner que des accès que vous avez vous-même.</p>
+        {done && <CredBox d={done} title="✓ Compte créé" onClose={()=>setDone(null)} />}
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+          <div className="field" style={{margin:0}}><label>Nom complet</label>
+            <input value={f.name} onChange={e=>set('name',e.target.value)} placeholder="Jean Dupont" /></div>
+          <div className="field" style={{margin:0}}><label>E-mail *</label>
+            <input type="email" value={f.email} onChange={e=>set('email',e.target.value)} placeholder="jean@exemple.com" autoCapitalize="off" /></div>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+          <div className="field" style={{margin:0}}><label>Nom d'utilisateur * <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(pour se connecter)</span></label>
+            <input value={f.username} onChange={e=>set('username',e.target.value.toLowerCase().replace(/\s/g,''))} placeholder="ex : jean.dupont" autoCapitalize="off" autoCorrect="off" /></div>
+          <div className="field" style={{margin:0}}><label>Mot de passe * <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>(8 caractères minimum)</span></label>
+            <div style={{display:'flex',gap:8}}>
+              <input value={f.password} onChange={e=>set('password',e.target.value)} placeholder="••••••••" autoComplete="new-password" style={{flex:1,fontFamily:'monospace'}} />
+              <button type="button" className="btn-ghost" style={{whiteSpace:'nowrap',padding:'8px 12px',fontSize:13}} onClick={()=>set('password',genPassword())}>🎲 Générer</button>
+            </div></div>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
+          <div className="field" style={{margin:0}}><label>Rôle</label>
+            <select value={f.preset} onChange={e=>applyPreset(e.target.value)}>
+              {ROLE_PRESETS.map(r=><option key={r.key} value={r.key}>{r.label}</option>)}
+            </select></div>
+          <div className="field" style={{margin:0}}><label>Titre / Poste</label>
+            <input value={f.job_title} onChange={e=>set('job_title',e.target.value)} placeholder="Ex : Secrétaire" /></div>
+        </div>
+        <div style={{fontSize:12,fontWeight:700,letterSpacing:'.04em',color:'var(--muted)',marginBottom:8}}>ACCÈS AUX MODULES (modifiables)</div>
+        <PermCheckboxes perms={perms} onChange={(k,v)=>setPerms(p=>({...p,[k]:v}))} allowed={canGive} />
+        <div style={{marginTop:16}}>
+          <button className="btn-primary" disabled={busy} onClick={create}>{busy?'Création…':'Créer le compte'}</button>
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3 style={{marginBottom:6}}>Réinitialiser un mot de passe</h3>
+        <p style={{fontSize:13,color:'var(--muted)',margin:'0 0 14px'}}>Pour un membre qui a oublié le sien.</p>
+        {rpDone && <CredBox d={rpDone} title="✓ Mot de passe changé" onClose={()=>setRpDone(null)} />}
+        <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end'}}>
+          <div className="field" style={{margin:0,minWidth:220,flex:1}}><label>Membre</label>
+            <select value={rp.email} onChange={e=>setRp(p=>({...p,email:e.target.value}))}>
+              <option value="">— Choisir —</option>
+              {users.filter(u=>u.email!==OWNER_EMAIL_UI||isOwner).map(u=><option key={u.id} value={u.email}>{u.name||u.email}{u.username?' ('+u.username+')':''}</option>)}
+            </select></div>
+          <div className="field" style={{margin:0,minWidth:240,flex:1}}><label>Nouveau mot de passe</label>
+            <div style={{display:'flex',gap:8}}>
+              <input value={rp.password} onChange={e=>setRp(p=>({...p,password:e.target.value}))} placeholder="8 caractères minimum" autoComplete="new-password" style={{flex:1,fontFamily:'monospace'}} />
+              <button type="button" className="btn-ghost" style={{whiteSpace:'nowrap',padding:'8px 12px',fontSize:13}} onClick={()=>setRp(p=>({...p,password:genPassword()}))}>🎲 Générer</button>
+            </div></div>
+          <button className="btn-primary" disabled={rpBusy} onClick={reset} style={{marginBottom:0}}>{rpBusy?'…':'Changer le mot de passe'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdminUsers({ adminEmail, toast, userPerms }){
+  const isOwner = adminEmail===OWNER_EMAIL_UI || !!userPerms?.__full;
+  const canTeam = isOwner || !!userPerms?.can_team;
+  const canManage = isOwner || !!userPerms?.can_manage_accounts;
+  // Whoever edits access here can't hand out the right to create accounts — only the owner decides that.
+  const canGrant = k => k!=='can_manage_accounts' || isOwner;
   const [users,setUsers]=useState([]);
   const [loading,setLoading]=useState(true);
   const [newEmail,setNewEmail]=useState('');
@@ -5541,6 +5695,8 @@ function AdminUsers({ adminEmail, toast }){
 
   return (
     <div>
+      {canManage && <AccountTools adminEmail={adminEmail} toast={toast} userPerms={userPerms} isOwner={isOwner} users={users} onChanged={load} />}
+      {canTeam && <>
       {/* Existing users */}
       {loading ? <Spinner/> : users.map(u=>(
         <div key={u.id} className="panel" style={{marginBottom:14}}>
@@ -5586,7 +5742,7 @@ function AdminUsers({ adminEmail, toast }){
                 </div>
               </div>
               <div style={{fontSize:12,fontWeight:700,letterSpacing:'.04em',color:'var(--muted)',marginBottom:8}}>ACCÈS AUX MODULES</div>
-              <PermCheckboxes perms={u} onChange={(k,v)=>updateUser(u,{[k]:v})} />
+              <PermCheckboxes perms={u} onChange={(k,v)=>updateUser(u,{[k]:v})} allowed={canGrant} />
             </div>
           )}
         </div>
@@ -5616,11 +5772,12 @@ function AdminUsers({ adminEmail, toast }){
           </div>
         </div>
         <div style={{fontSize:12,fontWeight:700,letterSpacing:'.04em',color:'var(--muted)',marginBottom:8}}>ACCÈS AUX MODULES</div>
-        <PermCheckboxes perms={newPerms} onChange={toggleNewPerm} />
+        <PermCheckboxes perms={newPerms} onChange={toggleNewPerm} allowed={canGrant} />
         <div style={{marginTop:16}}>
           <button className="btn-primary" disabled={saving} onClick={addUser}>{saving?'…':'+ Ajouter'}</button>
         </div>
       </div>
+      </>}
     </div>
   );
 }
@@ -7920,7 +8077,7 @@ function Admin({ session, onExit, data, reload, toast, userPerms, showProfile })
   const full = userPerms?.__full;
   const can = (k) => !!(full || userPerms?.[k]);
   const jobTitle = userPerms?.job_title || '';
-  const firstTab = ['can_articles','can_scores','can_partners','can_ads','can_content','can_emissions','can_finance','can_accounting','can_accounting_entry','can_maintenance'].find(k=>can(k));
+  const firstTab = ['can_articles','can_scores','can_partners','can_ads','can_content','can_emissions','can_finance','can_accounting','can_accounting_entry','can_maintenance','can_manage_accounts'].find(k=>can(k));
   const [tab,setTab]=useState(firstTab ? (firstTab==='can_accounting_entry'?'accounting':firstTab.replace('can_','')) : 'articles');
   const adminEmail = session.user.email;
   async function logout(){ await sb.auth.signOut(); onExit(); }
@@ -7940,7 +8097,7 @@ function Admin({ session, onExit, data, reload, toast, userPerms, showProfile })
         {can('can_scores') && <button className={tab==='scores'?'active':''} onClick={()=>setTab('scores')}>Scores &amp; Classement</button>}
         {can('can_partners') && <button className={tab==='partners'?'active':''} onClick={()=>setTab('partners')}>Partenaires</button>}
         {can('can_ads') && <button className={tab==='ads'?'active':''} onClick={()=>setTab('ads')}>Publicités</button>}
-        {can('can_team') && <button className={tab==='users'?'active':''} onClick={()=>setTab('users')}>Équipe</button>}
+        {(can('can_team')||can('can_manage_accounts')) && <button className={tab==='users'?'active':''} onClick={()=>setTab('users')}>Équipe</button>}
         {can('can_logs') && <button className={tab==='logs'?'active':''} onClick={()=>setTab('logs')}>Journal</button>}
         {can('can_content') && <button className={tab==='content'?'active':''} onClick={()=>setTab('content')}>📋 Contenu</button>}
         {can('can_emissions') && <button className={tab==='emissions'?'active':''} onClick={()=>setTab('emissions')}>📻 Émissions</button>}
@@ -7954,7 +8111,7 @@ function Admin({ session, onExit, data, reload, toast, userPerms, showProfile })
         {tab==='scores' && can('can_scores') && <><AdminScores scores={data.scores} standings={data.standings} fixtures={data.fixtures} reload={reload} toast={toast} adminEmail={adminEmail} /><PageJournal section="scores" /></>}
         {tab==='partners' && can('can_partners') && <><AdminPartners partners={data.partners} reload={reload} toast={toast} adminEmail={adminEmail} /><PageJournal section="partners" /></>}
         {tab==='ads' && can('can_ads') && <><AdminAds ads={data.ads||[]} reload={reload} toast={toast} adminEmail={adminEmail} /><PageJournal section="ads" /></>}
-        {tab==='users' && can('can_team') && <><AdminUsers adminEmail={adminEmail} toast={toast} /><PageJournal section="users" /></>}
+        {tab==='users' && (can('can_team')||can('can_manage_accounts')) && <><AdminUsers adminEmail={adminEmail} toast={toast} userPerms={userPerms} /><PageJournal section="users" /></>}
         {tab==='logs' && can('can_logs') && <AdminLogs />}
         {tab==='content' && can('can_content') && <><AdminContent adminEmail={adminEmail} userPerms={userPerms} toast={toast} /><PageJournal section="content" /></>}
         {tab==='emissions' && can('can_emissions') && <><AdminEmissions shows={data.shows||[]} reload={reload} toast={toast} adminEmail={adminEmail} /><PageJournal section="emissions" /></>}
